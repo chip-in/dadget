@@ -1,0 +1,8 @@
+/.vscode
+/node_modules
+/lib
+/dest
+/docs
+examples/*/lib
+examples/*/node_modules
+
