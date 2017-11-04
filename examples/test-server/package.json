@@ -1,10 +1,9 @@
 {
-  "name": "@chip-in/chipin-server",
+  "name": "@chip-in/chipin-test-server",
   "version": "1.0.0",
   "description": "",
   "main": "lib/server.js",
   "dependencies": {
-    "@chip-in/dadget": "*",
     "@chip-in/resource-node": "*"
   },
   "devDependencies": {
