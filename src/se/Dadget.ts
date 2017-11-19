@@ -131,6 +131,7 @@ export class Dadget extends ServiceEngine {
    * @returns 取得した件数を返すPromiseオブジェクト
    */
   count(query: object): Promise<number> {
+    // TODO 実装
     return Promise.resolve(1)
   }
     
@@ -156,7 +157,7 @@ export class Dadget extends ServiceEngine {
     return this.node.fetch(CORE_NODE.PATH_CONTEXT.replace(/:database\b/g, this.database) + "/exec", {
       method: 'POST',
       body: JSON.stringify(sendData),
-      headers : {
+      headers: {
         "Content-Type": "application/json"
       }
     })

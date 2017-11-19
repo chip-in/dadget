@@ -34,6 +34,9 @@ export class CsnOnMongoDB {
       })
   }
 
+  /**
+   * increment csn
+   */
   increment(): Promise<number> {
     let _db: Db
     return MongoClient.connect(this.dbUrl)
@@ -57,7 +60,10 @@ export class CsnOnMongoDB {
       })
   }
 
-  current(): Promise<number> {
+  /**
+   * Obtain current CSN
+   */
+  getCurrentCsn(): Promise<number> {
     let _db: Db
     return MongoClient.connect(this.dbUrl)
       .then(db => {

@@ -62,6 +62,7 @@ export class UpdateManager extends ServiceEngine {
       }
 
       convertTransactionForSubset(transaction: TransactionObject): TransactionObject {
+        // TODO サブセット用のトランザクション内容に変換
         return transaction
       }
 

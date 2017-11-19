@@ -88,7 +88,12 @@ export class JournalOnMongoDB {
       .then(_ => {
         db = _
         console.log("insert:", JSON.stringify(transaction));
-        return db.collection(MONGO_DB.JOURNAL_COLLECTION).insertOne(transaction)
+        // mongodbの制限によりoperatorを文字列化
+        let saveVal: any = {...transaction}
+        if(transaction.operator){
+          saveVal["operator"] = JSON.stringify(transaction.operator)
+        }
+        return db.collection(MONGO_DB.JOURNAL_COLLECTION).insertOne(saveVal)
       })
       .then(result => {
         db.close()

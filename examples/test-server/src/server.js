@@ -30,6 +30,8 @@ node.start().then(() => {
   let dadget = seList[0];
   queryTest()
   .then(()=>insertDemo("ddddddddd"))
+  .then(_=>updateDemo(_))
+  .then(_=>deleteDemo(_))
   .then(queryTest)
 
   function queryTest(){
@@ -56,9 +58,46 @@ node.start().then(() => {
       }})
       .then(result => {
         console.log("insertDemo succeeded:", JSON.stringify(result))
+        return result
       })
       .catch(reason => {
         console.log("insertDemo faild", reason)
+      })
+  }
+
+  function updateDemo(obj) {
+    console.log("updateDemo:", JSON.stringify(obj))
+    return dadget.exec(obj.csn, {
+      type: "update",
+      target: obj._id,
+      before: obj,
+      operator: {
+        "$set": {
+          "setval": "test"
+        }
+      }})
+      .then(result => {
+        console.log("updateDemo succeeded:", JSON.stringify(result))
+        return result
+      })
+      .catch(reason => {
+        console.log("updateDemo faild", reason)
+      })
+  }
+
+  function deleteDemo(obj) {
+    console.log("deleteDemo:", JSON.stringify(obj))
+    return dadget.exec(obj.csn, {
+      type: "delete",
+      target: obj._id,
+      before: obj
+    })
+      .then(result => {
+        console.log("deleteDemo succeeded:", JSON.stringify(result))
+        return result
+      })
+      .catch(reason => {
+        console.log("deleteDemo faild", reason)
       })
   }
 })

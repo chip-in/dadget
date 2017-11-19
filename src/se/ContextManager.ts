@@ -36,14 +36,14 @@ class TransactionJournalSubscriber extends Subscriber {
     let transaction: TransactionObject = JSON.parse(msg)
     this.context.getLock().acquire("transaction", () => {
       // 自分がスレーブになっていれば保存
-      return this.csnDB.current()
+      return this.csnDB.getCurrentCsn()
         .then(csn => {
           if (csn < transaction.csn) {
             return this.csnDB.update(transaction.csn)
           }
           return Promise.resolve()
         })
-        .then(_ => {
+        .then(() => {
           return this.journalDB.findByCsn(transaction.csn)
         })
         .then(savedTransaction => {
@@ -241,9 +241,9 @@ export class ContextManager extends ServiceEngine {
     this.mountHandle = undefined
 
     if (mountHandle) {
-      promise = promise.then(_ => { return this.node.unmount(mountHandle).catch() })
+      promise = promise.then(() => { return this.node.unmount(mountHandle).catch() })
     }
-    promise = promise.then(_ => {
+    promise = promise.then(() => {
       this.node.mount(CORE_NODE.PATH_CONTEXT.replace(/:database\b/g, this.database), "singletonMaster", this.server)
         .then(mountHandle => {
           // マスターを取得した場合のみ実行される
@@ -260,8 +260,8 @@ export class ContextManager extends ServiceEngine {
       // TODO 追加されたオブジェクトと一意属性が競合していないかを調べる
       return Promise.resolve(request.new)
     } else if(request.type == TransactionType.UPDATE && request.before) {
-      
-      return Promise.resolve(request.before) // TODO 更新を適用してリターン
+      let newObj = TransactionRequest.applyOperator(request)
+      return Promise.resolve(newObj)
     } else if(request.type == TransactionType.DELETE && request.before) {
       return Promise.resolve(request.before)
     }else{

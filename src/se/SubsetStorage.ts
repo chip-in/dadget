@@ -1,7 +1,7 @@
 import { ResourceNode, ServiceEngine, Subscriber, Proxy } from '@chip-in/resource-node'
 import { SubsetDb } from '../db/SubsetDb'
 import { DatabaseRegistry, SubsetDef } from "./DatabaseRegistry"
-import { TransactionObject, TransactionType } from '../db/Transaction'
+import { TransactionObject, TransactionType, TransactionRequest } from '../db/Transaction'
 import { QuestResult } from "./Dadget"
 import { ProxyHelper } from "../util/ProxyHelper"
 import { CORE_NODE } from "../Config"
@@ -28,8 +28,12 @@ class UpdateProcessor extends Subscriber {
     if (transaction.type == TransactionType.INSERT && transaction.new) {
       let obj = Object.assign({ _id: transaction.target, csn: transaction.csn }, transaction.new)
       this.storage.getSubsetDb().insert(obj)
+    } else if (transaction.type == TransactionType.UPDATE && transaction.before) {
+      let newObj = TransactionRequest.applyOperator(transaction)
+      this.storage.getSubsetDb().update(newObj)
+    } else if (transaction.type == TransactionType.DELETE && transaction.before) {
+      this.storage.getSubsetDb().delete(transaction.before)
     }
-
   }
 }
 
@@ -108,10 +112,11 @@ export class SubsetStorage extends ServiceEngine implements Proxy {
       return Promise.reject(new Error("DatabaseRegistry is missing, or there are multiple ones."));
     }
     let registry = seList[0] as DatabaseRegistry;
-    this.subsetDefinition = registry.getMetadata().subsets[this.subsetName];
+    let metaData = registry.getMetadata()
+    this.subsetDefinition = metaData.subsets[this.subsetName];
 
     // ストレージを準備
-    this.subsetDb = new SubsetDb(this.database, this.subsetName)
+    this.subsetDb = new SubsetDb(this.database, this.subsetName, metaData.indexes)
 
     // Rest サービスを登録する。
     let mountingMode = this.option.exported ? "loadBalancing" : "localOnly"
