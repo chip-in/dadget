@@ -1,4 +1,5 @@
 import * as http from 'http';
+import * as EJSON from 'mongodb-extended-json'
 
 export class ProxyHelper {
 
@@ -18,12 +19,12 @@ export class ProxyHelper {
     })
       .then(proc)
       .then((result) => {
-        console.log("procPost return", JSON.stringify(result))
+//        console.log("procPost return", JSON.stringify(result))
         res.writeHead(200, {
           "Content-Type": "application/json"
           , "Access-Control-Allow-Origin": "*"
         })
-        res.write(JSON.stringify(result))
+        res.write(EJSON.stringify(result))
         res.end()
         return res
       })
@@ -33,7 +34,7 @@ export class ProxyHelper {
           "Content-Type": "application/json"
           , "Access-Control-Allow-Origin": "*"
         })
-        res.write(JSON.stringify({status: "NG", reason: reason}))
+        res.write(EJSON.stringify({status: "NG", reason: reason}))
         res.end()
         return res
       })

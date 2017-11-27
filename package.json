@@ -1,6 +1,6 @@
 {
   "name": "@chip-in/dadget",
-  "version": "0.0.3",
+  "version": "0.0.4",
   "description": "chip-in Dadget",
   "keywords": [
     "chip-in"
@@ -12,6 +12,8 @@
   "main": "./lib/index.js",
   "types": "./src/index.ts",
   "browser": {
+    "./lib/db/CsnDb.js": "./lib/db/CsnDbOnBrowser.js",
+    "./lib/db/JournalDb.js": "./lib/db/JournalDbOnBrowser.js",
     "./lib/db/SubsetDb.js": "./lib/db/SubsetDbOnBrowser.js",
     "mongodb": false
   },
@@ -19,14 +21,18 @@
     "prepare": "npm run clean && npm run build",
     "clean": "rm -rf lib dest",
     "build": "tsc && babel dest --out-dir lib",
+    "start": "node lib/command.js",
     "makedoc": "typedoc --excludeExternals --module commonjs --out ./docs/ ./src/",
     "test": "mocha"
   },
   "dependencies": {
     "@chip-in/resource-node": "*",
     "async-lock": "^1.0.0",
+    "mongo-parse": "^2.0.3",
     "mongodb": "^2.2.31",
+    "mongodb-extended-json": "^1.10.0",
     "object-hash": "1.1.8",
+    "rwlock": "^5.0.0",
     "uuid": "^3.1.0"
   },
   "devDependencies": {
@@ -34,11 +40,12 @@
     "@types/mongodb": "^2.2.11",
     "@types/node": "^8.0.15",
     "@types/object-hash": "0.5.29",
+    "@types/rwlock": "^5.0.2",
     "@types/uuid": "^3.4.2",
     "babel-cli": "^6.24.1",
     "babel-preset-es2015": "^6.24.1",
-    "mocha": "^4.0.1",
     "chai": "^4.1.2",
+    "mocha": "^4.0.1",
     "typedoc": "^0.9.0",
     "typescript": "^2.4.2"
   },

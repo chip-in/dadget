@@ -1,13 +1,15 @@
 import { MongoClient, Db } from 'mongodb'
+import * as EJSON from 'mongodb-extended-json'
+
 import { TransactionRequest, TransactionObject, TransactionType } from '../db/Transaction'
 import { MONGO_DB } from "../Config"
 
-export class JournalOnMongoDB {
+export class JournalDb {
   protected dbUrl: string
 
   constructor(database: string) {
     this.dbUrl = MONGO_DB.URL + database
-    console.log("JournalOnMongoDB is created")
+    console.log("JournalDb is created")
   }
 
   start(): Promise<void> {
@@ -54,10 +56,10 @@ export class JournalOnMongoDB {
         if (request.type == TransactionType.INSERT && request.new) {
           if (!result || result.type == TransactionType.DELETE) return
           throw new Error('checkConsistent error');
-        } else if(request.before) {
+        } else if (request.before) {
           if (!result || result.type == TransactionType.DELETE || result.csn > csn) throw new Error('checkConsistent error');
           return
-        }else{
+        } else {
           throw new Error('checkConsistent error');
         }
       })
@@ -89,9 +91,9 @@ export class JournalOnMongoDB {
         db = _
         console.log("insert:", JSON.stringify(transaction));
         // mongodbの制限によりoperatorを文字列化
-        let saveVal: any = {...transaction}
-        if(transaction.operator){
-          saveVal["operator"] = JSON.stringify(transaction.operator)
+        let saveVal: any = { ...transaction }
+        if (transaction.operator) {
+          saveVal["operator"] = EJSON.stringify(transaction.operator)
         }
         return db.collection(MONGO_DB.JOURNAL_COLLECTION).insertOne(saveVal)
       })
@@ -127,6 +129,20 @@ export class JournalOnMongoDB {
           console.log("findByCsn: transaction none");
           return null
         }
+      })
+  }
+
+  findByCsnRange(from: number, to: number): Promise<TransactionObject[]> {
+    let db: Db
+    console.log("findByCsnRange:", from, to);
+    return MongoClient.connect(this.dbUrl)
+      .then(_ => {
+        db = _
+        return db.collection(MONGO_DB.JOURNAL_COLLECTION).find({ $and: [{ csn: { $gte: from } }, { csn: { $lte: to } }] }).sort({csn: -1}).toArray()
+      })
+      .then(transactions => {
+        db.close()
+        return transactions
       })
   }
 

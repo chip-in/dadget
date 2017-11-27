@@ -29,10 +29,12 @@ node.start().then(() => {
   }
   let dadget = seList[0];
   queryTest()
-  .then(()=>insertDemo("ddddddddd"))
+//  .then(_=>forwardQueryTest(_.csn))
+  .then(()=>insertDemo(new Date()))
   .then(_=>updateDemo(_))
-  .then(_=>deleteDemo(_))
-  .then(queryTest)
+//  .then(_=>updateDemo(_))
+//  .then(_=>deleteDemo(_))
+//  .then(queryTest)
 
   function queryTest(){
     return dadget.query({ alertClass: "EvacuationOrder", date: { $gt: "2017-08-07T10:23:00" } })
@@ -41,6 +43,7 @@ node.start().then(() => {
       for(let row of result.resultSet){
         console.log(JSON.stringify(row))
       }
+      return result
     });
   }
 
@@ -99,6 +102,31 @@ node.start().then(() => {
       .catch(reason => {
         console.log("deleteDemo faild", reason)
       })
+  }
+
+  function forwardQueryTest(csn){
+    csn++;
+    let query = { alertClass: "EvacuationOrder", date: { $gt: "2017-08-07T10:23:00" } };
+    let queryHandlers = node.searchServiceEngine("QueryHandler", { database: "alerts" }).sort((a, b) => b.getPriority() - a.getPriority());
+    let resultSet = []
+    return Promise.resolve({ csn: csn, resultSet: resultSet, restQuery: query, queryHandlers: queryHandlers })
+      .then(function queryFallback(request){
+        if (!Object.keys(request.restQuery).length) return Promise.resolve(request);
+        let qh = request.queryHandlers.shift();
+        if (qh == null) {
+          throw new Error("The queryHandlers has been empty before completing queries.");
+        }
+        return qh.query(request.csn, request.restQuery)
+          .then((result) => queryFallback({
+            csn: result.csn,
+            resultSet: [...request.resultSet, ...result.resultSet],
+            restQuery: result.restQuery,
+            queryHandlers: request.queryHandlers
+          }));
+      }).then(result => {
+        console.log("forwardQueryTest:", JSON.stringify(result))
+      })
+    
   }
 })
 

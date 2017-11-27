@@ -1,9 +1,11 @@
 import * as hash from "object-hash"
+import * as parser from "mongo-parse"
 
 export const enum TransactionType {
   INSERT = "insert",
   UPDATE = "update",
-  DELETE = "delete"
+  DELETE = "delete",
+  NONE = "none",
 }
 
 /**
@@ -52,68 +54,248 @@ export class TransactionRequest {
     let obj = Object.assign({}, transaction.before) as { [key: string]: any }
     let operator = transaction.operator
     for (let op in operator) {
+      let list = operator[op] as { [key: string]: any }
       switch (op) {
-        // TODO $currentDate の場合の処理。内部的に日時設定
+        case "$currentDate":
+          // Timestamp is not supported.
+          let _transaction = transaction as TransactionObject
+          for (let key in list) {
+            obj = updateField(obj, key.split("."), (org) => _transaction.datetime)
+          }
+          break
         case "$inc":
-          {
-            let list = operator[op] as { [key: string]: number }
-            for (let key in list) {
-              obj = apply$inc(obj, key.split("."), list[key])
-            }
+          for (let key in list) {
+            if (!Number.isInteger(list[key])) throw new Error("$inc must be Integer")
+            obj = updateField(obj, key.split("."), (org) => {
+              let val = typeof org === "undefined" ? 0 : org
+              if (!Number.isInteger(val)) throw new Error("A value of the field is not Integer:" + key + ", " + JSON.stringify(val))
+              return val + list[key]
+            })
+          }
+          break
+        case "$min":
+          for (let key in list) {
+            obj = updateField(obj, key.split("."), (org) => Math.min(org, list[key]))
+          }
+          break
+        case "$max":
+          for (let key in list) {
+            obj = updateField(obj, key.split("."), (org) => Math.max(org, list[key]))
+          }
+          break
+        case "$mul":
+          for (let key in list) {
+            if (!Number.isInteger(list[key])) throw new Error("$inc must be Integer")
+            obj = updateField(obj, key.split("."), (org) => {
+              let val = typeof org === "undefined" ? 0 : org
+              if (!Number.isInteger(val)) throw new Error("A value of the field is not Integer:" + key + ", " + JSON.stringify(val))
+              return val * list[key]
+            })
+          }
+          break
+        case "$rename":
+          for (let key in list) {
+            let newField = list[key]
+            let val: any
+            obj = updateField(obj, key.split("."), (org) => {
+              val = org
+              return undefined
+            })
+            obj = updateField(obj, newField.split("."), (org) => val)
           }
           break
         case "$set":
-          {
-            let list = operator[op] as { [key: string]: any }
-            for (let key in list) {
-              obj = apply$set(obj, key.split("."), list[key])
-            }
+          for (let key in list) {
+            obj = updateField(obj, key.split("."), (org) => list[key])
           }
           break
-
+        case "$setOnInsert":
+          throw new Error("$setOnInsert is not supported")
+        case "$unset":
+          for (let key in list) {
+            obj = updateField(obj, key.split("."), (org) => undefined)
+          }
+          break
+        case "$":
+          throw new Error("Update Operator $ is not supported")
+        case "$addToSet":
+          for (let key in list) {
+            obj = updateField(obj, key.split("."), (org) => {
+              let newVal: any[] = typeof org === "undefined" ? [] : org
+              if (!Array.isArray(newVal)) throw new Error("A value of the field is not Array:" + key + ", " + JSON.stringify(newVal))
+              newVal = [...newVal]
+              let values: any[] = list[key]["$each"] ? list[key]["$each"] : [list[key]]
+              if (!Array.isArray(values)) throw new Error("$each value must be Array:" + key + ", " + JSON.stringify(values))
+              for (let value of values) {
+                if (newVal.indexOf(value) < 0) newVal.push(value)
+              }
+              return newVal
+            })
+          }
+          break
+        case "$pop":
+          for (let key in list) {
+            obj = updateField(obj, key.split("."), (org) => {
+              if (typeof org === "undefined") return org
+              if (!Array.isArray(org)) throw new Error("A value of the field is not Array:" + key + ", " + JSON.stringify(org))
+              if (!Number.isInteger(list[key])) throw new Error("$pop value must be Integer")
+              if (org.length === 0) return org
+              return list[key] < 0 ? org.slice(1) : org.slice(0, -1)
+            })
+          }
+          break
+        case "$pull":
+          for (let key in list) {
+            obj = updateField(obj, key.split("."), (org) => {
+              if (typeof org === "undefined") return org
+              if (!Array.isArray(org)) throw new Error("A value of the field is not Array:" + key + ", " + JSON.stringify(org))
+              if (org.length === 0) return org
+              let newVal: any[] = []
+              if (typeof list[key] !== "object" || list[key] instanceof Date) {
+                for (let value of org) {
+                  if (!isEqual(value, list[key])) newVal.push(value)
+                }
+              } else {
+                if (Object.keys(list[key])[0].startsWith("$")) {
+                  let query = parser.parse({ _: list[key] })
+                  for (let value of org) {
+                    if (!query.matches({ _: value }, false)) newVal.push(value)
+                  }
+                } else {
+                  let query = parser.parse(list[key])
+                  for (let value of org) {
+                    if (!query.matches(value, false)) newVal.push(value)
+                  }
+                }
+              }
+              return newVal
+            })
+          }
+          break
+        case "$pushAll":
+          for (let key in list) {
+            obj = updateField(obj, key.split("."), (org) => {
+              let newVal: any[] = typeof org === "undefined" ? [] : org
+              if (!Array.isArray(list[key])) throw new Error("$pushAll must be Array")
+              if (!Array.isArray(newVal)) throw new Error("A value of the field is not Array:" + key + ", " + JSON.stringify(newVal))
+              newVal = [...newVal, ...list[key]]
+              return newVal
+            })
+          }
+          break
+        case "$push":
+          for (let key in list) {
+            obj = updateField(obj, key.split("."), (org) => {
+              let newVal: any[] = typeof org === "undefined" ? [] : [...org]
+              if (typeof list[key] === "object" && list[key]["$each"]) {
+                if (!Array.isArray(list[key]["$each"])) throw new Error("$each must be Array")
+                if (typeof list[key]["$position"] !== "undefined") {
+                  let pos = list[key]["$position"]
+                  if (!Number.isInteger(pos)) throw new Error("$position must be Integer")
+                  newVal = [...newVal.slice(0, pos), ...list[key]["$each"], ...newVal.slice(pos)]
+                } else {
+                  newVal = [...newVal, ...list[key]["$each"]]
+                }
+                if (typeof list[key]["$sort"] !== "undefined") {
+                  newVal = parser.search(newVal, {}, list[key]["$sort"], false)
+                }
+                if (typeof list[key]["$slice"] !== "undefined") {
+                  if (!Number.isInteger(list[key]["$slice"])) throw new Error("$slice must be Integer")
+                  newVal = newVal.slice(0, list[key]["$slice"])
+                }
+              } else {
+                newVal.push(list[key])
+              }
+              return newVal
+            })
+          }
+          break
+        case "$pullAll":
+          for (let key in list) {
+            obj = updateField(obj, key.split("."), (org) => {
+              if (typeof org === "undefined") return org
+              if (!Array.isArray(org)) throw new Error("A value of the field is not Array:" + key + ", " + JSON.stringify(org))
+              if (org.length === 0) return org
+              let newVal: any[] = []
+              for (let value of org) {
+                if (!inArray(value, list[key])) newVal.push(value)
+              }
+              return newVal
+            })
+          }
+          break
+        case "$bit":
+          for (let key in list) {
+            obj = updateField(obj, key.split("."), (org) => {
+              if (!Number.isInteger(org)) throw new Error("A value of the field is not Integer:" + key + ", " + JSON.stringify(org))
+              let val = list[key]
+              if (val.and) {
+                if (!Number.isInteger(val.and)) throw new Error("The bit AND operator value is not Integer:" + val.and)
+                return org & val.and
+              }
+              else if (val.or) {
+                if (!Number.isInteger(val.or)) throw new Error("The bit OR operator value is not Integer:" + val.or)
+                return org | val.or
+              }
+              else if (val.xor) {
+                if (!Number.isInteger(val.xor)) throw new Error("The bit XOR operator value is not Integer:" + val.xor)
+                return org ^ val.xor
+              }
+            })
+          }
+          break
+        default:
+          throw new Error("Not supported operator: " + op)
       }
-
     }
     return obj
   }
 }
 
-function apply$inc(obj: { [key: string]: any }, keys: string[], inc: number): { [key: string]: any } {
-  let key = keys.shift()
-  if (key == null) throw new Error()
-  if (keys.length == 0) {
-    if (Array.isArray(obj)) {
-      let pos = Number(key)
-      return [...obj.slice(0, pos), (obj[pos] || 0) + inc, ...obj.slice(pos + 1)]
-    } else {
-      return { ...obj, [key]: (obj[key] || 0) + inc }
-    }
+function isEqual(a: any, b: any) {
+  if (a instanceof Date) {
+    return b instanceof Date && a.getTime() == b.getTime()
   } else {
-    if (Array.isArray(obj)) {
-      let pos = Number(key)
-      return [...obj.slice(0, pos), apply$inc(obj[pos], keys, inc), ...obj.slice(pos + 1)]
-    } else {
-      return { ...obj, [key]: apply$inc(obj[key], keys, inc) }
-    }
+    return a === b
   }
 }
 
-function apply$set(obj: { [key: string]: any }, keys: string[], val: any): { [key: string]: any } {
+function inArray(a: any, obj: any[]) {
+  if (!Array.isArray(obj)) throw new Error("The value is not Array:" + JSON.stringify(obj))
+  for (let val of obj) {
+    if (isEqual(a, val)) return true
+  }
+  return false
+}
+
+function updateField(obj: { [key: string]: any }, keys: string[], func: (org: any) => any): { [key: string]: any } {
   let key = keys.shift()
   if (key == null) throw new Error()
   if (keys.length == 0) {
     if (Array.isArray(obj)) {
       let pos = Number(key)
-      return [...obj.slice(0, pos), val, ...obj.slice(pos + 1)]
+      if (!Number.isInteger(pos)) throw new Error("An value of position is not Integer:" + pos)
+      let newVal = func(obj[pos])
+      if (typeof newVal === "undefined") {
+        return [...obj.slice(0, pos), ...obj.slice(pos + 1)]
+      }
+      return [...obj.slice(0, pos), newVal, ...obj.slice(pos + 1)]
     } else {
-      return { ...obj, [key]: val}
+      let newVal = func(obj[key])
+      if (typeof newVal === "undefined") {
+        let newObj = { ...obj }
+        delete newObj[key]
+        return newObj
+      }
+      return { ...obj, [key]: newVal }
     }
   } else {
     if (Array.isArray(obj)) {
       let pos = Number(key)
-      return [...obj.slice(0, pos), apply$set(obj[pos], keys, val), ...obj.slice(pos + 1)]
+      if (!Number.isInteger(pos)) throw new Error("An value of position is not Integer:" + pos)
+      return [...obj.slice(0, pos), updateField(obj[pos], keys, func), ...obj.slice(pos + 1)]
     } else {
-      return { ...obj, [key]: apply$set(obj[key], keys, val) }
+      return { ...obj, [key]: updateField(obj[key], keys, func) }
     }
   }
 }
@@ -131,7 +313,7 @@ export class TransactionObject extends TransactionRequest {
   /**
    * 	トランザクションをコミットした時刻
    */
-  datetime: number
+  datetime: Date
 
   /**
    * 1個前のトランザクションオブジェクトのdigestの値

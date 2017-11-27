@@ -1,3 +1,5 @@
+import * as EJSON from 'mongodb-extended-json'
+
 import { ResourceNode, ServiceEngine, Subscriber } from '@chip-in/resource-node'
 import { TransactionObject } from '../db/Transaction'
 import { DatabaseRegistry, SubsetDef } from "./DatabaseRegistry"
@@ -40,7 +42,7 @@ export class UpdateManager extends ServiceEngine {
 
   start(node: ResourceNode): Promise<void> {
     this.node = node
-    node.logger.debug("UpdateManager is started")
+    this.logger.debug("UpdateManager is started")
 
     if (!this.option.database) {
       return Promise.reject(new Error("Database name is missing."));
@@ -58,7 +60,7 @@ export class UpdateManager extends ServiceEngine {
         super()
         this.database = database
         this.subsetDefinition = subsetDefinition
-        node.logger.debug("UpdateListener is created")
+        this.logger.debug("UpdateListener is created")
       }
 
       convertTransactionForSubset(transaction: TransactionObject): TransactionObject {
@@ -67,11 +69,11 @@ export class UpdateManager extends ServiceEngine {
       }
 
       onReceive(transctionJSON: string) {
-        let transaction = JSON.parse(transctionJSON);
+        let transaction = EJSON.parse(transctionJSON);
         let subsetTransaction = this.convertTransactionForSubset(transaction);
         node.publish(CORE_NODE.PATH_SUBSET_TRANSACTION
           .replace(/:database\b/g, this.database)
-          .replace(/:subset\b/g, subset), JSON.stringify(subsetTransaction));
+          .replace(/:subset\b/g, subset), EJSON.stringify(subsetTransaction));
       }
     }
 

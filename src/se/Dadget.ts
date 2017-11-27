@@ -1,8 +1,9 @@
 import { ResourceNode, ServiceEngine } from '@chip-in/resource-node'
-import { TransactionRequest, TransactionObject } from '../db/Transaction'
+import { TransactionRequest, TransactionObject, TransactionType } from '../db/Transaction'
 import { QueryHandler } from "./QueryHandler"
 import { CORE_NODE } from "../Config"
 import { v1 as uuidv1 } from 'uuid'
+import * as EJSON from 'mongodb-extended-json'
 
 /**
  * Dadgetコンフィグレーションパラメータ
@@ -58,7 +59,7 @@ export class Dadget extends ServiceEngine {
   start(node: ResourceNode): Promise<void> {
     this.node = node
     this.database = this.option.database
-    node.logger.debug("Dadget is started")
+    this.logger.debug("Dadget is started")
     return Promise.resolve();
   }
 
@@ -77,27 +78,27 @@ export class Dadget extends ServiceEngine {
    */
   query(query: object, sort?: object, limit?: number, offset?: number): Promise<QuestResult> {
     let node = this.node
-    let queryHandlers = this.node.searchServiceEngine("QueryHandler", { database: this.database }) as QueryHandler[];
-    queryHandlers = sortQueryHandlers(queryHandlers);
+    let queryHandlers = this.node.searchServiceEngine("QueryHandler", { database: this.database }) as QueryHandler[]
+    queryHandlers = sortQueryHandlers(queryHandlers)
     let csn = 0
     let resultSet: object[] = []
     return Promise.resolve({ csn: csn, resultSet: resultSet, restQuery: query, queryHandlers: queryHandlers })
       .then(function queryFallback(request): Promise<QuestResult> {
-        if (!Object.keys(request.restQuery).length) return Promise.resolve(request); // クエリが空集合なので、ここまでの結果を返す
-        let qh = request.queryHandlers.shift(); // 先頭のクエリハンドラを取得
+        if (!Object.keys(request.restQuery).length) return Promise.resolve(request)
+        let qh = request.queryHandlers.shift()
         if (qh == null) {
-          // まだクエリーが空になってないのにクエリハンドラが残ってない
-          throw new Error("The queryHandlers has been empty before completing queries.");
+          throw new Error("The queryHandlers has been empty before completing queries.")
         }
         return qh.query(request.csn, request.restQuery)
-          .then((result) => queryFallback({ // 次のクエリハンドラにフォールバック
-            csn: result.csn, // 前提となるコンテキスト通番をリレー
+          .then((result) => queryFallback({
+            csn: result.csn,
             resultSet: margeResultSet(request.resultSet, result.resultSet),
-            restQuery: result.restQuery, // 残ったクエリ
-            queryHandlers: request.queryHandlers // 残ったクエリハンドラ
+            restQuery: result.restQuery,
+            queryHandlers: request.queryHandlers
           }));
       }).then(result => {
         //クエリ完了後の処理
+        // TODO クエリが空にならなかった場合（＝ wholeContents サブセットのサブセットストレージが同期処理中で準備が整っていない場合）5秒ごとに4回くらい再試行した後、エラーとなる
         return result
       })
 
@@ -106,11 +107,11 @@ export class Dadget extends ServiceEngine {
      * @param seList
      */
     function sortQueryHandlers(seList: QueryHandler[]): QueryHandler[] {
-      node.logger.debug("before sort:")
-      for (let se of seList) node.logger.debug(se.getPriority().toString())
+//      this.logger.debug("before sort:")
+//      for (let se of seList) this.logger.debug(se.getPriority().toString())
       seList.sort((a, b) => b.getPriority() - a.getPriority())
-      node.logger.debug("after sort:")
-      for (let se of seList) node.logger.debug(se.getPriority().toString())
+//      this.logger.debug("after sort:")
+//      for (let se of seList) this.logger.debug(se.getPriority().toString())
       return seList;
     }
 
@@ -150,23 +151,25 @@ export class Dadget extends ServiceEngine {
    * @return 更新されたオブジェクト
    */
   exec(csn: number, request: TransactionRequest): Promise<object> {
+    request.type = request.type.toLowerCase() as TransactionType
+    if(request.type != TransactionType.INSERT && request.type != TransactionType.UPDATE && request.type != TransactionType.DELETE){
+      throw new Error("The TransactionType is not supported.")
+    }
     let sendData = {
       csn: csn,
       request: request
     }
     return this.node.fetch(CORE_NODE.PATH_CONTEXT.replace(/:database\b/g, this.database) + "/exec", {
       method: 'POST',
-      body: JSON.stringify(sendData),
+      body: EJSON.stringify(sendData),
       headers: {
         "Content-Type": "application/json"
       }
     })
-    .then(fetchResult => {
-      console.dir(fetchResult)
-      return fetchResult.json()
-    })
-    .then(result => {
-      console.log("exec:", JSON.stringify(result))
+    .then(fetchResult => fetchResult.json())
+    .then(_ => {
+      let result = EJSON.deserialize(_)
+      this.logger.debug("exec:", JSON.stringify(result))
       if (result.status == "OK") {
         return result.updateObject
       } else {

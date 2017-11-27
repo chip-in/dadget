@@ -80,7 +80,7 @@ export class DatabaseRegistry extends ServiceEngine {
 
   start(node: ResourceNode): Promise<void> {
     this.node = node
-    node.logger.debug("DatabaseRegistry is started")
+    this.logger.debug("DatabaseRegistry is started")
     return Promise.resolve();
   }
 

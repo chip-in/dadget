@@ -1,12 +1,12 @@
 import { MongoClient, Db } from 'mongodb'
 import { MONGO_DB } from "../Config"
 
-export class CsnOnMongoDB {
+export class CsnDb {
   protected dbUrl: string
 
   constructor(database: string) {
     this.dbUrl = MONGO_DB.URL + database
-    console.log("CsnOnMongoDB is created")
+    console.log("CsnDB is created")
   }
 
   start(): Promise<void> {
@@ -73,7 +73,7 @@ export class CsnOnMongoDB {
       .then(result => {
         _db.close()
         if (result) {
-          console.log("increment value:", result.seq);
+          console.log("current value:", result.seq);
           return result.seq
         } else {
           return Promise.reject({

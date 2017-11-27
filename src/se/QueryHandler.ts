@@ -1,3 +1,5 @@
+import * as EJSON from 'mongodb-extended-json'
+
 import { ResourceNode, ServiceEngine } from '@chip-in/resource-node'
 import { DatabaseRegistry, SubsetDef } from "./DatabaseRegistry"
 import { QuestResult } from "./Dadget"
@@ -46,7 +48,7 @@ export class QueryHandler extends ServiceEngine {
 
   start(node: ResourceNode): Promise<void> {
     this.node = node
-    node.logger.debug("QueryHandler is started")
+    this.logger.debug("QueryHandler is started")
 
     if (!this.option.database) {
       return Promise.reject(new Error("Database name is missing."))
@@ -79,13 +81,14 @@ export class QueryHandler extends ServiceEngine {
       .replace(/:database\b/g, this.database)
       .replace(/:subset\b/g, this.subsetName) + "/query", {
         method: 'POST',
-        body: JSON.stringify(request),
+        body: EJSON.stringify(request),
         headers : {
           "Content-Type": "application/json"
         }
       })
       .then(result => result.json())
-      .then(result => {
+      .then(_ => {
+        let result = EJSON.deserialize(_) as QuestResult
         return { csn: result.csn, resultSet: result.resultSet, restQuery: result.restQuery }
       })
   }
