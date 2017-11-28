@@ -1,21 +1,9 @@
 import { ResourceNode } from '@chip-in/resource-node';
-import {
-  DatabaseRegistry
-  , ContextManager
-  , UpdateManager
-  , QueryHandler
-  , SubsetStorage
-  , Dadget} from '../../..';
+import Dadget from '../../..';
 
 let node = new ResourceNode("http://test-core.chip-in.net", "db-server-test");
-node.registerServiceClasses({
-  DatabaseRegistry,
-  ContextManager,
-  Dadget,
-  UpdateManager,
-  QueryHandler,
-  SubsetStorage
-});
+Dadget.registerServiceClasses(node);
+
 node.start().then(() => {
   process.on('SIGINT', function () {
     node.stop().then(()=>{

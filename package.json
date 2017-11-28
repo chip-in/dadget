@@ -9,8 +9,8 @@
     "url": "https://github.com/chip-in/dadget/issues"
   },
   "license": "MIT",
-  "main": "./lib/index.js",
-  "types": "./src/index.ts",
+  "main": "./lib/se/Dadget.js",
+  "types": "./src/se/Dadget.ts",
   "browser": {
     "./lib/db/CsnDb.js": "./lib/db/CsnDbOnBrowser.js",
     "./lib/db/JournalDb.js": "./lib/db/JournalDbOnBrowser.js",

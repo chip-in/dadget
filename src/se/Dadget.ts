@@ -1,6 +1,10 @@
 import { ResourceNode, ServiceEngine } from '@chip-in/resource-node'
 import { TransactionRequest, TransactionObject, TransactionType } from '../db/Transaction'
+import { ContextManager } from "./ContextManager"
+import { DatabaseRegistry } from "./DatabaseRegistry"
 import { QueryHandler } from "./QueryHandler"
+import { SubsetStorage } from "./SubsetStorage"
+import { UpdateManager } from "./UpdateManager"
 import { CORE_NODE } from "../Config"
 import { v1 as uuidv1 } from 'uuid'
 import * as EJSON from 'mongodb-extended-json'
@@ -44,7 +48,7 @@ export class QuestResult {
  *
  * 更新APIとクリルータ機能を提供するAPIである。execメソッド（更新API）とqueryメソッド（クエリルータ）を提供する。
  */
-export class Dadget extends ServiceEngine {
+export default class Dadget extends ServiceEngine {
 
   private option: DadgetConfigDef
   private node: ResourceNode
@@ -54,6 +58,17 @@ export class Dadget extends ServiceEngine {
     super(option)
     this.logger.debug(JSON.stringify(option))
     this.option = option
+  }
+
+  static registerServiceClasses(node: ResourceNode){
+    node.registerServiceClasses({
+      DatabaseRegistry,
+      ContextManager,
+      Dadget,
+      UpdateManager,
+      QueryHandler,
+      SubsetStorage
+    });
   }
 
   start(node: ResourceNode): Promise<void> {

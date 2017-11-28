@@ -1,10 +1,5 @@
 import { ResourceNode } from '@chip-in/resource-node';
-import {
-  DatabaseRegistry
-  , ContextManager
-  , UpdateManager
-  , QueryHandler
-  , SubsetStorage} from '@chip-in/dadget';
+import Dadget from '@chip-in/dadget';
 import fs from 'fs'
 
 let env = {}
@@ -21,13 +16,7 @@ const CORE_SERVER = process.env.CORE_SERVER ? process.env.CORE_SERVER : env.CORE
 const RN_NAME = process.env.RN_NAME ? process.env.RN_NAME : env.RN_NAME ? env.RN_NAME : "db-server";
 
 let node = new ResourceNode(CORE_SERVER, RN_NAME);
-node.registerServiceClasses({
-  DatabaseRegistry,
-  ContextManager,
-  UpdateManager,
-  QueryHandler,
-  SubsetStorage
-});
+Dadget.registerServiceClasses(node);
 node.start().then(() => {
   process.on('SIGINT', function () {
     node.stop().then(()=>{
