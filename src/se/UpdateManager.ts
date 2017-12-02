@@ -1,4 +1,4 @@
-import * as EJSON from 'mongodb-extended-json'
+import * as EJSON from '../util/Ejson'
 
 import { ResourceNode, ServiceEngine, Subscriber } from '@chip-in/resource-node'
 import { TransactionObject } from '../db/Transaction'

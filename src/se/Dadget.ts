@@ -7,7 +7,7 @@ import { SubsetStorage } from "./SubsetStorage"
 import { UpdateManager } from "./UpdateManager"
 import { CORE_NODE } from "../Config"
 import { v1 as uuidv1 } from 'uuid'
-import * as EJSON from 'mongodb-extended-json'
+import * as EJSON from '../util/Ejson'
 
 /**
  * Dadgetコンフィグレーションパラメータ
@@ -46,7 +46,7 @@ export class QuestResult {
 /**
  * API(Dadget)
  *
- * 更新APIとクリルータ機能を提供するAPIである。execメソッド（更新API）とqueryメソッド（クエリルータ）を提供する。
+ * 更新APIとクエリルータ機能を提供するAPIである。execメソッド（更新API）とqueryメソッド（クエリルータ）を提供する。
  */
 export default class Dadget extends ServiceEngine {
 
@@ -91,11 +91,11 @@ export default class Dadget extends ServiceEngine {
    * @param offset 開始位置
    * @returns 取得した結果オブジェクトを返すPromiseオブジェクト
    */
-  query(query: object, sort?: object, limit?: number, offset?: number): Promise<QuestResult> {
+  query(query: object, sort?: object, limit?: number, offset?: number, csn?: number): Promise<QuestResult> {
     let node = this.node
     let queryHandlers = this.node.searchServiceEngine("QueryHandler", { database: this.database }) as QueryHandler[]
     queryHandlers = sortQueryHandlers(queryHandlers)
-    let csn = 0
+    if(typeof csn == "undefined") csn = 0
     let resultSet: object[] = []
     return Promise.resolve({ csn: csn, resultSet: resultSet, restQuery: query, queryHandlers: queryHandlers })
       .then(function queryFallback(request): Promise<QuestResult> {
@@ -104,7 +104,7 @@ export default class Dadget extends ServiceEngine {
         if (qh == null) {
           throw new Error("The queryHandlers has been empty before completing queries.")
         }
-        return qh.query(request.csn, request.restQuery)
+        return qh.query(request.csn, request.restQuery, sort, limit, offset)
           .then((result) => queryFallback({
             csn: result.csn,
             resultSet: margeResultSet(request.resultSet, result.resultSet),

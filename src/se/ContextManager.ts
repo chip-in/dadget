@@ -1,7 +1,7 @@
 import * as http from 'http';
 import * as URL from 'url'
 import * as  AsyncLock from "async-lock"
-import * as EJSON from 'mongodb-extended-json'
+import * as EJSON from '../util/Ejson'
 
 import { ResourceNode, ServiceEngine, Subscriber, Proxy } from '@chip-in/resource-node'
 import { TransactionRequest, TransactionObject, TransactionType } from '../db/Transaction'

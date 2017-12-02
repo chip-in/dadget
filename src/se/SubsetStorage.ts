@@ -1,7 +1,7 @@
 import * as http from 'http';
 import * as URL from 'url'
 import * as  ReadWriteLock from "rwlock"
-import * as EJSON from 'mongodb-extended-json'
+import * as EJSON from '../util/Ejson'
 
 import { ResourceNode, ServiceEngine, Subscriber, Proxy } from '@chip-in/resource-node'
 import { SubsetDb } from '../db/SubsetDb'
@@ -225,7 +225,7 @@ export class SubsetStorage extends ServiceEngine implements Proxy {
       return ProxyHelper.procPost(req, res, (data) => {
         this.logger.debug("/query")
         let request = EJSON.parse(data)
-        return this.query(request.csn, request.query)
+        return this.query(request.csn, request.query, request.sort, request.limit, request.offset)
       })
     } else {
       this.logger.debug("server command not found!:" + url.pathname)
@@ -233,7 +233,7 @@ export class SubsetStorage extends ServiceEngine implements Proxy {
     }
   }
 
-  query(csn: number, restQuery: object): Promise<QuestResult> {
+  query(csn: number, restQuery: object, sort?: object, limit?: number, offset?: number): Promise<QuestResult> {
     // TODO csn が0の場合は、最新のcsnを取得、それ以外の場合はcsnを一致させる
     let type = this.option.type.toLowerCase()
     if (type == "cache") {
@@ -258,14 +258,16 @@ export class SubsetStorage extends ServiceEngine implements Proxy {
         .then(_ => {
           currentCsn = _
           if (csn == 0 || csn == currentCsn) {
-            return this.getSubsetDb().find(restQuery)
+            return this.getSubsetDb().find(restQuery, sort, limit, offset)
               .then(result => {
                 release()
                 return { csn: currentCsn, resultSet: result, restQuery: {} }
               })
           } else if (csn < currentCsn) {
+            // rollback transactions
+            // TODO limitはcsnの差分だけ多めに確保して最後に調整
             let result: object
-            return this.getSubsetDb().find(restQuery)
+            return this.getSubsetDb().find(restQuery, sort, limit, offset)
               .then(_ => {
                 result = _
                 release()
@@ -280,10 +282,11 @@ export class SubsetStorage extends ServiceEngine implements Proxy {
                 return { csn: csn, resultSet: result, restQuery: {} }
               })
           } else {
+            // wait for transactions
             return new Promise<QuestResult>((resolve, reject) => {
               if (!this.queryWaitingList[csn]) this.queryWaitingList[csn] = []
               this.queryWaitingList[csn].push(() => {
-                return this.getSubsetDb().find(restQuery)
+                return this.getSubsetDb().find(restQuery, sort, limit, offset)
                   .then(result => {
                     resolve({ csn: currentCsn, resultSet: result, restQuery: {} })
                   })

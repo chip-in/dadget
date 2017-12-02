@@ -131,12 +131,16 @@ export class SubsetDb {
       })
   }
 
-  find(query: object): Promise<any> {
+  find(query: object, sort?: object, limit?: number, offset?: number): Promise<any> {
     let _db: Db
     return MongoClient.connect(this.dbUrl)
       .then(db => {
         _db = db
-        return db.collection(this.subsetName).find(query).toArray()
+        let cursor = db.collection(this.subsetName).find(query)
+        if(sort) cursor = cursor.sort(sort)
+        if(offset) cursor = cursor.skip(offset)
+        if(limit) cursor = cursor.limit(limit)
+        return cursor.toArray()
       })
       .then(result => {
         _db.close()

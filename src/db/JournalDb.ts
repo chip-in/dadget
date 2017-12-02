@@ -1,5 +1,5 @@
 import { MongoClient, Db } from 'mongodb'
-import * as EJSON from 'mongodb-extended-json'
+import * as EJSON from '../util/Ejson'
 
 import { TransactionRequest, TransactionObject, TransactionType } from '../db/Transaction'
 import { MONGO_DB } from "../Config"

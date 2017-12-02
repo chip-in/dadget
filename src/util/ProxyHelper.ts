@@ -1,5 +1,5 @@
 import * as http from 'http';
-import * as EJSON from 'mongodb-extended-json'
+import * as EJSON from '../util/Ejson'
 
 export class ProxyHelper {
 

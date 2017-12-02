@@ -21,7 +21,7 @@ export class SubsetDb {
     return Promise.resolve()
   }
 
-  find(query: object): Promise<any> {
+  find(query: object, sort?: object, limit?: number, offset?: number): Promise<any> {
     console.log("ddd")
     return Promise.resolve([{
       id: "dddddd",

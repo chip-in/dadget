@@ -1,4 +1,4 @@
-import * as EJSON from 'mongodb-extended-json'
+import * as EJSON from '../util/Ejson'
 
 import { ResourceNode, ServiceEngine } from '@chip-in/resource-node'
 import { DatabaseRegistry, SubsetDef } from "./DatabaseRegistry"
@@ -71,11 +71,14 @@ export class QueryHandler extends ServiceEngine {
     return Promise.resolve()
   }
 
-  query(csn: number, restQuery: object): Promise<QuestResult> {
+  query(csn: number, restQuery: object, sort?: object, limit?: number, offset?: number): Promise<QuestResult> {
     // TODO csn が0の場合は、最新のcsnを取得、それ以外の場合はcsnを一致させる
     let request = {
-      csn: csn,
-      query: restQuery
+      csn: csn
+      , query: restQuery
+      , sort: sort
+      , limit: limit
+      , offset: offset
     }
     return this.node.fetch(CORE_NODE.PATH_SUBSET
       .replace(/:database\b/g, this.database)
