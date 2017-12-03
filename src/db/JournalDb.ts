@@ -57,10 +57,12 @@ export class JournalDb {
           if (!result || result.type == TransactionType.DELETE) return
           throw new Error('checkConsistent error');
         } else if (request.before) {
-          if (!result || result.type == TransactionType.DELETE || result.csn > csn) throw new Error('checkConsistent error');
+          if (!result) throw new Error('checkConsistent error: Not find');
+          if (result.type == TransactionType.DELETE) throw new Error('checkConsistent error: already deleted');
+          if (result.csn > csn) throw new Error('checkConsistent error: csn error ' + result.csn + "," + csn);
           return
         } else {
-          throw new Error('checkConsistent error');
+          throw new Error('checkConsistent error: "before" required');
         }
       })
   }

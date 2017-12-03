@@ -35,9 +35,9 @@ declare module "@chip-in/resource-node" {
         setBasicAuthorization(userid: string, password: string): void
         start(): Promise<any>
         stop(): Promise<void>
-        subscribe(topicName: string, subscriber: Subscriber): Promise<void>
+        subscribe(topicName: string, subscriber: Subscriber): Promise<string>
         unmount(handle: string): Promise<void>
-        unsubscribe(topicName: string): Promise<void>
+        unsubscribe(key: string): Promise<void>
     }
 
     export abstract class Proxy {

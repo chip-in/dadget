@@ -1,4 +1,4 @@
-import { ResourceNode, ServiceEngine } from '@chip-in/resource-node'
+import { ResourceNode, ServiceEngine, Subscriber } from '@chip-in/resource-node'
 import { TransactionRequest, TransactionObject, TransactionType } from '../db/Transaction'
 import { ContextManager } from "./ContextManager"
 import { DatabaseRegistry } from "./DatabaseRegistry"
@@ -53,6 +53,10 @@ export default class Dadget extends ServiceEngine {
   private option: DadgetConfigDef
   private node: ResourceNode
   private database: string
+  private currentCsn: number = 0
+  private notifyCsn: number = 0
+  private updateListeners: { [id: string]: { listener: (csn: number) => void, csn: number, minInterval: number, notifyTime: number } } = {}
+  private updateListenerKey: string | null
 
   constructor(option: DadgetConfigDef) {
     super(option)
@@ -60,7 +64,11 @@ export default class Dadget extends ServiceEngine {
     this.option = option
   }
 
-  static registerServiceClasses(node: ResourceNode){
+  /**
+   * デフォルトサービスクラスを登録
+   * @param node 
+   */
+  static registerServiceClasses(node: ResourceNode) {
     node.registerServiceClasses({
       DatabaseRegistry,
       ContextManager,
@@ -89,13 +97,14 @@ export default class Dadget extends ServiceEngine {
    * @param sort  mongoDBと同じソートオブジェクト
    * @param limit 最大取得件数
    * @param offset 開始位置
+   * @param csn 問い合わせの前提CSN
    * @returns 取得した結果オブジェクトを返すPromiseオブジェクト
    */
   query(query: object, sort?: object, limit?: number, offset?: number, csn?: number): Promise<QuestResult> {
     let node = this.node
     let queryHandlers = this.node.searchServiceEngine("QueryHandler", { database: this.database }) as QueryHandler[]
     queryHandlers = sortQueryHandlers(queryHandlers)
-    if(typeof csn == "undefined") csn = 0
+    if (!csn) csn = 0
     let resultSet: object[] = []
     return Promise.resolve({ csn: csn, resultSet: resultSet, restQuery: query, queryHandlers: queryHandlers })
       .then(function queryFallback(request): Promise<QuestResult> {
@@ -112,7 +121,21 @@ export default class Dadget extends ServiceEngine {
             queryHandlers: request.queryHandlers
           }));
       }).then(result => {
-        //クエリ完了後の処理
+        // TODO クエリ完了後の処理
+        // 通知処理
+        // csn が0の場合は代入
+        this.currentCsn = result.csn
+        for (let id in this.updateListeners) {
+          let listener = this.updateListeners[id]
+          if (listener.csn == 0) {
+            listener.csn = result.csn
+            listener.notifyTime = Date.now()
+          }
+        }
+        setTimeout(() => {
+          this.notifyAll()
+        })
+
         // TODO クエリが空にならなかった場合（＝ wholeContents サブセットのサブセットストレージが同期処理中で準備が整っていない場合）5秒ごとに4回くらい再試行した後、エラーとなる
         return result
       })
@@ -122,11 +145,11 @@ export default class Dadget extends ServiceEngine {
      * @param seList
      */
     function sortQueryHandlers(seList: QueryHandler[]): QueryHandler[] {
-//      this.logger.debug("before sort:")
-//      for (let se of seList) this.logger.debug(se.getPriority().toString())
+      //      this.logger.debug("before sort:")
+      //      for (let se of seList) this.logger.debug(se.getPriority().toString())
       seList.sort((a, b) => b.getPriority() - a.getPriority())
-//      this.logger.debug("after sort:")
-//      for (let se of seList) this.logger.debug(se.getPriority().toString())
+      //      this.logger.debug("after sort:")
+      //      for (let se of seList) this.logger.debug(se.getPriority().toString())
       return seList;
     }
 
@@ -144,13 +167,14 @@ export default class Dadget extends ServiceEngine {
    * count メソッドはクエリルータを呼び出して、問い合わせを行い、件数を返す。
    *
    * @param query mongoDBと同じクエリーオブジェクト
+   * @param csn 問い合わせの前提CSN
    * @returns 取得した件数を返すPromiseオブジェクト
    */
-  count(query: object): Promise<number> {
-    // TODO 実装
-    return Promise.resolve(1)
+  count(query: object, csn?: number): Promise<number> {
+    // TODO 実装の効率化
+    return this.query(query, undefined, undefined, undefined, csn).then(result => result.resultSet.length)
   }
-    
+
   /**
    * targetに設定するUUIDを生成
    */
@@ -167,7 +191,7 @@ export default class Dadget extends ServiceEngine {
    */
   exec(csn: number, request: TransactionRequest): Promise<object> {
     request.type = request.type.toLowerCase() as TransactionType
-    if(request.type != TransactionType.INSERT && request.type != TransactionType.UPDATE && request.type != TransactionType.DELETE){
+    if (request.type != TransactionType.INSERT && request.type != TransactionType.UPDATE && request.type != TransactionType.DELETE) {
       throw new Error("The TransactionType is not supported.")
     }
     let sendData = {
@@ -181,15 +205,104 @@ export default class Dadget extends ServiceEngine {
         "Content-Type": "application/json"
       }
     })
-    .then(fetchResult => fetchResult.json())
-    .then(_ => {
-      let result = EJSON.deserialize(_)
-      this.logger.debug("exec:", JSON.stringify(result))
-      if (result.status == "OK") {
-        return result.updateObject
-      } else {
-        throw new Error(result.reason)
-      }
-    })
+      .then(fetchResult => fetchResult.json())
+      .then(_ => {
+        let result = EJSON.deserialize(_)
+        this.logger.debug("exec:", JSON.stringify(result))
+        if (result.status == "OK") {
+          return result.updateObject
+        } else {
+          throw new Error(result.reason)
+        }
+      })
   }
+
+  private notifyAll() {
+    for (let id in this.updateListeners) {
+      let listener = this.updateListeners[id]
+      if (listener.csn > 0 && this.notifyCsn > listener.csn) {
+        let now = Date.now()
+        if (listener.minInterval == 0 || now - listener.notifyTime >= listener.minInterval) {
+          listener.notifyTime = now
+          listener.csn = this.notifyCsn
+          listener.listener(this.notifyCsn)
+        } else {
+          setTimeout(() => {
+            this.notifyAll()
+          }, now - listener.notifyTime);
+        }
+      }
+    }
+  }
+
+  /**
+   * データベースの更新通知のリスナを登録する
+   * @param listener 更新があった場合、csn を引数にしてこの関数を呼び出す
+   * @param minInterval 通知の間隔の最小値をミリ秒で指定
+   * @return 更新通知取り消しに指定するID
+   */
+  addUpdateListener(listener: (csn: number) => void, minInterval?: number): string {
+    let parent = this
+    if (Object.keys(this.updateListeners).length == 0) {
+      class NotifyListener extends Subscriber {
+
+        constructor() {
+          super()
+          this.logger.debug("NotifyListener is created")
+        }
+
+        onReceive(transctionJSON: string) {
+          let transaction = EJSON.parse(transctionJSON) as TransactionObject
+          parent.notifyCsn = transaction.csn
+          setTimeout(() => {
+            parent.notifyAll()
+          })
+        }
+      }
+
+      if (!this.updateListenerKey) {
+        this.node.subscribe(CORE_NODE.PATH_TRANSACTION.replace(/:database\b/g, this.database), new NotifyListener())
+          .then(key => { this.updateListenerKey = key })
+      }
+    }
+
+    let id = uuidv1()
+    this.updateListeners[id] = {
+      listener: listener
+      , csn: this.currentCsn
+      , minInterval: minInterval || 0
+      , notifyTime: 0
+    }
+    return id
+  }
+
+  /**
+   * データベースの更新通知のリスナを解除する
+   * @param id 登録時のID
+   */
+  removeUpdateListener(id: string) {
+    delete this.updateListeners[id]
+    if (Object.keys(this.updateListeners).length == 0) {
+      if (this.updateListenerKey) {
+        this.node.unsubscribe(this.updateListenerKey)
+        this.updateListenerKey = null
+      }
+    }
+  }
+
+  /**
+   * データベースの更新通知のリスナを全解除
+   */
+  resetUpdateListener() {
+    this.updateListeners = {}
+    if (this.updateListenerKey) {
+      this.node.unsubscribe(this.updateListenerKey)
+      this.updateListenerKey = null
+    }
+  }
+
+  addUpdateListenerForSubset(subset: string, listener: (csn: number) => void, minInterval?: number) {
+
+  }
+
 }

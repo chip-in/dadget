@@ -1,12 +1,17 @@
 import { ResourceNode } from '@chip-in/resource-node';
 import Dadget from '../../..';
 
+process.on('unhandledRejection', (e) => {
+  console.log("unhandledRejection")
+  console.dir(_)
+});
+
 let node = new ResourceNode("http://test-core.chip-in.net", "db-server-test");
 Dadget.registerServiceClasses(node);
 
 node.start().then(() => {
   process.on('SIGINT', function () {
-    node.stop().then(()=>{
+    node.stop().then(() => {
       process.exit()
     })
   })
@@ -16,23 +21,26 @@ node.start().then(() => {
     throw new Error("Dadgetエラー:" + seList.length)
   }
   let dadget = seList[0];
+  dadget.addUpdateListener((csn) => {
+    console.log("cccccccccccc: " + csn)
+  })
   queryTest()
-//  .then(_=>forwardQueryTest(_.csn))
-  .then(()=>insertDemo(new Date()))
-  .then(_=>updateDemo(_))
-//  .then(_=>updateDemo(_))
-//  .then(_=>deleteDemo(_))
-//  .then(queryTest)
+    //  .then(_=>forwardQueryTest(_.csn))
+    .then(() => insertDemo(new Date()))
+    .then(_ => updateDemo(_))
+  //  .then(_=>updateDemo(_))
+  //  .then(_=>deleteDemo(_))
+  //  .then(queryTest)
 
-  function queryTest(){
+  function queryTest() {
     return dadget.query({ alertClass: "EvacuationOrder", date: { $gt: "2017-08-07T10:23:00" } })
-    .then((result) => {
-      console.log("queryTest:", JSON.stringify(result))
-      for(let row of result.resultSet){
-        console.log(JSON.stringify(row))
-      }
-      return result
-    });
+      .then((result) => {
+        console.log("queryTest:", JSON.stringify(result))
+        for (let row of result.resultSet) {
+          console.log(JSON.stringify(row))
+        }
+        return result
+      });
   }
 
   function insertDemo(data) {
@@ -45,8 +53,10 @@ node.start().then(() => {
         alertClass: "EvacuationOrder",
         date: "2017-08-07T10:23:24",
         title: data,
-        distributionId: Dadget.uuidGen()
-      }})
+        distributionId: Dadget.uuidGen(),
+        completed: false
+      }
+    })
       .then(result => {
         console.log("insertDemo succeeded:", JSON.stringify(result))
         return result
@@ -66,7 +76,8 @@ node.start().then(() => {
         "$set": {
           "setval": "test"
         }
-      }})
+      }
+    })
       .then(result => {
         console.log("updateDemo succeeded:", JSON.stringify(result))
         return result
@@ -92,13 +103,13 @@ node.start().then(() => {
       })
   }
 
-  function forwardQueryTest(csn){
+  function forwardQueryTest(csn) {
     csn++;
     let query = { alertClass: "EvacuationOrder", date: { $gt: "2017-08-07T10:23:00" } };
     let queryHandlers = node.searchServiceEngine("QueryHandler", { database: "alerts" }).sort((a, b) => b.getPriority() - a.getPriority());
     let resultSet = []
     return Promise.resolve({ csn: csn, resultSet: resultSet, restQuery: query, queryHandlers: queryHandlers })
-      .then(function queryFallback(request){
+      .then(function queryFallback(request) {
         if (!Object.keys(request.restQuery).length) return Promise.resolve(request);
         let qh = request.queryHandlers.shift();
         if (qh == null) {
@@ -114,7 +125,7 @@ node.start().then(() => {
       }).then(result => {
         console.log("forwardQueryTest:", JSON.stringify(result))
       })
-    
+
   }
 })
 

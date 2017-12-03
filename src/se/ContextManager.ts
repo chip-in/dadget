@@ -104,7 +104,7 @@ class ContextManagementServer extends Proxy {
     this.context.logger.debug(`exec ${csn}`)
     let transaction: TransactionObject
     let newCsn: number
-    let updateObject: {_id?: string, csn?: number}
+    let updateObject: { _id?: string, csn?: number }
 
     // TODO マスターを取得したばかりの時は時間待ち
 
@@ -112,7 +112,7 @@ class ContextManagementServer extends Proxy {
     // コンテキスト通番をインクリメントしてトランザクションオブジェクトを作成
     return new Promise((resolve, reject) => {
       this.context.getLock().acquire("transaction", () => {
-        let _request = {...request, datetime: new Date()}
+        let _request = { ...request, datetime: new Date() }
         // ジャーナルと照合して矛盾がないかチェック
         return this.journalDB.checkConsistent(csn, _request)
           .then(() => this.context.checkUniqueConstraint(csn, _request))
@@ -137,7 +137,7 @@ class ContextManagementServer extends Proxy {
               , EJSON.stringify(transaction))
           })
       }).then(() => {
-        if(!updateObject._id) updateObject._id = transaction.target
+        if (!updateObject._id) updateObject._id = transaction.target
         updateObject.csn = newCsn
         resolve({
           status: "OK",
@@ -218,7 +218,7 @@ export class ContextManager extends ServiceEngine {
     // スレーブ動作で同期するのためのサブスクライバを登録
     this.subscriber = new TransactionJournalSubscriber(this, this.journalDb, this.csnDb)
     promise = promise.then(() => {
-      return node.subscribe(CORE_NODE.PATH_TRANSACTION.replace(/:database\b/g, this.database), this.subscriber)
+      return node.subscribe(CORE_NODE.PATH_TRANSACTION.replace(/:database\b/g, this.database), this.subscriber).then(key => { })
     })
     promise = promise.then(() => {
       // コンテキストマネージャのRestサービスを登録
@@ -261,13 +261,13 @@ export class ContextManager extends ServiceEngine {
     if (request.type == TransactionType.INSERT && request.new) {
       // TODO 追加されたオブジェクトと一意属性が競合していないかを調べる
       return Promise.resolve(request.new)
-    } else if(request.type == TransactionType.UPDATE && request.before) {
+    } else if (request.type == TransactionType.UPDATE && request.before) {
       let newObj = TransactionRequest.applyOperator(request)
       return Promise.resolve(newObj)
-    } else if(request.type == TransactionType.DELETE && request.before) {
+    } else if (request.type == TransactionType.DELETE && request.before) {
       return Promise.resolve(request.before)
-    }else{
+    } else {
       throw new Error('checkConsistent error');
     }
-}
+  }
 }

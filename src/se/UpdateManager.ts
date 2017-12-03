@@ -69,7 +69,7 @@ export class UpdateManager extends ServiceEngine {
       }
 
       onReceive(transctionJSON: string) {
-        let transaction = EJSON.parse(transctionJSON);
+        let transaction = EJSON.parse(transctionJSON) as TransactionObject
         let subsetTransaction = this.convertTransactionForSubset(transaction);
         node.publish(CORE_NODE.PATH_SUBSET_TRANSACTION
           .replace(/:database\b/g, this.database)
@@ -89,7 +89,7 @@ export class UpdateManager extends ServiceEngine {
     let promise = Promise.resolve()
     let listener = new UpdateListener(this.database, this.subsetDefinition)
     promise = promise.then(() => node.subscribe(
-      CORE_NODE.PATH_TRANSACTION.replace(/:database\b/g, this.database), listener))
+      CORE_NODE.PATH_TRANSACTION.replace(/:database\b/g, this.database), listener)).then(key => {})
     return promise
   }
 

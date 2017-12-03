@@ -29,7 +29,7 @@ class UpdateProcessor extends Subscriber {
     let transaction = EJSON.parse(msg) as TransactionObject;
     this.storage.getLock().writeLock(release => {
       this.storage.logger.debug("get writeLock")
-      return this.storage.getCsnDb().getCurrentCsn()
+      this.storage.getCsnDb().getCurrentCsn()
         .then(csn => {
           if (csn >= transaction.csn) {
             this.storage.logger.debug("release writeLock")
@@ -47,6 +47,7 @@ class UpdateProcessor extends Subscriber {
                 promise = promise.then(() => this.storage.getSubsetDb().insert(obj))
               } else if (transaction.type == TransactionType.UPDATE && transaction.before) {
                 let updateObj = TransactionRequest.applyOperator(transaction)
+                updateObj.csn = transaction.csn
                 promise = promise.then(() => this.storage.getSubsetDb().update(updateObj))
               } else if (transaction.type == TransactionType.DELETE && transaction.before) {
                 let before = transaction.before
@@ -56,7 +57,8 @@ class UpdateProcessor extends Subscriber {
               promise = promise.then(() => this.storage.getJournalDb().insert(transaction))
               promise = promise.then(() => this.storage.getCsnDb().update(_csn))
               promise = promise.then(() => {
-                for(let query of this.storage.pullQueryWaitingList(_csn)){
+                for (let query of this.storage.pullQueryWaitingList(_csn)) {
+                  this.storage.logger.debug("do wait query")
                   query()
                 }
               })
@@ -152,7 +154,7 @@ export class SubsetStorage extends ServiceEngine implements Proxy {
 
   pullQueryWaitingList(csn: number): (() => void)[] {
     let list = this.queryWaitingList[csn]
-    if(list){
+    if (list) {
       delete this.queryWaitingList[csn]
       return list
     }
@@ -192,7 +194,7 @@ export class SubsetStorage extends ServiceEngine implements Proxy {
     promise = promise.then(() =>
       node.subscribe(CORE_NODE.PATH_SUBSET_TRANSACTION
         .replace(/:database\b/g, this.database)
-        .replace(/:subset\b/g, this.subsetName), listener)
+        .replace(/:subset\b/g, this.subsetName), listener).then(key => { })
     )
     promise = promise.then(() =>
       node.mount(CORE_NODE.PATH_SUBSET
@@ -247,6 +249,7 @@ export class SubsetStorage extends ServiceEngine implements Proxy {
       let release: () => void
       let promise = new Promise<void>((resolve, reject) => {
         this.getLock().readLock(_ => {
+          this.logger.debug("get readLock")
           release = _
           resolve()
         })
@@ -260,16 +263,19 @@ export class SubsetStorage extends ServiceEngine implements Proxy {
           if (csn == 0 || csn == currentCsn) {
             return this.getSubsetDb().find(restQuery, sort, limit, offset)
               .then(result => {
+                this.logger.debug("release readLock")
                 release()
                 return { csn: currentCsn, resultSet: result, restQuery: {} }
               })
           } else if (csn < currentCsn) {
+            this.logger.debug("rollback transactions", String(csn), String(currentCsn))
             // rollback transactions
-            // TODO limitはcsnの差分だけ多めに確保して最後に調整
+            // TODO 先にJournalから影響するトランザクションを取得して影響するオブジェクト件数分を多く取得
             let result: object
             return this.getSubsetDb().find(restQuery, sort, limit, offset)
               .then(_ => {
                 result = _
+                this.logger.debug("release readLock")
                 release()
                 return this.getJournalDb().findByCsnRange(csn + 1, currentCsn)
               })
@@ -282,6 +288,7 @@ export class SubsetStorage extends ServiceEngine implements Proxy {
                 return { csn: csn, resultSet: result, restQuery: {} }
               })
           } else {
+            this.logger.debug("wait for transactions", String(csn), String(currentCsn))
             // wait for transactions
             return new Promise<QuestResult>((resolve, reject) => {
               if (!this.queryWaitingList[csn]) this.queryWaitingList[csn] = []
@@ -291,9 +298,19 @@ export class SubsetStorage extends ServiceEngine implements Proxy {
                     resolve({ csn: currentCsn, resultSet: result, restQuery: {} })
                   })
               })
+              this.logger.debug("release readLock")
               release()
             })
           }
+        }).catch(e => {
+          this.logger.debug("release readLock Error: " + e.toString())
+          release()
+          return Promise.reject({
+            ns: "dadget.chip-in.net",
+            code: 223,
+            message: "SubsetStorage failed to query cause=%1",
+            inserts: [e.toString()]
+          })
         })
     }
     throw new Error("SubsetStorage has no type")
