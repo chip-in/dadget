@@ -1,3 +1,5 @@
+import { DadgetError } from "../util/DadgetError"
+import { ERROR } from "../Errors"
 
 export class SubsetDb {
 
@@ -13,11 +15,11 @@ export class SubsetDb {
     return Promise.resolve()
   }
 
-  update(obj: {_id: number}): Promise<void> {
+  update(obj: { _id: number }): Promise<void> {
     return Promise.resolve()
   }
 
-  delete(obj: {_id: number}): Promise<void> {
+  delete(obj: { _id: number }): Promise<void> {
     return Promise.resolve()
   }
 

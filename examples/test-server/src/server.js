@@ -3,7 +3,7 @@ import Dadget from '../../..';
 
 process.on('unhandledRejection', (e) => {
   console.log("unhandledRejection")
-  console.dir(_)
+  console.dir(e)
 });
 
 let node = new ResourceNode("http://test-core.chip-in.net", "db-server-test");
@@ -28,7 +28,7 @@ node.start().then(() => {
     //  .then(_=>forwardQueryTest(_.csn))
     .then(() => insertDemo(new Date()))
     .then(_ => updateDemo(_))
-  //  .then(_=>updateDemo(_))
+    .then(_=>failDemo(_))
   //  .then(_=>deleteDemo(_))
   //  .then(queryTest)
 
@@ -53,7 +53,6 @@ node.start().then(() => {
         alertClass: "EvacuationOrder",
         date: "2017-08-07T10:23:24",
         title: data,
-        distributionId: Dadget.uuidGen(),
         completed: false
       }
     })
@@ -84,6 +83,31 @@ node.start().then(() => {
       })
       .catch(reason => {
         console.log("updateDemo faild", reason)
+      })
+  }
+
+  function failDemo(obj) {
+    console.log("failDemo:", JSON.stringify(obj))
+    return dadget.exec(obj.csn - 1, {
+      type: "update",
+      target: obj._id,
+      before: obj,
+      operator: {
+        "$set": {
+          "setval": "test"
+        }
+      }
+    })
+      .then(result => {
+        console.log("updateDemo succeeded:", JSON.stringify(result))
+        return result
+      })
+      .catch(reason => {
+        if(reason.code = 2004){
+          console.log("failDemo retryable", reason.toString())
+        }else{
+          console.log("failDemo faild", reason.toString())
+        }
       })
   }
 

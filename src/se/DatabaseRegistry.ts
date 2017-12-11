@@ -1,4 +1,6 @@
 import { ResourceNode, ServiceEngine } from '@chip-in/resource-node'
+import { DadgetError } from "../util/DadgetError"
+import { ERROR } from "../Errors"
 
 /**
  * サブセット定義
@@ -80,6 +82,10 @@ export class DatabaseRegistry extends ServiceEngine {
 
   start(node: ResourceNode): Promise<void> {
     this.node = node
+    this.logger.debug("DatabaseRegistry is starting")
+    if (!this.option.metadata) {
+      return Promise.reject(new DadgetError(ERROR.E2201, ["metadata is missing."]));
+    }
     this.logger.debug("DatabaseRegistry is started")
     return Promise.resolve();
   }

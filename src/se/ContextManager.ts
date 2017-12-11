@@ -8,6 +8,8 @@ import { TransactionRequest, TransactionObject, TransactionType } from '../db/Tr
 import { CsnDb } from '../db/CsnDb'
 import { JournalDb } from '../db/JournalDb'
 import { ProxyHelper } from "../util/ProxyHelper"
+import { DadgetError } from "../util/DadgetError"
+import { ERROR } from "../Errors"
 import { CORE_NODE } from "../Config"
 
 /**
@@ -64,6 +66,9 @@ class TransactionJournalSubscriber extends Subscriber {
             return promise
           }
         })
+        .catch(err => {
+          this.context.logger.error(err.toString())
+        })
     })
   }
 }
@@ -80,9 +85,10 @@ class ContextManagementServer extends Proxy {
   }
 
   onReceive(req: http.IncomingMessage, res: http.ServerResponse): Promise<http.ServerResponse> {
-    if (!req.url || !req.method) throw new Error()
+    if (!req.url) throw new Error("url is required.")
+    if (!req.method) throw new Error("method is required.")
     let url = URL.parse(req.url)
-    if (url.pathname == null) throw new Error()
+    if (url.pathname == null) throw new Error("pathname is required.")
     this.context.logger.debug(url.pathname)
     let method = req.method.toUpperCase()
     this.context.logger.debug(method)
@@ -105,6 +111,32 @@ class ContextManagementServer extends Proxy {
     let transaction: TransactionObject
     let newCsn: number
     let updateObject: { _id?: string, csn?: number }
+
+    let err: string | null = null
+    if (!request.target) {
+      err = 'target required'
+    }
+    if (request.type == TransactionType.INSERT) {
+      if (request.before) err = 'before not required'
+      if (request.operator) err = 'operator not required'
+      if (!request.new) err = 'new required'
+    } else if (request.type == TransactionType.UPDATE) {
+      if (!request.before) err = 'before required'
+      if (!request.operator) err = 'operator required'
+      if (request.new) err = 'new not required'
+    } else if (request.type == TransactionType.DELETE) {
+      if (!request.before) err = 'before required'
+      if (request.operator) err = 'operator not required'
+      if (request.new) err = 'new not required'
+    } else {
+      err = 'type not found'
+    }
+    if (err) {
+      return Promise.resolve({
+        status: "NG",
+        reason: new DadgetError(ERROR.E2002, [err])
+      })
+    }
 
     // TODO マスターを取得したばかりの時は時間待ち
 
@@ -145,17 +177,13 @@ class ContextManagementServer extends Proxy {
         })
       }, reason => {
         // トランザクションエラー
-        if (reason instanceof Error) {
-          resolve({
-            status: "NG",
-            reason: reason.message
-          })
-        } else {
-          resolve({
-            status: "NG",
-            reason: "unexpected"
-          })
-        }
+        let cause = reason instanceof DadgetError ? reason : new DadgetError(ERROR.E2003, [reason])
+        if (cause.code == ERROR.E1105.code) cause = new DadgetError(ERROR.E2004, [cause])
+        cause.convertInsertsToString()
+        resolve({
+          status: "NG",
+          reason: cause
+        })
       })
     })
   }
@@ -177,6 +205,7 @@ export class ContextManager extends ServiceEngine {
   private server: ContextManagementServer
   private mountHandle?: string
   private lock: AsyncLock
+  private subscriberKey: string | null
 
   constructor(option: ContextManagerConfigDef) {
     super(option)
@@ -203,10 +232,10 @@ export class ContextManager extends ServiceEngine {
 
   start(node: ResourceNode): Promise<void> {
     this.node = node
-    this.logger.debug("ContextManager is started")
+    this.logger.debug("ContextManager is starting")
 
     if (!this.option.database) {
-      return Promise.reject(new Error("Database name is missing."));
+      return Promise.reject(new DadgetError(ERROR.E2001, ["Database name is missing."]));
     }
     this.database = this.option.database
 
@@ -218,7 +247,7 @@ export class ContextManager extends ServiceEngine {
     // スレーブ動作で同期するのためのサブスクライバを登録
     this.subscriber = new TransactionJournalSubscriber(this, this.journalDb, this.csnDb)
     promise = promise.then(() => {
-      return node.subscribe(CORE_NODE.PATH_TRANSACTION.replace(/:database\b/g, this.database), this.subscriber).then(key => { })
+      return node.subscribe(CORE_NODE.PATH_TRANSACTION.replace(/:database\b/g, this.database), this.subscriber).then(key => { this.subscriberKey = key })
     })
     promise = promise.then(() => {
       // コンテキストマネージャのRestサービスを登録
@@ -226,6 +255,7 @@ export class ContextManager extends ServiceEngine {
       this.connect()
     })
 
+    this.logger.debug("ContextManager is started")
     return promise
   }
 
@@ -233,7 +263,10 @@ export class ContextManager extends ServiceEngine {
     return Promise.resolve()
       .then(() => {
         if (this.mountHandle) return this.node.unmount(this.mountHandle).catch()
-      });
+      })
+      .then(() => {
+        if (this.subscriberKey) return this.node.unsubscribe(this.subscriberKey).catch()
+      })
   }
 
   connect(): Promise<void> {

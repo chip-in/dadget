@@ -5,6 +5,8 @@ import { DatabaseRegistry } from "./DatabaseRegistry"
 import { QueryHandler } from "./QueryHandler"
 import { SubsetStorage } from "./SubsetStorage"
 import { UpdateManager } from "./UpdateManager"
+import { DadgetError } from "../util/DadgetError"
+import { ERROR } from "../Errors"
 import { CORE_NODE } from "../Config"
 import { v1 as uuidv1 } from 'uuid'
 import * as EJSON from '../util/Ejson'
@@ -81,6 +83,10 @@ export default class Dadget extends ServiceEngine {
 
   start(node: ResourceNode): Promise<void> {
     this.node = node
+    this.logger.debug("Dadget is starting")
+    if (!this.option.database) {
+      return Promise.reject(new DadgetError(ERROR.E2101, ["Database name is missing."]));
+    }
     this.database = this.option.database
     this.logger.debug("Dadget is started")
     return Promise.resolve();
@@ -138,6 +144,10 @@ export default class Dadget extends ServiceEngine {
 
         // TODO クエリが空にならなかった場合（＝ wholeContents サブセットのサブセットストレージが同期処理中で準備が整っていない場合）5秒ごとに4回くらい再試行した後、エラーとなる
         return result
+      })
+      .catch(reason => {
+        let cause = reason instanceof DadgetError ? reason : new DadgetError(ERROR.E2102, [reason.toString()])
+        return Promise.reject(cause)
       })
 
     /**
@@ -211,9 +221,16 @@ export default class Dadget extends ServiceEngine {
         this.logger.debug("exec:", JSON.stringify(result))
         if (result.status == "OK") {
           return result.updateObject
+        } else if (result.reason) {
+          let reason = result.reason as DadgetError
+          throw new DadgetError({ code: reason.code, message: reason.message }, reason.inserts, reason.ns)
         } else {
-          throw new Error(result.reason)
+          throw JSON.stringify(result)
         }
+      })
+      .catch(reason => {
+        let cause = reason instanceof DadgetError ? reason : new DadgetError(ERROR.E2103, [reason.toString()])
+        return Promise.reject(cause)
       })
   }
 

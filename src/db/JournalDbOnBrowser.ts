@@ -1,4 +1,6 @@
 import { TransactionRequest, TransactionObject, TransactionType } from '../db/Transaction'
+import { DadgetError } from "../util/DadgetError"
+import { ERROR } from "../Errors"
 import { MONGO_DB } from "../Config"
 
 export class JournalDb {

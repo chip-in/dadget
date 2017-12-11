@@ -3,6 +3,8 @@ import * as EJSON from '../util/Ejson'
 import { ResourceNode, ServiceEngine, Subscriber } from '@chip-in/resource-node'
 import { TransactionObject } from '../db/Transaction'
 import { DatabaseRegistry, SubsetDef } from "./DatabaseRegistry"
+import { DadgetError } from "../util/DadgetError"
+import { ERROR } from "../Errors"
 import { CORE_NODE } from "../Config"
 
 /**
@@ -33,6 +35,7 @@ export class UpdateManager extends ServiceEngine {
   private database: string
   private subset: string
   private subsetDefinition: SubsetDef
+  private updateListenerKey: string | null
 
   constructor(option: UpdateManagerConfigDef) {
     super(option)
@@ -42,12 +45,15 @@ export class UpdateManager extends ServiceEngine {
 
   start(node: ResourceNode): Promise<void> {
     this.node = node
-    this.logger.debug("UpdateManager is started")
+    this.logger.debug("UpdateManager is starting")
 
     if (!this.option.database) {
-      return Promise.reject(new Error("Database name is missing."));
+      return Promise.reject(new DadgetError(ERROR.E2501, ["Database name is missing."]));
     }
     this.database = this.option.database
+    if (!this.option.subset) {
+      return Promise.reject(new DadgetError(ERROR.E2501, ["Subset name is missing."]));
+    }
     let subset = this.subset = this.option.subset
 
     // (参照コードの再現のため内部クラスにしたケース)
@@ -80,7 +86,7 @@ export class UpdateManager extends ServiceEngine {
     // サブセットの定義を取得する
     let seList = node.searchServiceEngine("DatabaseRegistry", { database: this.database });
     if (seList.length != 1) {
-      return Promise.reject(new Error("DatabaseRegistry is missing, or there are multiple ones."));
+      return Promise.reject(new DadgetError(ERROR.E2501, ["DatabaseRegistry is missing, or there are multiple ones."]));
     }
     let registry = seList[0] as DatabaseRegistry;
     this.subsetDefinition = registry.getMetadata().subsets[this.subset];
@@ -89,11 +95,14 @@ export class UpdateManager extends ServiceEngine {
     let promise = Promise.resolve()
     let listener = new UpdateListener(this.database, this.subsetDefinition)
     promise = promise.then(() => node.subscribe(
-      CORE_NODE.PATH_TRANSACTION.replace(/:database\b/g, this.database), listener)).then(key => {})
+      CORE_NODE.PATH_TRANSACTION.replace(/:database\b/g, this.database), listener)).then(key => { this.updateListenerKey = key })
+    this.logger.debug("UpdateManager is started")
     return promise
   }
 
   stop(node: ResourceNode): Promise<void> {
-    return Promise.resolve();
+    let promise = Promise.resolve()
+    if (this.updateListenerKey) promise = this.node.unsubscribe(this.updateListenerKey)
+    return promise
   }
 }

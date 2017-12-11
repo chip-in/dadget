@@ -3,6 +3,8 @@ import * as EJSON from '../util/Ejson'
 import { ResourceNode, ServiceEngine } from '@chip-in/resource-node'
 import { DatabaseRegistry, SubsetDef } from "./DatabaseRegistry"
 import { QuestResult } from "./Dadget"
+import { DadgetError } from "../util/DadgetError"
+import { ERROR } from "../Errors"
 import { CORE_NODE } from "../Config"
 
 /**
@@ -41,29 +43,33 @@ export class QueryHandler extends ServiceEngine {
   getPriority(): number {
     return this.subsetDefinition.priority
   }
-  
+
   getNode(): ResourceNode {
     return this.node;
   }
 
   start(node: ResourceNode): Promise<void> {
     this.node = node
-    this.logger.debug("QueryHandler is started")
+    this.logger.debug("QueryHandler is starting")
 
     if (!this.option.database) {
-      return Promise.reject(new Error("Database name is missing."))
+      return Promise.reject(new DadgetError(ERROR.E2301, ["Database name is missing."]));
     }
     this.database = this.option.database
+    if (!this.option.subset) {
+      return Promise.reject(new DadgetError(ERROR.E2301, ["Subset name is missing."]));
+    }
     this.subsetName = this.option.subset
 
     // サブセットの定義を取得する
     let seList = node.searchServiceEngine("DatabaseRegistry", { database: this.database })
     if (seList.length != 1) {
-      return Promise.reject(new Error("DatabaseRegistry is missing, or there are multiple ones."))
+      return Promise.reject(new DadgetError(ERROR.E2301, ["DatabaseRegistry is missing, or there are multiple ones."]));
     }
     let registry = seList[0] as DatabaseRegistry
     this.subsetDefinition = registry.getMetadata().subsets[this.subsetName]
 
+    this.logger.debug("QueryHandler is started")
     return Promise.resolve()
   }
 
@@ -85,14 +91,16 @@ export class QueryHandler extends ServiceEngine {
       .replace(/:subset\b/g, this.subsetName) + "/query", {
         method: 'POST',
         body: EJSON.stringify(request),
-        headers : {
+        headers: {
           "Content-Type": "application/json"
         }
       })
       .then(result => result.json())
       .then(_ => {
-        let result = EJSON.deserialize(_) as QuestResult
-        return { csn: result.csn, resultSet: result.resultSet, restQuery: result.restQuery }
+        let data = EJSON.deserialize(_)
+        if(data.status == "NG") throw data.reason
+        if(data.status == "OK") return data.result
+        throw new Error("fetch error:" + JSON.stringify(data))
       })
   }
 }

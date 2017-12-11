@@ -1,4 +1,6 @@
 import { MongoClient, Db } from 'mongodb'
+import { DadgetError } from "../util/DadgetError"
+import { ERROR } from "../Errors"
 import { MONGO_DB } from "../Config"
 
 export class CsnDb {
@@ -17,21 +19,13 @@ export class CsnDb {
         return db.collection(MONGO_DB.SYSTEM_COLLECTION).findOne({ _id: MONGO_DB.CSN_ID })
       })
       .then(result => {
-        if(result) return;
-        return _db.collection(MONGO_DB.SYSTEM_COLLECTION).insertOne({ _id: MONGO_DB.CSN_ID, seq: 0 }).then(()=>{})
+        if (result) return;
+        return _db.collection(MONGO_DB.SYSTEM_COLLECTION).insertOne({ _id: MONGO_DB.CSN_ID, seq: 0 }).then(() => { })
       })
       .then(result => {
         _db.close()
       })
-      .catch((err) => {
-        console.log(err.stack);
-        return Promise.reject({
-          ns: "dadget.chip-in.net",
-          code: 223,
-          message: "CsnOnMongoDB failed to start cause=%1",
-          inserts: [err.stack.toString()]
-        })
-      })
+      .catch(err => Promise.reject(new DadgetError(ERROR.E1001, [err.toString()])))
   }
 
   /**
@@ -50,12 +44,7 @@ export class CsnDb {
           console.log("increment value:", result.value.seq);
           return result.value.seq
         } else {
-          return Promise.reject({
-            ns: "dadget.chip-in.net",
-            code: 223,
-            message: "CsnOnMongoDB failed to increment cause=%1",
-            inserts: [result.lastErrorObject.toString()]
-          })
+          return Promise.reject(new DadgetError(ERROR.E1002, [result.lastErrorObject.toString()]))
         }
       })
   }
@@ -72,26 +61,11 @@ export class CsnDb {
       })
       .then(result => {
         _db.close()
-        if (result) {
-          console.log("current value:", result.seq);
-          return result.seq
-        } else {
-          return Promise.reject({
-            ns: "dadget.chip-in.net",
-            code: 223,
-            message: "CsnOnMongoDB failed to get current cause=none",
-            inserts: []
-          })
-        }
+        if (!result) throw "csn not found"
+        console.log("current value:", result.seq);
+        return result.seq
       })
-      .catch(reason => {
-        return Promise.reject({
-          ns: "dadget.chip-in.net",
-          code: 223,
-          message: "CsnOnMongoDB failed to get current cause=%1",
-          inserts: [reason.toString()]
-        })
-      })
+      .catch(reason => Promise.reject(new DadgetError(ERROR.E1003, [reason.toString()])))
   }
 
   update(seq: number): Promise<void> {
@@ -103,25 +77,10 @@ export class CsnDb {
       })
       .then(result => {
         _db.close()
-        if (result.result.ok) {
-          console.log("update value:", seq);
-          return Promise.resolve()
-        } else {
-          return Promise.reject({
-            ns: "dadget.chip-in.net",
-            code: 223,
-            message: "CsnOnMongoDB failed to update",
-            inserts: [result.toString()]
-          })
-        }
+        if (!result.result.ok || result.result.nModified != 1) throw "failed to update csn: " + JSON.stringify(result)
+        console.log("update value:", seq);
+        return Promise.resolve()
       })
-      .catch(reason => {
-        return Promise.reject({
-          ns: "dadget.chip-in.net",
-          code: 223,
-          message: "CsnOnMongoDB failed to update cause=%1",
-          inserts: [reason.toString()]
-        })
-      })
+      .catch(reason => Promise.reject(new DadgetError(ERROR.E1004, [reason.toString()])))
   }
 }

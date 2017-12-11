@@ -1,5 +1,7 @@
 import * as http from 'http';
 import * as EJSON from '../util/Ejson'
+import { DadgetError } from './DadgetError';
+import { ERROR } from '../Errors';
 
 export class ProxyHelper {
 
@@ -19,7 +21,7 @@ export class ProxyHelper {
     })
       .then(proc)
       .then((result) => {
-//        console.log("procPost return", JSON.stringify(result))
+        //        console.log("procPost return", JSON.stringify(result))
         res.writeHead(200, {
           "Content-Type": "application/json"
           , "Access-Control-Allow-Origin": "*"
@@ -29,12 +31,16 @@ export class ProxyHelper {
         return res
       })
       .catch(reason => {
-        console.log("procPost error return", JSON.stringify(reason))
+        console.log("procPost error return", reason.toString())
+        if (!(reason instanceof DadgetError)) {
+          reason = new DadgetError(ERROR.E3001, [reason])
+        }
+        reason.convertInsertsToString()
         res.writeHead(200, {
           "Content-Type": "application/json"
           , "Access-Control-Allow-Origin": "*"
         })
-        res.write(EJSON.stringify({status: "NG", reason: reason}))
+        res.write(EJSON.stringify({ status: "NG", reason: reason }))
         res.end()
         return res
       })

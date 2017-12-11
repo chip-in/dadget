@@ -11,6 +11,8 @@ import { DatabaseRegistry, SubsetDef } from "./DatabaseRegistry"
 import { TransactionObject, TransactionType, TransactionRequest } from '../db/Transaction'
 import { QuestResult } from "./Dadget"
 import { ProxyHelper } from "../util/ProxyHelper"
+import { DadgetError } from "../util/DadgetError"
+import { ERROR } from "../Errors"
 import { CORE_NODE } from "../Config"
 
 class UpdateProcessor extends Subscriber {
@@ -67,7 +69,8 @@ class UpdateProcessor extends Subscriber {
               this.storage.logger.debug("release writeLock")
               release()
             }).catch(e => {
-              this.storage.logger.debug("release writeLock: Error", e)
+              this.storage.logger.error("UpdateProcessor Error: ", e.toString())
+              this.storage.logger.debug("release writeLock")
               release()
             })
           }
@@ -114,12 +117,14 @@ export class SubsetStorage extends ServiceEngine implements Proxy {
   private database: string
   private subsetName: string
   private subsetDefinition: SubsetDef
+  private type: string
   private subsetDb: SubsetDb
   private journalDb: JournalDb
   private csnDb: CsnDb
   private mountHandle: string
   private lock: ReadWriteLock
   private queryWaitingList: { [csn: number]: (() => void)[] } = {}
+  private subscriberKey: string | null
 
   constructor(option: SubsetStorageConfigDef) {
     super(option)
@@ -163,30 +168,41 @@ export class SubsetStorage extends ServiceEngine implements Proxy {
 
   start(node: ResourceNode): Promise<void> {
     this.node = node
-    this.logger.debug("SubsetStorage is started")
+    this.logger.debug("SubsetStorage is starting")
 
     if (!this.option.database) {
-      return Promise.reject(new Error("Database name is missing."));
+      return Promise.reject(new DadgetError(ERROR.E2401, ["Database name is missing."]));
     }
     this.database = this.option.database
+    if (!this.option.subset) {
+      return Promise.reject(new DadgetError(ERROR.E2401, ["Subset name is missing."]));
+    }
     this.subsetName = this.option.subset
+    this.logger.debug("subsetName: ", this.subsetName)
 
     // サブセットの定義を取得する
     let seList = node.searchServiceEngine("DatabaseRegistry", { database: this.database });
     if (seList.length != 1) {
-      return Promise.reject(new Error("DatabaseRegistry is missing, or there are multiple ones."));
+      return Promise.reject(new DadgetError(ERROR.E2401, ["DatabaseRegistry is missing, or there are multiple ones."]));
     }
     let registry = seList[0] as DatabaseRegistry;
     let metaData = registry.getMetadata()
     this.subsetDefinition = metaData.subsets[this.subsetName];
 
+    this.type = this.option.type.toLowerCase()
+    if (this.type != "persistent" && this.type != "cache") {
+      return Promise.reject(new DadgetError(ERROR.E2401, [`SubsetStorage type ${this.type} is not supported.`]));
+    }
+
     // ストレージを準備
-    this.subsetDb = new SubsetDb(this.database, this.subsetName, metaData.indexes)
-    this.journalDb = new JournalDb(this.database + '--' + this.subsetName)
-    this.csnDb = new CsnDb(this.database + '--' + this.subsetName)
+    let dbName = this.database + '--' + this.subsetName
+    this.subsetDb = new SubsetDb(dbName, this.subsetName, metaData.indexes)
+    this.journalDb = new JournalDb(dbName)
+    this.csnDb = new CsnDb(dbName)
 
     // Rest サービスを登録する。
     let mountingMode = this.option.exported ? "loadBalancing" : "localOnly"
+    this.logger.debug("mountingMode: ", mountingMode)
     let listener = new UpdateProcessor(this, this.database, this.subsetDefinition);
     let promise = this.subsetDb.start()
     promise = promise.then(() => this.journalDb.start())
@@ -194,7 +210,7 @@ export class SubsetStorage extends ServiceEngine implements Proxy {
     promise = promise.then(() =>
       node.subscribe(CORE_NODE.PATH_SUBSET_TRANSACTION
         .replace(/:database\b/g, this.database)
-        .replace(/:subset\b/g, this.subsetName), listener).then(key => { })
+        .replace(/:subset\b/g, this.subsetName), listener).then(key => { this.subscriberKey = key })
     )
     promise = promise.then(() =>
       node.mount(CORE_NODE.PATH_SUBSET
@@ -204,20 +220,25 @@ export class SubsetStorage extends ServiceEngine implements Proxy {
       this.mountHandle = value
     })
 
+    this.logger.debug("SubsetStorage is started")
     return promise
   }
 
   stop(node: ResourceNode): Promise<void> {
     return Promise.resolve()
       .then(() => {
-        if (this.mountHandle) return this.node.unmount(this.mountHandle)
-      });
+        if (this.mountHandle) return this.node.unmount(this.mountHandle).catch()
+      })
+      .then(() => {
+        if (this.subscriberKey) return this.node.unsubscribe(this.subscriberKey).catch()
+      })
   }
 
   onReceive(req: http.IncomingMessage, res: http.ServerResponse): Promise<http.ServerResponse> {
-    if (!req.url || !req.method) throw new Error()
+    if (!req.url) throw new Error("url is required.")
+    if (!req.method) throw new Error("method is required.")
     let url = URL.parse(req.url)
-    if (url.pathname == null) throw new Error()
+    if (url.pathname == null) throw new Error("pathname is required.")
     this.logger.debug(url.pathname)
     let method = req.method.toUpperCase()
     this.logger.debug(method)
@@ -227,7 +248,7 @@ export class SubsetStorage extends ServiceEngine implements Proxy {
       return ProxyHelper.procPost(req, res, (data) => {
         this.logger.debug("/query")
         let request = EJSON.parse(data)
-        return this.query(request.csn, request.query, request.sort, request.limit, request.offset)
+        return this.query(request.csn, request.query, request.sort, request.limit, request.offset).then(result => ({ status: "OK", result: result }))
       })
     } else {
       this.logger.debug("server command not found!:" + url.pathname)
@@ -237,12 +258,11 @@ export class SubsetStorage extends ServiceEngine implements Proxy {
 
   query(csn: number, restQuery: object, sort?: object, limit?: number, offset?: number): Promise<QuestResult> {
     // TODO csn が0の場合は、最新のcsnを取得、それ以外の場合はcsnを一致させる
-    let type = this.option.type.toLowerCase()
-    if (type == "cache") {
+    if (this.type == "cache") {
       // TODO cacheの場合 とりあえず空レスポンス
       this.logger.debug("query: cache")
       return Promise.resolve({ csn: csn, resultSet: [], restQuery: restQuery })
-    } else if (type == "persistent") {
+    } else if (this.type == "persistent") {
       // TODO persistentの場合
       this.logger.debug("query: persistent")
       // TODO csnが0以外の場合はそのcsnに合わせる csnが変更されないようにロックが必要
@@ -303,16 +323,12 @@ export class SubsetStorage extends ServiceEngine implements Proxy {
             })
           }
         }).catch(e => {
-          this.logger.debug("release readLock Error: " + e.toString())
+          this.logger.debug("SubsetStorage query Error: " + e.toString())
+          this.logger.debug("release readLock")
           release()
-          return Promise.reject({
-            ns: "dadget.chip-in.net",
-            code: 223,
-            message: "SubsetStorage failed to query cause=%1",
-            inserts: [e.toString()]
-          })
+          return Promise.reject(e)
         })
     }
-    throw new Error("SubsetStorage has no type")
+    throw new Error(`SubsetStorage type ${this.type} is not supported.`)
   }
 }
