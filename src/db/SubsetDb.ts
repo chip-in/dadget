@@ -27,6 +27,9 @@ export class SubsetDb {
     return MongoClient.connect(this.dbUrl)
       .then(db => {
         _db = db
+        return _db.createCollection(MONGO_DB.SUBSET_COLLECTION)
+      })
+      .then(_ => {
         return _db.collection(MONGO_DB.SUBSET_COLLECTION).indexes()
       })
       .then(indexes => {

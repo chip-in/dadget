@@ -286,6 +286,9 @@ export class ContextManager extends ServiceEngine {
           this.mountHandle = mountHandle
         })
     })
+    promise = promise.then(() => new Promise<void>(resolve => {
+      setTimeout(resolve, 1000)
+    }))
     return promise
   }
 
