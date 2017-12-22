@@ -4,13 +4,13 @@ import * as EJSON from '../util/Ejson'
 import { TransactionRequest, TransactionObject, TransactionType } from '../db/Transaction'
 import { DadgetError } from "../util/DadgetError"
 import { ERROR } from "../Errors"
-import { MONGO_DB } from "../Config"
+import { MONGO_DB, Mongo } from "../Config"
 
 export class JournalDb {
   protected dbUrl: string
 
   constructor(database: string) {
-    this.dbUrl = MONGO_DB.URL + database
+    this.dbUrl = Mongo.getUrl() + database
     console.log("JournalDb is created")
   }
 

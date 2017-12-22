@@ -4,13 +4,13 @@ import { MongoClient, Db } from 'mongodb'
 import { IndexDef } from '../se/DatabaseRegistry';
 import { DadgetError } from "../util/DadgetError"
 import { ERROR } from "../Errors"
-import { MONGO_DB } from "../Config"
+import { MONGO_DB, Mongo } from "../Config"
 
 export class SubsetDb {
   protected dbUrl: string
 
   constructor(database: string, protected subsetName: string, protected indexDefList: IndexDef[]) {
-    this.dbUrl = MONGO_DB.URL + database
+    this.dbUrl = Mongo.getUrl() + database
     console.log("SubsetDb is created:", subsetName)
   }
 

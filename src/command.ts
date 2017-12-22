@@ -1,5 +1,5 @@
 import { MongoClient, Db } from 'mongodb'
-import { MONGO_DB } from "./Config"
+import { MONGO_DB, Mongo } from "./Config"
 
 let mode = process.argv[2];
 if (!mode) process.exit();
@@ -8,7 +8,7 @@ if (mode == "reset") {
   let target = process.argv[3];
   console.log("reset db:", target)
   let db: Db
-  let dbUrl = MONGO_DB.URL + target
+  let dbUrl = Mongo.getUrl() + target
   MongoClient.connect(dbUrl)
     .then(_ => {
       db = _

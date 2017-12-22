@@ -1,13 +1,13 @@
 import { MongoClient, Db } from 'mongodb'
 import { DadgetError } from "../util/DadgetError"
 import { ERROR } from "../Errors"
-import { MONGO_DB } from "../Config"
+import { MONGO_DB, Mongo } from "../Config"
 
 export class CsnDb {
   protected dbUrl: string
 
   constructor(database: string) {
-    this.dbUrl = MONGO_DB.URL + database
+    this.dbUrl = Mongo.getUrl() + database
     console.log("CsnDB is created")
   }
 

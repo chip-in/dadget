@@ -1,9 +1,16 @@
 export const MONGO_DB = {
-  URL: 'mongodb://localhost:27017/'
-  , SYSTEM_COLLECTION: "__system__"
+  SYSTEM_COLLECTION: "__system__"
   , JOURNAL_COLLECTION: "__journal__"
   , SUBSET_COLLECTION: "subset_data"
   , CSN_ID: "csn"
+}
+
+export class Mongo {
+  static getUrl() {
+    let url = (process.env.MONGODB_URL ? process.env.MONGODB_URL : 'mongodb://localhost:27017/') as string
+    if(url.slice(-1) !== '/') url += '/'
+    return url
+  }
 }
 
 export const CORE_NODE = {
