@@ -8,9 +8,21 @@ export const MONGO_DB = {
 export class Mongo {
   static getUrl() {
     let url = (process.env.MONGODB_URL ? process.env.MONGODB_URL : 'mongodb://localhost:27017/') as string
-    if(url.slice(-1) !== '/') url += '/'
+    if (url.slice(-1) !== '/') url += '/'
     return url
   }
+}
+
+const ACCESS_CONTROL_ALLOW_ORIGIN = process.env.ACCESS_CONTROL_ALLOW_ORIGIN
+
+export function getAccessControlAllowOrigin(origin: string) {
+  if (!origin) return null
+  if (!ACCESS_CONTROL_ALLOW_ORIGIN) return null
+  let allowOrigins = ACCESS_CONTROL_ALLOW_ORIGIN.split(",")
+  for (let allowOrigin of allowOrigins) {
+    if (allowOrigin.toLowerCase().replace(/\/$/, '') == origin.toLowerCase().replace(/\/$/, '')) return origin
+  }
+  return null
 }
 
 export const CORE_NODE = {
