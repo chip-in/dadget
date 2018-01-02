@@ -315,7 +315,7 @@ export class SubsetStorage extends ServiceEngine implements Proxy {
               this.queryWaitingList[csn].push(() => {
                 return this.getSubsetDb().find(restQuery, sort, limit, offset)
                   .then(result => {
-                    resolve({ csn: currentCsn, resultSet: result, restQuery: {} })
+                    resolve({ csn: csn, resultSet: result, restQuery: {} })
                   })
               })
               this.logger.debug("release readLock")

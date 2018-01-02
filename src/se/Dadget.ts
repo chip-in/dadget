@@ -45,6 +45,8 @@ export class QuestResult {
   queryHandlers?: QueryHandler[]
 }
 
+const PREQUERY_CSN = -1
+
 /**
  * API(Dadget)
  *
@@ -55,7 +57,7 @@ export default class Dadget extends ServiceEngine {
   private option: DadgetConfigDef
   private node: ResourceNode
   private database: string
-  private currentCsn: number = 0
+  private currentCsn: number = PREQUERY_CSN
   private notifyCsn: number = 0
   private updateListeners: { [id: string]: { listener: (csn: number) => void, csn: number, minInterval: number, notifyTime: number } } = {}
   private updateListenerKey: string | null
@@ -133,7 +135,7 @@ export default class Dadget extends ServiceEngine {
         this.currentCsn = result.csn
         for (let id in this.updateListeners) {
           let listener = this.updateListeners[id]
-          if (listener.csn == 0) {
+          if (listener.csn == PREQUERY_CSN) {
             listener.csn = result.csn
             listener.notifyTime = Date.now()
           }
@@ -237,7 +239,7 @@ export default class Dadget extends ServiceEngine {
   private notifyAll() {
     for (let id in this.updateListeners) {
       let listener = this.updateListeners[id]
-      if (listener.csn > 0 && this.notifyCsn > listener.csn) {
+      if (listener.csn != PREQUERY_CSN && this.notifyCsn > listener.csn) {
         let now = Date.now()
         if (listener.minInterval == 0 || now - listener.notifyTime >= listener.minInterval) {
           listener.notifyTime = now
