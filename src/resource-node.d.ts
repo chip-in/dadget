@@ -38,6 +38,7 @@ declare module "@chip-in/resource-node" {
         subscribe(topicName: string, subscriber: Subscriber): Promise<string>
         unmount(handle: string): Promise<void>
         unsubscribe(key: string): Promise<void>
+        setJWTAuthorization(jwt: string, updatePath: string): void
     }
 
     export abstract class Proxy {
