@@ -26,10 +26,10 @@
     "test": "mocha"
   },
   "dependencies": {
-    "@chip-in/resource-node": "*",
+    "@chip-in/resource-node": "^0.0.12",
     "async-lock": "^1.0.0",
     "mongo-parse": "^2.0.3",
-    "mongodb": "^2.2.31",
+    "mongodb": "^2.2.34",
     "object-hash": "1.1.8",
     "rwlock": "^5.0.0",
     "uuid": "^3.1.0"
@@ -37,7 +37,7 @@
   "devDependencies": {
     "@types/async-lock": "0.0.20",
     "@types/mongodb": "^2.2.11",
-    "@types/node": "^8.0.15",
+    "@types/node": "^8.5.5",
     "@types/object-hash": "0.5.29",
     "@types/rwlock": "^5.0.2",
     "@types/uuid": "^3.4.2",

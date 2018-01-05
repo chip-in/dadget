@@ -101,6 +101,16 @@ export const ERROR = {
   E1205: { code: 1205, message: "SubsetDb failed to find subset data. cause=%1" },
 
   /**
+   * SubsetDb failed to insertAll subset data.
+   */
+  E1206: { code: 1206, message: "SubsetDb failed to insertAll subset data. cause=%1" },
+  
+  /**
+   * SubsetDb failed to deleteAll subset data.
+   */
+  E1207: { code: 1207, message: "SubsetDb failed to deleteAll subset data. cause=%1" },
+  
+  /**
    * ContextManager Config Error
    */
   E2001: { code: 2001, message: "ContextManager Config Error: %1" },

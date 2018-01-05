@@ -25,7 +25,7 @@ export class DadgetConfigDef {
 /**
  * 結果オブジェクト
  */
-export class QuestResult {
+export class QueryResult {
 
   /**
    * トランザクションをコミットしたコンテキスト通番
@@ -54,6 +54,7 @@ const PREQUERY_CSN = -1
  */
 export default class Dadget extends ServiceEngine {
 
+  public bootOrder = 60
   private option: DadgetConfigDef
   private node: ResourceNode
   private database: string
@@ -99,6 +100,50 @@ export default class Dadget extends ServiceEngine {
   }
 
   /**
+   * クエリハンドラの優先度順にソート
+   * @param seList
+   */
+  static sortQueryHandlers(seList: QueryHandler[]): QueryHandler[] {
+    seList.sort((a, b) => b.getPriority() - a.getPriority())
+    return seList;
+  }
+
+  /**
+   * サブセットのクエリの結果をマージ
+   * @param resultSet1
+   * @param resultSet2
+   */
+  static margeResultSet(resultSet1: object[], resultSet2: object[]): object[] {
+    // TODO ソート？
+    return [...resultSet1, ...resultSet2];
+  }
+
+  public static _query(node: ResourceNode, database: string, query: object, sort?: object, limit?: number, offset?: number, csn?: number): Promise<QueryResult> {
+    let queryHandlers = node.searchServiceEngine("QueryHandler", { database: database }) as QueryHandler[]
+    queryHandlers = Dadget.sortQueryHandlers(queryHandlers)
+    if (!csn) csn = 0
+    let resultSet: object[] = []
+    return Promise.resolve({ csn: csn, resultSet: resultSet, restQuery: query, queryHandlers: queryHandlers })
+      .then(function queryFallback(request): Promise<QueryResult> {
+        if (!Object.keys(request.restQuery).length) return Promise.resolve(request)
+        if (request.queryHandlers.length == 0) {
+          let error = new Error("The queryHandlers has been empty before completing queries.") as any
+          error.queryResult = request
+          throw error
+        }
+        let qh = request.queryHandlers.shift()
+        if (qh == null) throw new Error("The queryHandlers has been empty before completing queries.")
+        return qh.query(request.csn, request.restQuery, sort, limit, offset)
+          .then((result) => queryFallback({
+            csn: result.csn,
+            resultSet: Dadget.margeResultSet(request.resultSet, result.resultSet),
+            restQuery: result.restQuery,
+            queryHandlers: request.queryHandlers
+          }));
+      })
+  }
+
+  /**
    * query メソッドはクエリルータを呼び出して、問い合わせを行い、結果オブジェクトを返す。
    *
    * @param query mongoDBと同じクエリーオブジェクト
@@ -108,27 +153,9 @@ export default class Dadget extends ServiceEngine {
    * @param csn 問い合わせの前提CSN
    * @returns 取得した結果オブジェクトを返すPromiseオブジェクト
    */
-  query(query: object, sort?: object, limit?: number, offset?: number, csn?: number): Promise<QuestResult> {
-    let node = this.node
-    let queryHandlers = this.node.searchServiceEngine("QueryHandler", { database: this.database }) as QueryHandler[]
-    queryHandlers = sortQueryHandlers(queryHandlers)
-    if (!csn) csn = 0
-    let resultSet: object[] = []
-    return Promise.resolve({ csn: csn, resultSet: resultSet, restQuery: query, queryHandlers: queryHandlers })
-      .then(function queryFallback(request): Promise<QuestResult> {
-        if (!Object.keys(request.restQuery).length) return Promise.resolve(request)
-        let qh = request.queryHandlers.shift()
-        if (qh == null) {
-          throw new Error("The queryHandlers has been empty before completing queries.")
-        }
-        return qh.query(request.csn, request.restQuery, sort, limit, offset)
-          .then((result) => queryFallback({
-            csn: result.csn,
-            resultSet: margeResultSet(request.resultSet, result.resultSet),
-            restQuery: result.restQuery,
-            queryHandlers: request.queryHandlers
-          }));
-      }).then(result => {
+  query(query: object, sort?: object, limit?: number, offset?: number, csn?: number): Promise<QueryResult> {
+    return Dadget._query(this.node, this.database, query, sort, limit, offset, csn)
+      .then(result => {
         // TODO クエリ完了後の処理
         // 通知処理
         // csn が0の場合は代入
@@ -151,30 +178,8 @@ export default class Dadget extends ServiceEngine {
         let cause = reason instanceof DadgetError ? reason : new DadgetError(ERROR.E2102, [reason.toString()])
         return Promise.reject(cause)
       })
-
-    /**
-     * クエリハンドラの優先度順にソート
-     * @param seList
-     */
-    function sortQueryHandlers(seList: QueryHandler[]): QueryHandler[] {
-      //      this.logger.debug("before sort:")
-      //      for (let se of seList) this.logger.debug(se.getPriority().toString())
-      seList.sort((a, b) => b.getPriority() - a.getPriority())
-      //      this.logger.debug("after sort:")
-      //      for (let se of seList) this.logger.debug(se.getPriority().toString())
-      return seList;
-    }
-
-    /**
-     * サブセットのクエリの結果をマージ
-     * @param resultSet1
-     * @param resultSet2
-     */
-    function margeResultSet(resultSet1: object[], resultSet2: object[]): object[] {
-      // TODO ソート？
-      return [...resultSet1, ...resultSet2];
-    }
   }
+
   /**
    * count メソッドはクエリルータを呼び出して、問い合わせを行い、件数を返す。
    *

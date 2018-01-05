@@ -30,6 +30,7 @@ export class UpdateManagerConfigDef {
  */
 export class UpdateManager extends ServiceEngine {
 
+  public bootOrder = 40
   private option: UpdateManagerConfigDef
   private node: ResourceNode
   private database: string

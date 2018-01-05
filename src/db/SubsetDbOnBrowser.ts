@@ -15,11 +15,19 @@ export class SubsetDb {
     return Promise.resolve()
   }
 
+  insertAll(obj: object[]): Promise<void> {
+    return Promise.resolve()
+  }
+
   update(obj: { _id: number }): Promise<void> {
     return Promise.resolve()
   }
 
   delete(obj: { _id: number }): Promise<void> {
+    return Promise.resolve()
+  }
+
+  deleteAll(): Promise<void> {
     return Promise.resolve()
   }
 

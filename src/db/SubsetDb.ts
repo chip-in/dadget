@@ -77,6 +77,21 @@ export class SubsetDb {
       .catch(err => Promise.reject(new DadgetError(ERROR.E1202, [err.toString()])))
   }
 
+  insertAll(obj: object[]): Promise<void> {
+    if (obj.length == 0) return Promise.resolve()
+    let _db: Db
+    return MongoClient.connect(this.dbUrl)
+      .then(db => {
+        _db = db
+        console.log("insertAll:");
+        return _db.collection(MONGO_DB.SUBSET_COLLECTION).insertMany(obj)
+      })
+      .then(result => {
+        _db.close()
+      })
+      .catch(err => Promise.reject(new DadgetError(ERROR.E1206, [err.toString()])))
+  }
+
   update(obj: { [key: string]: any }): Promise<void> {
     let _db: Db
     return MongoClient.connect(this.dbUrl)
@@ -103,6 +118,20 @@ export class SubsetDb {
         _db.close()
       })
       .catch(err => Promise.reject(new DadgetError(ERROR.E1204, [err.toString()])))
+  }
+
+  deleteAll(): Promise<void> {
+    let _db: Db
+    return MongoClient.connect(this.dbUrl)
+      .then(db => {
+        _db = db
+        console.log("deleteAll:");
+        return _db.collection(MONGO_DB.SUBSET_COLLECTION).deleteMany({})
+      })
+      .then(result => {
+        _db.close()
+      })
+      .catch(err => Promise.reject(new DadgetError(ERROR.E1207, [err.toString()])))
   }
 
   find(query: object, sort?: object, limit?: number, offset?: number): Promise<any> {

@@ -196,6 +196,7 @@ class ContextManagementServer extends Proxy {
  */
 export class ContextManager extends ServiceEngine {
 
+  public bootOrder = 20
   private option: ContextManagerConfigDef
   private node: ResourceNode
   private database: string

@@ -71,6 +71,7 @@ export class DatabaseRegistryConfigDef {
  */
 export class DatabaseRegistry extends ServiceEngine {
 
+  public bootOrder = 10
   private option: DatabaseRegistryConfigDef
   private node: ResourceNode
 

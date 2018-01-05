@@ -2,7 +2,7 @@ import * as EJSON from '../util/Ejson'
 
 import { ResourceNode, ServiceEngine } from '@chip-in/resource-node'
 import { DatabaseRegistry, SubsetDef } from "./DatabaseRegistry"
-import { QuestResult } from "./Dadget"
+import { QueryResult } from "./Dadget"
 import { DadgetError } from "../util/DadgetError"
 import { ERROR } from "../Errors"
 import { CORE_NODE } from "../Config"
@@ -28,6 +28,7 @@ export class QueryHandlerConfigDef {
  */
 export class QueryHandler extends ServiceEngine {
 
+  public bootOrder = 30
   private option: QueryHandlerConfigDef
   private node: ResourceNode
   private database: string
@@ -77,7 +78,7 @@ export class QueryHandler extends ServiceEngine {
     return Promise.resolve()
   }
 
-  query(csn: number, restQuery: object, sort?: object, limit?: number, offset?: number): Promise<QuestResult> {
+  query(csn: number, restQuery: object, sort?: object, limit?: number, offset?: number): Promise<QueryResult> {
     // TODO csn が0の場合は、最新のcsnを取得、それ以外の場合はcsnを一致させる
     let request = {
       csn: csn
