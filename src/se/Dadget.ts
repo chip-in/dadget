@@ -46,6 +46,7 @@ export class QueryResult {
 }
 
 const PREQUERY_CSN = -1
+export type CsnMode = "strict" | "latest"
 
 /**
  * API(Dadget)
@@ -118,12 +119,12 @@ export default class Dadget extends ServiceEngine {
     return [...resultSet1, ...resultSet2];
   }
 
-  public static _query(node: ResourceNode, database: string, query: object, sort?: object, limit?: number, offset?: number, csn?: number): Promise<QueryResult> {
+  public static _query(node: ResourceNode, database: string, query: object, sort?: object, limit?: number, offset?: number, csn?: number, csnMode?: CsnMode): Promise<QueryResult> {
     let queryHandlers = node.searchServiceEngine("QueryHandler", { database: database }) as QueryHandler[]
     queryHandlers = Dadget.sortQueryHandlers(queryHandlers)
     if (!csn) csn = 0
     let resultSet: object[] = []
-    return Promise.resolve({ csn: csn, resultSet: resultSet, restQuery: query, queryHandlers: queryHandlers })
+    return Promise.resolve({ csn: csn, resultSet: resultSet, restQuery: query, queryHandlers: queryHandlers, csnMode: csnMode })
       .then(function queryFallback(request): Promise<QueryResult> {
         if (!Object.keys(request.restQuery).length) return Promise.resolve(request)
         if (request.queryHandlers.length == 0) {
@@ -133,12 +134,13 @@ export default class Dadget extends ServiceEngine {
         }
         let qh = request.queryHandlers.shift()
         if (qh == null) throw new Error("The queryHandlers has been empty before completing queries.")
-        return qh.query(request.csn, request.restQuery, sort, limit, offset)
+        return qh.query(request.csn, request.restQuery, sort, limit, offset, csnMode)
           .then((result) => queryFallback({
             csn: result.csn,
             resultSet: Dadget.margeResultSet(request.resultSet, result.resultSet),
             restQuery: result.restQuery,
-            queryHandlers: request.queryHandlers
+            queryHandlers: request.queryHandlers,
+            csnMode: undefined
           }));
       })
   }
@@ -151,10 +153,11 @@ export default class Dadget extends ServiceEngine {
    * @param limit 最大取得件数
    * @param offset 開始位置
    * @param csn 問い合わせの前提CSN
+   * @param csnMode 問い合わせの前提CSNの意味付け
    * @returns 取得した結果オブジェクトを返すPromiseオブジェクト
    */
-  query(query: object, sort?: object, limit?: number, offset?: number, csn?: number): Promise<QueryResult> {
-    return Dadget._query(this.node, this.database, query, sort, limit, offset, csn)
+  query(query: object, sort?: object, limit?: number, offset?: number, csn?: number, csnMode?: CsnMode): Promise<QueryResult> {
+    return Dadget._query(this.node, this.database, query, sort, limit, offset, csn, csnMode)
       .then(result => {
         // TODO クエリ完了後の処理
         // 通知処理

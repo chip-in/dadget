@@ -9,7 +9,7 @@ import { CsnDb } from '../db/CsnDb'
 import { JournalDb } from '../db/JournalDb'
 import { TransactionObject, TransactionType, TransactionRequest } from '../db/Transaction'
 import { DatabaseRegistry, SubsetDef } from "./DatabaseRegistry"
-import { QueryResult, default as Dadget } from "./Dadget"
+import { QueryResult, CsnMode, default as Dadget } from "./Dadget"
 import { ProxyHelper } from "../util/ProxyHelper"
 import { DadgetError } from "../util/DadgetError"
 import { ERROR } from "../Errors"
@@ -44,7 +44,7 @@ class UpdateProcessor extends Subscriber {
                   this.storage.logger.debug("release writeLock")
                   release2()
                 })
-                .then(() => Dadget._query(this.storage.getNode(), this.database, query, undefined, undefined, undefined, transaction.csn)
+                .then(() => Dadget._query(this.storage.getNode(), this.database, query, undefined, undefined, undefined, transaction.csn, "latest")
                   .catch(e => {
                     if (e.queryResult) return e.queryResult
                     throw e
@@ -302,7 +302,7 @@ export class SubsetStorage extends ServiceEngine implements Proxy {
       return ProxyHelper.procPost(req, res, (data) => {
         this.logger.debug("/query")
         let request = EJSON.parse(data)
-        return this.query(request.csn, request.query, request.sort, request.limit, request.offset).then(result => ({ status: "OK", result: result }))
+        return this.query(request.csn, request.query, request.sort, request.limit, request.offset, request.csnMode).then(result => ({ status: "OK", result: result }))
       })
     } else {
       this.logger.debug("server command not found!:" + url.pathname)
@@ -310,7 +310,7 @@ export class SubsetStorage extends ServiceEngine implements Proxy {
     }
   }
 
-  query(csn: number, restQuery: object, sort?: object, limit?: number, offset?: number): Promise<QueryResult> {
+  query(csn: number, restQuery: object, sort?: object, limit?: number, offset?: number, csnMode?: CsnMode): Promise<QueryResult> {
     // TODO csn が0の場合は、最新のcsnを取得、それ以外の場合はcsnを一致させる
     if (this.type == "cache") {
       // TODO cacheの場合 とりあえず空レスポンス
@@ -341,7 +341,7 @@ export class SubsetStorage extends ServiceEngine implements Proxy {
             release()
             return { csn: csn, resultSet: [], restQuery: restQuery }
           }
-          else if (csn == 0 || csn == currentCsn) {
+          else if (csn == 0 || csn == currentCsn || (csn < currentCsn && csnMode === "latest")) {
             return this.getSubsetDb().find(restQuery, sort, limit, offset)
               .then(result => {
                 this.logger.debug("release readLock")

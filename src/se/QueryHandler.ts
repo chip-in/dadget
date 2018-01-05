@@ -2,7 +2,7 @@ import * as EJSON from '../util/Ejson'
 
 import { ResourceNode, ServiceEngine } from '@chip-in/resource-node'
 import { DatabaseRegistry, SubsetDef } from "./DatabaseRegistry"
-import { QueryResult } from "./Dadget"
+import { QueryResult, CsnMode } from "./Dadget"
 import { DadgetError } from "../util/DadgetError"
 import { ERROR } from "../Errors"
 import { CORE_NODE } from "../Config"
@@ -78,7 +78,7 @@ export class QueryHandler extends ServiceEngine {
     return Promise.resolve()
   }
 
-  query(csn: number, restQuery: object, sort?: object, limit?: number, offset?: number): Promise<QueryResult> {
+  query(csn: number, restQuery: object, sort?: object, limit?: number, offset?: number, csnMode?: CsnMode): Promise<QueryResult> {
     // TODO csn が0の場合は、最新のcsnを取得、それ以外の場合はcsnを一致させる
     let request = {
       csn: csn
@@ -86,6 +86,7 @@ export class QueryHandler extends ServiceEngine {
       , sort: sort
       , limit: limit
       , offset: offset
+      , csnMode: csnMode
     }
     return this.node.fetch(CORE_NODE.PATH_SUBSET
       .replace(/:database\b/g, this.database)
