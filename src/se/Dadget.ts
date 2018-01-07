@@ -22,6 +22,8 @@ export class DadgetConfigDef {
   database: string
 }
 
+export type CsnMode = "strict" | "latest"
+
 /**
  * 結果オブジェクト
  */
@@ -43,10 +45,11 @@ export class QueryResult {
   restQuery: object
 
   queryHandlers?: QueryHandler[]
+
+  csnMode?: CsnMode
 }
 
 const PREQUERY_CSN = -1
-export type CsnMode = "strict" | "latest"
 
 /**
  * API(Dadget)
@@ -63,6 +66,7 @@ export default class Dadget extends ServiceEngine {
   private notifyCsn: number = 0
   private updateListeners: { [id: string]: { listener: (csn: number) => void, csn: number, minInterval: number, notifyTime: number } } = {}
   private updateListenerKey: string | null
+  private latestCsn: number
 
   constructor(option: DadgetConfigDef) {
     super(option)
@@ -140,7 +144,7 @@ export default class Dadget extends ServiceEngine {
             resultSet: Dadget.margeResultSet(request.resultSet, result.resultSet),
             restQuery: result.restQuery,
             queryHandlers: request.queryHandlers,
-            csnMode: undefined
+            csnMode: result.csnMode
           }));
       })
   }
@@ -157,6 +161,10 @@ export default class Dadget extends ServiceEngine {
    * @returns 取得した結果オブジェクトを返すPromiseオブジェクト
    */
   query(query: object, sort?: object, limit?: number, offset?: number, csn?: number, csnMode?: CsnMode): Promise<QueryResult> {
+    if (this.latestCsn && !csn) {
+      csn = this.latestCsn
+      csnMode = "latest"
+    }
     return Dadget._query(this.node, this.database, query, sort, limit, offset, csn, csnMode)
       .then(result => {
         // TODO クエリ完了後の処理
@@ -188,11 +196,12 @@ export default class Dadget extends ServiceEngine {
    *
    * @param query mongoDBと同じクエリーオブジェクト
    * @param csn 問い合わせの前提CSN
+   * @param csnMode 問い合わせの前提CSNの意味付け
    * @returns 取得した件数を返すPromiseオブジェクト
    */
-  count(query: object, csn?: number): Promise<number> {
+  count(query: object, csn?: number, csnMode?: CsnMode): Promise<number> {
     // TODO 実装の効率化
-    return this.query(query, undefined, undefined, undefined, csn).then(result => result.resultSet.length)
+    return this.query(query, undefined, undefined, undefined, csn, csnMode).then(result => result.resultSet.length)
   }
 
   /**
@@ -230,6 +239,7 @@ export default class Dadget extends ServiceEngine {
         let result = EJSON.deserialize(_)
         this.logger.debug("exec:", JSON.stringify(result))
         if (result.status == "OK") {
+          this.latestCsn = result.csn
           return result.updateObject
         } else if (result.reason) {
           let reason = result.reason as DadgetError

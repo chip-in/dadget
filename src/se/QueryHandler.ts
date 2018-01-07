@@ -79,7 +79,6 @@ export class QueryHandler extends ServiceEngine {
   }
 
   query(csn: number, restQuery: object, sort?: object, limit?: number, offset?: number, csnMode?: CsnMode): Promise<QueryResult> {
-    // TODO csn が0の場合は、最新のcsnを取得、それ以外の場合はcsnを一致させる
     let request = {
       csn: csn
       , query: restQuery

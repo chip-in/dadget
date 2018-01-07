@@ -173,6 +173,7 @@ class ContextManagementServer extends Proxy {
         updateObject.csn = newCsn
         resolve({
           status: "OK",
+          csn: newCsn,
           updateObject: updateObject
         })
       }, reason => {

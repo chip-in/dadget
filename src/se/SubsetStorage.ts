@@ -55,7 +55,7 @@ class UpdateProcessor extends Subscriber {
                     Promise.resolve()
                       .then(() => this.storage.getSubsetDb().deleteAll())
                       .then(() => this.storage.getSubsetDb().insertAll(result.resultSet))
-                      .then(() => this.storage.getCsnDb().update(transaction.csn))
+                      .then(() => this.storage.getCsnDb().update(result.csn ? result.csn : transaction.csn))
                       .then(() => {
                         this.storage.logger.debug("release writeLock")
                         release3()
@@ -315,7 +315,7 @@ export class SubsetStorage extends ServiceEngine implements Proxy {
     if (this.type == "cache") {
       // TODO cacheの場合 とりあえず空レスポンス
       this.logger.debug("query: cache")
-      return Promise.resolve({ csn: csn, resultSet: [], restQuery: restQuery })
+      return Promise.resolve({ csn: csn, resultSet: [], restQuery: restQuery , csnMode: csnMode})
     } else if (this.type == "persistent") {
       // TODO persistentの場合
       this.logger.debug("query: persistent")
@@ -328,7 +328,6 @@ export class SubsetStorage extends ServiceEngine implements Proxy {
           resolve()
         })
       })
-      // TODO 戻す場合と待つ場合
       let currentCsn: number
       return promise
         .then(() => this.getCsnDb().getCurrentCsn())
