@@ -1,8 +1,9 @@
 import { TransactionRequest, TransactionObject, TransactionType } from '../db/Transaction'
 import { DadgetError } from "../util/DadgetError"
 import { ERROR } from "../Errors"
+import { JournalDb } from "./JournalDb"
 
-export class JournalDb {
+export class JournalPersistentDb implements JournalDb {
 
   constructor(database: string) {
     console.log("JournalDbOnBrowser is created")

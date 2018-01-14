@@ -12,9 +12,9 @@
   "main": "./lib/se/Dadget.js",
   "types": "./src/se/Dadget.ts",
   "browser": {
-    "./lib/db/CsnDb.js": "./lib/db/CsnDbOnBrowser.js",
-    "./lib/db/JournalDb.js": "./lib/db/JournalDbOnBrowser.js",
-    "./lib/db/SubsetDb.js": "./lib/db/SubsetDbOnBrowser.js",
+    "./lib/db/CsnPersistentDb.js": "./lib/db/CsnPersistentDbOnBrowser.js",
+    "./lib/db/JournalPersistentDb.js": "./lib/db/JournalPersistentDbOnBrowser.js",
+    "./lib/db/SubsetPersistentDb.js": "./lib/db/SubsetPersistentDbOnBrowser.js",
     "mongodb": false
   },
   "scripts": {

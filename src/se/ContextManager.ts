@@ -5,7 +5,9 @@ import * as hash from "object-hash"
 import { ResourceNode, ServiceEngine, Subscriber, Proxy } from '@chip-in/resource-node'
 import { TransactionRequest, TransactionObject, TransactionType } from '../db/Transaction'
 import { CsnDb } from '../db/CsnDb'
+import { CsnPersistentDb } from '../db/CsnPersistentDb'
 import { JournalDb } from '../db/JournalDb'
+import { JournalPersistentDb } from '../db/JournalPersistentDb'
 import { ProxyHelper } from "../util/ProxyHelper"
 import { DadgetError } from "../util/DadgetError"
 import * as EJSON from '../util/Ejson'
@@ -252,8 +254,8 @@ export class ContextManager extends ServiceEngine {
     this.database = this.option.database
 
     // ストレージを準備
-    this.journalDb = new JournalDb(this.database)
-    this.csnDb = new CsnDb(this.database)
+    this.journalDb = new JournalPersistentDb(this.database)
+    this.csnDb = new CsnPersistentDb(this.database)
     let promise = Promise.all([this.journalDb.start(), this.csnDb.start()]).then(_ => { })
 
     // スレーブ動作で同期するのためのサブスクライバを登録

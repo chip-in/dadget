@@ -5,8 +5,14 @@ import * as EJSON from '../util/Ejson'
 
 import { ResourceNode, ServiceEngine, Subscriber, Proxy } from '@chip-in/resource-node'
 import { SubsetDb } from '../db/SubsetDb'
+import { SubsetPersistentDb } from '../db/SubsetPersistentDb'
+import { SubsetCacheDbOnMemory } from '../db/SubsetCacheDbOnMemory'
 import { CsnDb } from '../db/CsnDb'
+import { CsnPersistentDb } from '../db/CsnPersistentDb'
+import { CsnCacheDbOnMemory } from '../db/CsnCacheDbOnMemory'
 import { JournalDb } from '../db/JournalDb'
+import { JournalPersistentDb } from '../db/JournalPersistentDb'
+import { JournalCacheDbOnMemory } from '../db/JournalCacheDbOnMemory'
 import { TransactionObject, TransactionType, TransactionRequest } from '../db/Transaction'
 import { DatabaseRegistry, SubsetDef } from "./DatabaseRegistry"
 import { QueryResult, CsnMode, default as Dadget } from "./Dadget"
@@ -250,9 +256,15 @@ export class SubsetStorage extends ServiceEngine implements Proxy {
 
     // ストレージを準備
     let dbName = this.database + '--' + this.subsetName
-    this.subsetDb = new SubsetDb(dbName, this.subsetName, metaData.indexes)
-    this.journalDb = new JournalDb(dbName)
-    this.csnDb = new CsnDb(dbName)
+    if (this.type == "cache") {
+      this.subsetDb = new SubsetCacheDbOnMemory(dbName, this.subsetName, metaData.indexes)
+      this.journalDb = new JournalCacheDbOnMemory(dbName)
+      this.csnDb = new CsnCacheDbOnMemory(dbName)
+    } else if (this.type == "persistent") {
+      this.subsetDb = new SubsetPersistentDb(dbName, this.subsetName, metaData.indexes)
+      this.journalDb = new JournalPersistentDb(dbName)
+      this.csnDb = new CsnPersistentDb(dbName)
+    }
 
     // Rest サービスを登録する。
     let mountingMode = this.option.exported ? "loadBalancing" : "localOnly"

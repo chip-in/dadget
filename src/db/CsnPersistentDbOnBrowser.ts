@@ -1,7 +1,8 @@
 import { DadgetError } from "../util/DadgetError"
 import { ERROR } from "../Errors"
+import { CsnDb } from "./CsnDb"
 
-export class CsnDb {
+export class CsnPersistentDb implements CsnDb {
 
   constructor(database: string) {
     console.log("CsnDBOnBrowser is created")

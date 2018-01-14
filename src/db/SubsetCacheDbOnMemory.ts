@@ -1,10 +1,12 @@
+import { IndexDef } from '../se/DatabaseRegistry';
 import { DadgetError } from "../util/DadgetError"
 import { ERROR } from "../Errors"
+import { SubsetDb } from "./SubsetDb"
 
-export class SubsetDb {
+export class SubsetCacheDbOnMemory implements SubsetDb {
 
-  constructor() {
-    console.log("SubsetDbOnBrowser is created")
+  constructor(database: string, protected subsetName: string, protected indexDefList: IndexDef[]) {
+    console.log("SubsetCacheDbOnMemory is created")
   }
 
   start(): Promise<void> {
@@ -19,11 +21,11 @@ export class SubsetDb {
     return Promise.resolve()
   }
 
-  update(obj: { _id: number }): Promise<void> {
+  update(obj: { [key: string]: any }): Promise<void> {
     return Promise.resolve()
   }
 
-  delete(obj: { _id: number }): Promise<void> {
+  delete(obj: { [key: string]: any }): Promise<void> {
     return Promise.resolve()
   }
 
