@@ -18,10 +18,12 @@ const RN_NAME = process.env.RN_NAME ? process.env.RN_NAME : env.RN_NAME ? env.RN
 let node = new ResourceNode(CORE_SERVER, RN_NAME);
 Dadget.registerServiceClasses(node);
 node.start().then(() => {
-  process.on('SIGINT', function () {
+  function sigHandle() {
     node.stop().then(()=>{
       process.exit()
     })
-  })
+  }
+  process.on('SIGINT', sigHandle);
+  process.on('SIGTERM', sigHandle);
 })
 

@@ -2,10 +2,10 @@ declare module "@chip-in/resource-node" {
     import * as http from 'http';
 
     class Logger {
-        debug(msg: string, ...substN: string[]): void
-        info(msg: string, ...substN: string[]): void
-        warn(msg: string, ...substN: string[]): void
-        error(msg: string, ...substN: string[]): void
+        debug(msg: string, ...substN: (string | number)[]): void
+        info(msg: string, ...substN: (string | number)[]): void
+        warn(msg: string, ...substN: (string | number)[]): void
+        error(msg: string, ...substN: (string | number)[]): void
     }
 
     interface ServiceEngineConstructor {

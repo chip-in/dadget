@@ -121,14 +121,19 @@ export const ERROR = {
   E2002: { code: 2002, message: "Transaction Data Format Error: %1" },
 
   /**
-   * ContextManagementServer failed to exec a transaction.
+   * ContextManagementServer failed to execute a transaction.
    */
-  E2003: { code: 2003, message: "ContextManagementServer failed to exec a transaction. cause=%1" },
+  E2003: { code: 2003, message: "ContextManagementServer failed to execute a transaction. cause=%1" },
 
   /**
-   * ContextManagementServer failed to exec a transaction. Csn update is required.
+   * ContextManagementServer failed to execute a transaction. Csn update is required.
    */
-  E2004: { code: 2004, message: "ContextManagementServer failed to exec a transaction. Csn update is required. cause=%1" },
+  E2004: { code: 2004, message: "ContextManagementServer failed to execute a transaction. Csn update is required. cause=%1" },
+
+  /**
+   * A bad "before" object caused failing to execute a transaction. 
+   */
+  E2005: { code: 2005, message: 'A bad "before" object caused failing to execute a transaction. for request = %1' },
 
   /**
    * Dadget Config Error

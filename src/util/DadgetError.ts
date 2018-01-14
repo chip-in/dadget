@@ -2,7 +2,7 @@ export class DadgetError {
   public code: number
   public message: string
 
-  constructor(err: { code: number, message: string }, public inserts: (object | string)[] = [], public ns: string = "dadget.chip-in.net") {
+  constructor(err: { code: number, message: string }, public inserts: (object | string | number)[] = [], public ns: string = "dadget.chip-in.net") {
     this.code = err.code
     this.message = err.message
   }

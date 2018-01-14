@@ -1,14 +1,14 @@
 import * as http from 'http';
 import * as URL from 'url'
-import * as  AsyncLock from "async-lock"
-import * as EJSON from '../util/Ejson'
-
+import * as AsyncLock from "async-lock"
+import * as hash from "object-hash"
 import { ResourceNode, ServiceEngine, Subscriber, Proxy } from '@chip-in/resource-node'
 import { TransactionRequest, TransactionObject, TransactionType } from '../db/Transaction'
 import { CsnDb } from '../db/CsnDb'
 import { JournalDb } from '../db/JournalDb'
 import { ProxyHelper } from "../util/ProxyHelper"
 import { DadgetError } from "../util/DadgetError"
+import * as EJSON from '../util/Ejson'
 import { ERROR } from "../Errors"
 import { CORE_NODE } from "../Config"
 
@@ -74,6 +74,7 @@ class TransactionJournalSubscriber extends Subscriber {
 }
 
 class ContextManagementServer extends Proxy {
+  private lastBeforeObj: { _id?: string, csn?: number }
 
   constructor(
     protected context: ContextManager
@@ -145,6 +146,14 @@ class ContextManagementServer extends Proxy {
     return new Promise((resolve, reject) => {
       this.context.getLock().acquire("transaction", () => {
         let _request = { ...request, datetime: new Date() }
+        if (this.lastBeforeObj && request.before
+          && this.lastBeforeObj._id === request.before._id) {
+          if (hash.MD5(this.lastBeforeObj) !== hash.MD5(request.before)) {
+            throw new DadgetError(ERROR.E2005, [JSON.stringify(request)])
+          } else {
+            this.context.logger.debug("lastBeforeObj check passed")
+          }
+        }
         // ジャーナルと照合して矛盾がないかチェック
         return this.journalDB.checkConsistent(csn, _request)
           .then(() => this.context.checkUniqueConstraint(csn, _request))
@@ -171,6 +180,7 @@ class ContextManagementServer extends Proxy {
       }).then(() => {
         if (!updateObject._id) updateObject._id = transaction.target
         updateObject.csn = newCsn
+        this.lastBeforeObj = updateObject
         resolve({
           status: "OK",
           csn: newCsn,
@@ -289,7 +299,7 @@ export class ContextManager extends ServiceEngine {
         })
     })
     promise = promise.then(() => new Promise<void>(resolve => {
-      setTimeout(resolve, 1000)
+      setTimeout(resolve, 3000)
     }))
     return promise
   }
