@@ -60,9 +60,9 @@ class TransactionJournalSubscriber extends Subscriber {
               promise = promise.then(() => this.journalDB.updateAndDeleteAfter(transaction))
             }
             // マスター権を喪失している場合は再接続
-            if (this.context.getMountHandle()) {
-              promise = promise.then(() => this.context.connect())
-            }
+//            if (this.context.getMountHandle()) {
+//              promise = promise.then(() => this.context.connect())
+//            }
             return promise
           }
         })

@@ -86,7 +86,7 @@ class UpdateProcessor extends Subscriber {
               while (this.updateQueue[++csn]) {
                 let _csn = csn
                 this.storage.logger.debug("subset csn: " + _csn)
-                transaction = this.updateQueue[_csn]
+                let transaction = this.updateQueue[_csn]
                 delete this.updateQueue[_csn]
 
                 if (transaction.type == TransactionType.INSERT && transaction.new) {
