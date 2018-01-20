@@ -26,7 +26,7 @@
     "test": "mocha"
   },
   "dependencies": {
-    "@chip-in/resource-node": "0.0.14",
+    "@chip-in/resource-node": "*",
     "async-lock": "^1.0.0",
     "deep-diff": "^0.3.8",
     "mongo-parse": "^2.0.3",
