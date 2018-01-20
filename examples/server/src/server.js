@@ -1,5 +1,5 @@
 import { ResourceNode } from '@chip-in/resource-node';
-import Dadget from '@chip-in/dadget';
+import Dadget from '../../..';
 import fs from 'fs'
 
 let env = {}
