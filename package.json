@@ -18,8 +18,9 @@
     "mongodb": false
   },
   "scripts": {
-    "prepare": "npm run clean && npm run build",
+    "prepare": "npm run clean && npm run release_build",
     "clean": "rm -rf lib dest",
+    "release_build": "tsc && babel --plugins transform-remove-console dest --out-dir lib",
     "build": "tsc && babel dest --out-dir lib",
     "start": "node lib/command.js",
     "makedoc": "typedoc --excludeExternals --module commonjs --out ./docs/ ./src/",
@@ -44,6 +45,7 @@
     "@types/rwlock": "^5.0.2",
     "@types/uuid": "^3.4.2",
     "babel-cli": "^6.24.1",
+    "babel-plugin-transform-remove-console": "^6.8.5",
     "babel-preset-env": "^1.6.1",
     "chai": "^4.1.2",
     "mocha": "^4.1.0",
