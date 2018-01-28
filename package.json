@@ -1,6 +1,6 @@
 {
   "name": "@chip-in/dadget",
-  "version": "0.0.12",
+  "version": "0.0.17",
   "description": "chip-in Dadget",
   "keywords": [
     "chip-in"
@@ -18,16 +18,18 @@
     "mongodb": false
   },
   "scripts": {
-    "prepare": "npm run clean && npm run build",
+    "prepare": "npm run clean && npm run release_build",
     "clean": "rm -rf lib dest",
+    "release_build": "tsc && babel --plugins transform-remove-console dest --out-dir lib",
     "build": "tsc && babel dest --out-dir lib",
     "start": "node lib/command.js",
     "makedoc": "typedoc --excludeExternals --module commonjs --out ./docs/ ./src/",
     "test": "mocha"
   },
   "dependencies": {
-    "@chip-in/resource-node": "0.0.12",
+    "@chip-in/resource-node": "*",
     "async-lock": "^1.0.0",
+    "deep-diff": "^0.3.8",
     "mongo-parse": "^2.0.3",
     "mongodb": "^2.2.34",
     "object-hash": "1.1.8",
@@ -36,12 +38,14 @@
   },
   "devDependencies": {
     "@types/async-lock": "0.0.20",
+    "@types/deep-diff": "0.0.31",
     "@types/mongodb": "^2.2.19",
     "@types/node": "^8.5.8",
     "@types/object-hash": "0.5.29",
     "@types/rwlock": "^5.0.2",
     "@types/uuid": "^3.4.2",
     "babel-cli": "^6.24.1",
+    "babel-plugin-transform-remove-console": "^6.8.5",
     "babel-preset-env": "^1.6.1",
     "chai": "^4.1.2",
     "mocha": "^4.1.0",

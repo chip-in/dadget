@@ -1,7 +1,7 @@
 import * as http from 'http';
 import * as URL from 'url'
 import * as AsyncLock from "async-lock"
-import * as hash from "object-hash"
+import { diff } from "deep-diff"
 import { ResourceNode, ServiceEngine, Subscriber, Proxy } from '@chip-in/resource-node'
 import { TransactionRequest, TransactionObject, TransactionType } from '../db/Transaction'
 import { CsnDb } from '../db/CsnDb'
@@ -62,9 +62,9 @@ class TransactionJournalSubscriber extends Subscriber {
               promise = promise.then(() => this.journalDB.updateAndDeleteAfter(transaction))
             }
             // マスター権を喪失している場合は再接続
-            if (this.context.getMountHandle()) {
-              promise = promise.then(() => this.context.connect())
-            }
+//            if (this.context.getMountHandle()) {
+//              promise = promise.then(() => this.context.connect())
+//            }
             return promise
           }
         })
@@ -149,9 +149,11 @@ class ContextManagementServer extends Proxy {
       this.context.getLock().acquire("transaction", () => {
         let _request = { ...request, datetime: new Date() }
         if (this.lastBeforeObj && request.before
-          && this.lastBeforeObj._id === request.before._id) {
-          if (hash.MD5(this.lastBeforeObj) !== hash.MD5(request.before)) {
-            throw new DadgetError(ERROR.E2005, [JSON.stringify(request)])
+          && (!request.before._id || this.lastBeforeObj._id === request.before._id)) {
+          const objDiff = diff(this.lastBeforeObj, request.before)
+          if (objDiff) {
+            this.context.logger.error("a mismatch of request.before", JSON.stringify(objDiff))
+            // throw new DadgetError(ERROR.E2005, [JSON.stringify(request)])
           } else {
             this.context.logger.debug("lastBeforeObj check passed")
           }

@@ -96,7 +96,10 @@ export class QueryHandler extends ServiceEngine {
           "Content-Type": "application/json"
         }
       })
-      .then(result => result.json())
+      .then(result => {
+        if(typeof result.ok !== "undefined" && !result.ok) throw Error("fetch error:" + result.statusText)
+        return result.json()
+      })
       .then(_ => {
         let data = EJSON.deserialize(_)
         if(data.status == "NG") throw data.reason

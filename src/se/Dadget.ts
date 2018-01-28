@@ -234,7 +234,10 @@ export default class Dadget extends ServiceEngine {
         "Content-Type": "application/json"
       }
     })
-      .then(fetchResult => fetchResult.json())
+      .then(fetchResult => {
+        if(typeof fetchResult.ok !== "undefined" && !fetchResult.ok) throw Error(fetchResult.statusText)
+        return fetchResult.json()
+      })
       .then(_ => {
         let result = EJSON.deserialize(_)
         this.logger.debug("exec:", JSON.stringify(result))

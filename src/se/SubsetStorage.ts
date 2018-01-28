@@ -36,7 +36,7 @@ class UpdateProcessor extends Subscriber {
 
   onReceive(msg: string) {
     this.storage.logger.debug("onReceive: " + msg)
-    let transaction = EJSON.parse(msg) as TransactionObject;
+    const transaction = EJSON.parse(msg) as TransactionObject;
     this.lock.writeLock(release1 => {
       this.storage.getLock().writeLock(release2 => {
         this.storage.logger.debug("get writeLock")
@@ -92,7 +92,7 @@ class UpdateProcessor extends Subscriber {
               while (this.updateQueue[++csn]) {
                 let _csn = csn
                 this.storage.logger.debug("subset csn: " + _csn)
-                transaction = this.updateQueue[_csn]
+                const transaction = this.updateQueue[_csn]
                 delete this.updateQueue[_csn]
 
                 if (transaction.type == TransactionType.INSERT && transaction.new) {
