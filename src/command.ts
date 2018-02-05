@@ -1,5 +1,5 @@
 import { MongoClient, Db } from 'mongodb'
-import { MONGO_DB, Mongo } from "./Config"
+import { Mongo } from "./Config"
 
 let mode = process.argv[2];
 if (!mode) process.exit();

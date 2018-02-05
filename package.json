@@ -12,9 +12,7 @@
   "main": "./lib/se/Dadget.js",
   "types": "./src/se/Dadget.ts",
   "browser": {
-    "./lib/db/CsnPersistentDb.js": "./lib/db/CsnPersistentDbOnBrowser.js",
-    "./lib/db/JournalPersistentDb.js": "./lib/db/JournalPersistentDbOnBrowser.js",
-    "./lib/db/SubsetPersistentDb.js": "./lib/db/SubsetPersistentDbOnBrowser.js",
+    "./lib/db/PersistentDb.js": "./lib/db/PersistentDbOnBrowser.js",
     "mongodb": false
   },
   "scripts": {
@@ -51,7 +49,7 @@
     "mocha": "^4.1.0",
     "mongodb-extended-json": "^1.10.0",
     "typedoc": "^0.9.0",
-    "typescript": "^2.4.2"
+    "typescript": "^2.6.2"
   },
   "publishConfig": {
     "access": "public"

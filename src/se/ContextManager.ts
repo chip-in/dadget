@@ -5,9 +5,8 @@ import { diff } from "deep-diff"
 import { ResourceNode, ServiceEngine, Subscriber, Proxy } from '@chip-in/resource-node'
 import { TransactionRequest, TransactionObject, TransactionType } from '../db/Transaction'
 import { CsnDb } from '../db/CsnDb'
-import { CsnPersistentDb } from '../db/CsnPersistentDb'
 import { JournalDb } from '../db/JournalDb'
-import { JournalPersistentDb } from '../db/JournalPersistentDb'
+import { PersistentDb } from "../db/PersistentDb"
 import { ProxyHelper } from "../util/ProxyHelper"
 import { DadgetError } from "../util/DadgetError"
 import * as EJSON from '../util/Ejson'
@@ -256,8 +255,8 @@ export class ContextManager extends ServiceEngine {
     this.database = this.option.database
 
     // ストレージを準備
-    this.journalDb = new JournalPersistentDb(this.database)
-    this.csnDb = new CsnPersistentDb(this.database)
+    this.journalDb = new JournalDb(new PersistentDb(this.database))
+    this.csnDb = new CsnDb(new PersistentDb(this.database))
     let promise = Promise.all([this.journalDb.start(), this.csnDb.start()]).then(_ => { })
 
     // スレーブ動作で同期するのためのサブスクライバを登録

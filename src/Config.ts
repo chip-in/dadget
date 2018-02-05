@@ -1,9 +1,3 @@
-export const MONGO_DB = {
-  SYSTEM_COLLECTION: "__system__"
-  , JOURNAL_COLLECTION: "__journal__"
-  , SUBSET_COLLECTION: "subset_data"
-  , CSN_ID: "csn"
-}
 
 export class Mongo {
   static getUrl() {

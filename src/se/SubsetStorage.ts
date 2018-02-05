@@ -5,14 +5,10 @@ import * as EJSON from '../util/Ejson'
 
 import { ResourceNode, ServiceEngine, Subscriber, Proxy } from '@chip-in/resource-node'
 import { SubsetDb } from '../db/SubsetDb'
-import { SubsetPersistentDb } from '../db/SubsetPersistentDb'
-import { SubsetCacheDbOnMemory } from '../db/SubsetCacheDbOnMemory'
 import { CsnDb } from '../db/CsnDb'
-import { CsnPersistentDb } from '../db/CsnPersistentDb'
-import { CsnCacheDbOnMemory } from '../db/CsnCacheDbOnMemory'
 import { JournalDb } from '../db/JournalDb'
-import { JournalPersistentDb } from '../db/JournalPersistentDb'
-import { JournalCacheDbOnMemory } from '../db/JournalCacheDbOnMemory'
+import { PersistentDb } from "../db/PersistentDb"
+import { CacheDb } from "../db/CacheDb"
 import { TransactionObject, TransactionType, TransactionRequest } from '../db/Transaction'
 import { DatabaseRegistry, SubsetDef } from "./DatabaseRegistry"
 import { QueryResult, CsnMode, default as Dadget } from "./Dadget"
@@ -60,7 +56,7 @@ class UpdateProcessor extends Subscriber {
                   this.storage.getLock().writeLock(release3 => {
                     Promise.resolve()
                       .then(() => this.storage.getSubsetDb().deleteAll())
-                      .then(() => this.storage.getSubsetDb().insertAll(result.resultSet))
+                      .then(() => this.storage.getSubsetDb().insertMany(result.resultSet))
                       .then(() => this.storage.getCsnDb().update(result.csn ? result.csn : transaction.csn))
                       .then(() => {
                         this.storage.logger.debug("release writeLock")
@@ -257,13 +253,13 @@ export class SubsetStorage extends ServiceEngine implements Proxy {
     // ストレージを準備
     let dbName = this.database + '--' + this.subsetName
     if (this.type == "cache") {
-      this.subsetDb = new SubsetCacheDbOnMemory(dbName, this.subsetName, metaData.indexes)
-      this.journalDb = new JournalCacheDbOnMemory(dbName)
-      this.csnDb = new CsnCacheDbOnMemory(dbName)
+      this.subsetDb = new SubsetDb(new CacheDb(dbName), this.subsetName, metaData.indexes)
+      this.journalDb = new JournalDb(new CacheDb(dbName))
+      this.csnDb = new CsnDb(new CacheDb(dbName))
     } else if (this.type == "persistent") {
-      this.subsetDb = new SubsetPersistentDb(dbName, this.subsetName, metaData.indexes)
-      this.journalDb = new JournalPersistentDb(dbName)
-      this.csnDb = new CsnPersistentDb(dbName)
+      this.subsetDb = new SubsetDb(new PersistentDb(dbName), this.subsetName, metaData.indexes)
+      this.journalDb = new JournalDb(new PersistentDb(dbName))
+      this.csnDb = new CsnDb(new PersistentDb(dbName))
     }
 
     // Rest サービスを登録する。
