@@ -1,17 +1,17 @@
-import * as http from 'http';
-import * as URL from 'url'
+import { Proxy, ResourceNode, ServiceEngine, Subscriber } from "@chip-in/resource-node"
 import * as AsyncLock from "async-lock"
 import { diff } from "deep-diff"
-import { ResourceNode, ServiceEngine, Subscriber, Proxy } from '@chip-in/resource-node'
-import { TransactionRequest, TransactionObject, TransactionType } from '../db/Transaction'
-import { CsnDb } from '../db/CsnDb'
-import { JournalDb } from '../db/JournalDb'
-import { PersistentDb } from "../db/PersistentDb"
-import { ProxyHelper } from "../util/ProxyHelper"
-import { DadgetError } from "../util/DadgetError"
-import * as EJSON from '../util/Ejson'
-import { ERROR } from "../Errors"
+import * as http from "http";
+import * as URL from "url"
 import { CORE_NODE } from "../Config"
+import { CsnDb } from "../db/CsnDb"
+import { JournalDb } from "../db/JournalDb"
+import { PersistentDb } from "../db/PersistentDb"
+import { TransactionObject, TransactionRequest, TransactionType } from "../db/Transaction"
+import { ERROR } from "../Errors"
+import { DadgetError } from "../util/DadgetError"
+import * as EJSON from "../util/Ejson"
+import { ProxyHelper } from "../util/ProxyHelper"
 
 /**
  * コンテキストマネージャコンフィグレーションパラメータ
@@ -27,9 +27,9 @@ export class ContextManagerConfigDef {
 class TransactionJournalSubscriber extends Subscriber {
 
   constructor(
-    protected context: ContextManager
-    , protected journalDB: JournalDb
-    , protected csnDB: CsnDb) {
+    protected context: ContextManager,
+    protected journalDB: JournalDb,
+    protected csnDB: CsnDb) {
 
     super()
     context.logger.debug("TransactionJournalSubscriber is created")
@@ -37,11 +37,11 @@ class TransactionJournalSubscriber extends Subscriber {
 
   onReceive(msg: string) {
     //    console.log("onReceive:", msg)
-    let transaction: TransactionObject = EJSON.parse(msg)
+    const transaction: TransactionObject = EJSON.parse(msg)
     this.context.getLock().acquire("transaction", () => {
       // 自分がスレーブになっていれば保存
       return this.csnDB.getCurrentCsn()
-        .then(csn => {
+        .then((csn) => {
           if (csn < transaction.csn) {
             return this.csnDB.update(transaction.csn)
           }
@@ -50,24 +50,24 @@ class TransactionJournalSubscriber extends Subscriber {
         .then(() => {
           return this.journalDB.findByCsn(transaction.csn)
         })
-        .then(savedTransaction => {
+        .then((savedTransaction) => {
           if (!savedTransaction) {
             // トランザクションオブジェクトをジャーナルに追加
             return this.journalDB.insert(transaction)
           } else {
             let promise = Promise.resolve()
-            if (savedTransaction.digest != transaction.digest) {
+            if (savedTransaction.digest !== transaction.digest) {
               // ダイジェストが異なる場合は更新して、それ以降でtimeがこのトランザクション以前のジャーナルを削除
               promise = promise.then(() => this.journalDB.updateAndDeleteAfter(transaction))
             }
             // マスター権を喪失している場合は再接続
-//            if (this.context.getMountHandle()) {
-//              promise = promise.then(() => this.context.connect())
-//            }
+            //            if (this.context.getMountHandle()) {
+            //              promise = promise.then(() => this.context.connect())
+            //            }
             return promise
           }
         })
-        .catch(err => {
+        .catch((err) => {
           this.context.logger.error(err.toString())
         })
     })
@@ -78,28 +78,28 @@ class ContextManagementServer extends Proxy {
   private lastBeforeObj: { _id?: string, csn?: number }
 
   constructor(
-    protected context: ContextManager
-    , protected journalDB: JournalDb
-    , protected csnDB: CsnDb) {
+    protected context: ContextManager,
+    protected journalDB: JournalDb,
+    protected csnDB: CsnDb) {
 
     super()
     context.logger.debug("ContextManagementServer is created")
   }
 
   onReceive(req: http.IncomingMessage, res: http.ServerResponse): Promise<http.ServerResponse> {
-    if (!req.url) throw new Error("url is required.")
-    if (!req.method) throw new Error("method is required.")
-    let url = URL.parse(req.url)
-    if (url.pathname == null) throw new Error("pathname is required.")
+    if (!req.url) { throw new Error("url is required.") }
+    if (!req.method) { throw new Error("method is required.") }
+    const url = URL.parse(req.url)
+    if (url.pathname == null) { throw new Error("pathname is required.") }
     this.context.logger.debug(url.pathname)
-    let method = req.method.toUpperCase()
+    const method = req.method.toUpperCase()
     this.context.logger.debug(method)
-    if (method == "OPTIONS") {
+    if (method === "OPTIONS") {
       return ProxyHelper.procOption(req, res)
-    } else if (url.pathname.endsWith("/exec") && method == "POST") {
+    } else if (url.pathname.endsWith("/exec") && method === "POST") {
       return ProxyHelper.procPost(req, res, (data) => {
         this.context.logger.debug("/exec")
-        let request = EJSON.parse(data)
+        const request = EJSON.parse(data)
         return this.exec(request.csn, request.request)
       })
     } else {
@@ -116,37 +116,36 @@ class ContextManagementServer extends Proxy {
 
     let err: string | null = null
     if (!request.target) {
-      err = 'target required'
+      err = "target required"
     }
-    if (request.type == TransactionType.INSERT) {
-      if (request.before) err = 'before not required'
-      if (request.operator) err = 'operator not required'
-      if (!request.new) err = 'new required'
-    } else if (request.type == TransactionType.UPDATE) {
-      if (!request.before) err = 'before required'
-      if (!request.operator) err = 'operator required'
-      if (request.new) err = 'new not required'
-    } else if (request.type == TransactionType.DELETE) {
-      if (!request.before) err = 'before required'
-      if (request.operator) err = 'operator not required'
-      if (request.new) err = 'new not required'
+    if (request.type === TransactionType.INSERT) {
+      if (request.before) { err = "before not required" }
+      if (request.operator) { err = "operator not required" }
+      if (!request.new) { err = "new required" }
+    } else if (request.type === TransactionType.UPDATE) {
+      if (!request.before) { err = "before required" }
+      if (!request.operator) { err = "operator required" }
+      if (request.new) { err = "new not required" }
+    } else if (request.type === TransactionType.DELETE) {
+      if (!request.before) { err = "before required" }
+      if (request.operator) { err = "operator not required" }
+      if (request.new) { err = "new not required" }
     } else {
-      err = 'type not found'
+      err = "type not found"
     }
     if (err) {
       return Promise.resolve({
         status: "NG",
-        reason: new DadgetError(ERROR.E2002, [err])
+        reason: new DadgetError(ERROR.E2002, [err]),
       })
     }
 
     // TODO マスターを取得したばかりの時は時間待ち
 
-
     // コンテキスト通番をインクリメントしてトランザクションオブジェクトを作成
     return new Promise((resolve, reject) => {
       this.context.getLock().acquire("transaction", () => {
-        let _request = { ...request, datetime: new Date() }
+        const _request = { ...request, datetime: new Date() }
         if (this.lastBeforeObj && request.before
           && (!request.before._id || this.lastBeforeObj._id === request.before._id)) {
           const objDiff = diff(this.lastBeforeObj, request.before)
@@ -160,15 +159,15 @@ class ContextManagementServer extends Proxy {
         // ジャーナルと照合して矛盾がないかチェック
         return this.journalDB.checkConsistent(csn, _request)
           .then(() => this.context.checkUniqueConstraint(csn, _request))
-          .then(_ => {
+          .then((_) => {
             updateObject = _
             return Promise.all([this.csnDB.increment(), this.journalDB.getLastDigest()])
-              .then(values => {
+              .then((values) => {
                 newCsn = values[0]
-                let lastDigest = values[1]
+                const lastDigest = values[1]
                 transaction = Object.assign({
                   csn: newCsn
-                  , beforeDigest: lastDigest
+                  , beforeDigest: lastDigest,
                 }, _request)
                 transaction.digest = TransactionObject.calcDigest(transaction);
                 // トランザクションオブジェクトをジャーナルに追加
@@ -181,22 +180,22 @@ class ContextManagementServer extends Proxy {
               , EJSON.stringify(transaction))
           })
       }).then(() => {
-        if (!updateObject._id) updateObject._id = transaction.target
+        if (!updateObject._id) { updateObject._id = transaction.target }
         updateObject.csn = newCsn
         this.lastBeforeObj = updateObject
         resolve({
           status: "OK",
           csn: newCsn,
-          updateObject: updateObject
+          updateObject,
         })
-      }, reason => {
+      }, (reason) => {
         // トランザクションエラー
         let cause = reason instanceof DadgetError ? reason : new DadgetError(ERROR.E2003, [reason])
-        if (cause.code == ERROR.E1105.code) cause = new DadgetError(ERROR.E2004, [cause])
+        if (cause.code === ERROR.E1105.code) { cause = new DadgetError(ERROR.E2004, [cause]) }
         cause.convertInsertsToString()
         resolve({
           status: "NG",
-          reason: cause
+          reason: cause,
         })
       })
     })
@@ -205,7 +204,7 @@ class ContextManagementServer extends Proxy {
 
 /**
  * コンテキストマネージャ(ContextManager)
- * 
+ *
  * コンテキストマネージャは、逆接続プロキシの Rest API で exec メソッドを提供する。
  */
 export class ContextManager extends ServiceEngine {
@@ -257,12 +256,13 @@ export class ContextManager extends ServiceEngine {
     // ストレージを準備
     this.journalDb = new JournalDb(new PersistentDb(this.database))
     this.csnDb = new CsnDb(new PersistentDb(this.database))
-    let promise = Promise.all([this.journalDb.start(), this.csnDb.start()]).then(_ => { })
+    let promise = Promise.all([this.journalDb.start(), this.csnDb.start()]).then((_) => { })
 
     // スレーブ動作で同期するのためのサブスクライバを登録
     this.subscriber = new TransactionJournalSubscriber(this, this.journalDb, this.csnDb)
     promise = promise.then(() => {
-      return node.subscribe(CORE_NODE.PATH_TRANSACTION.replace(/:database\b/g, this.database), this.subscriber).then(key => { this.subscriberKey = key })
+      return node.subscribe(CORE_NODE.PATH_TRANSACTION.replace(/:database\b/g, this.database), this.subscriber)
+        .then((key) => { this.subscriberKey = key })
     })
     promise = promise.then(() => {
       // コンテキストマネージャのRestサービスを登録
@@ -277,10 +277,10 @@ export class ContextManager extends ServiceEngine {
   stop(node: ResourceNode): Promise<void> {
     return Promise.resolve()
       .then(() => {
-        if (this.mountHandle) return this.node.unmount(this.mountHandle).catch()
+        if (this.mountHandle) { return this.node.unmount(this.mountHandle).catch() }
       })
       .then(() => {
-        if (this.subscriberKey) return this.node.unsubscribe(this.subscriberKey).catch()
+        if (this.subscriberKey) { return this.node.unsubscribe(this.subscriberKey).catch() }
       })
   }
 
@@ -290,18 +290,18 @@ export class ContextManager extends ServiceEngine {
     this.mountHandle = undefined
 
     if (mountHandle) {
-      promise = promise.then(() => { return this.node.unmount(mountHandle).catch() })
+      promise = promise.then(() => this.node.unmount(mountHandle).catch())
     }
     promise = promise.then(() => {
       this.node.mount(CORE_NODE.PATH_CONTEXT.replace(/:database\b/g, this.database), "singletonMaster", this.server)
-        .then(mountHandle => {
+        .then((mountHandle) => {
           // マスターを取得した場合のみ実行される
           // TODO 時間待ちのための時刻保存
           // TODO マスターを取得した場合、他のサブセットを自分と同じcsnまでロールバックさせるメッセージを送信
           this.mountHandle = mountHandle
         })
     })
-    promise = promise.then(() => new Promise<void>(resolve => {
+    promise = promise.then(() => new Promise<void>((resolve) => {
       setTimeout(resolve, 3000)
     }))
     return promise
@@ -309,16 +309,16 @@ export class ContextManager extends ServiceEngine {
 
   checkUniqueConstraint(csn: number, request: TransactionRequest): Promise<object> {
     // TODO ユニーク制約についてはクエリーを発行して確認 前提csnはジャーナルの最新を使用しなればならない
-    if (request.type == TransactionType.INSERT && request.new) {
+    if (request.type === TransactionType.INSERT && request.new) {
       // TODO 追加されたオブジェクトと一意属性が競合していないかを調べる
       return Promise.resolve(request.new)
-    } else if (request.type == TransactionType.UPDATE && request.before) {
-      let newObj = TransactionRequest.applyOperator(request)
+    } else if (request.type === TransactionType.UPDATE && request.before) {
+      const newObj = TransactionRequest.applyOperator(request)
       return Promise.resolve(newObj)
-    } else if (request.type == TransactionType.DELETE && request.before) {
+    } else if (request.type === TransactionType.DELETE && request.before) {
       return Promise.resolve(request.before)
     } else {
-      throw new Error('checkConsistent error');
+      throw new Error("checkConsistent error");
     }
   }
 }

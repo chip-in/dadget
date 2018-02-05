@@ -1,10 +1,10 @@
-import { MongoClient, Db } from 'mongodb'
+import { Db, MongoClient } from "mongodb"
 import { Mongo } from "../Config"
 import { IDb } from "./IDb"
 
 export class PersistentDb implements IDb {
-  private collection: string
   private static dbMap: { [database: string]: Db } = {}
+  private collection: string
 
   constructor(protected database: string) {
     console.log("PersistentDb is created")
@@ -17,7 +17,7 @@ export class PersistentDb implements IDb {
   start(): Promise<void> {
     if (!PersistentDb.dbMap[this.database]) {
       return MongoClient.connect(Mongo.getUrl() + this.database)
-        .then(_ => {
+        .then((_) => {
           PersistentDb.dbMap[this.database] = _
         })
     } else {
@@ -35,9 +35,9 @@ export class PersistentDb implements IDb {
 
   find(query: object, sort?: object, limit?: number, offset?: number): Promise<any> {
     let cursor = PersistentDb.dbMap[this.database].collection(this.collection).find(query)
-    if (sort) cursor = cursor.sort(sort)
-    if (offset) cursor = cursor.skip(offset)
-    if (limit) cursor = cursor.limit(limit)
+    if (sort) { cursor = cursor.sort(sort) }
+    if (offset) { cursor = cursor.skip(offset) }
+    if (limit) { cursor = cursor.limit(limit) }
     return cursor.toArray()
   }
 
@@ -50,8 +50,9 @@ export class PersistentDb implements IDb {
   }
 
   increment(id: string): Promise<number> {
-    return PersistentDb.dbMap[this.database].collection(this.collection).findOneAndUpdate({ _id: id }, { $inc: { seq: 1 } }, { returnOriginal: false })
-      .then(result => {
+    return PersistentDb.dbMap[this.database].collection(this.collection)
+      .findOneAndUpdate({ _id: id }, { $inc: { seq: 1 } }, { returnOriginal: false })
+      .then((result) => {
         if (result.ok) {
           return result.value.seq
         } else {
@@ -62,36 +63,36 @@ export class PersistentDb implements IDb {
 
   updateOneById(id: string, update: object): Promise<void> {
     return PersistentDb.dbMap[this.database].collection(this.collection).updateOne({ _id: id }, update)
-      .then(result => {
-        if (!result.result.ok || result.result.nModified != 1) throw "failed to update: " + JSON.stringify(result)
+      .then((result) => {
+        if (!result.result.ok || result.result.nModified !== 1) { throw new Error("failed to update: " + JSON.stringify(result)) }
       })
   }
 
   updateOne(filter: object, update: object): Promise<void> {
     return PersistentDb.dbMap[this.database].collection(this.collection).updateOne(filter, update)
-      .then(result => {
-        if (!result.result.ok || result.result.nModified != 1) throw "failed to update: " + JSON.stringify(result)
+      .then((result) => {
+        if (!result.result.ok || result.result.nModified !== 1) { throw new Error("failed to update: " + JSON.stringify(result)) }
       })
   }
 
   replaceOne(id: string, doc: object): Promise<void> {
     return PersistentDb.dbMap[this.database].collection(this.collection).replaceOne({ _id: id }, doc)
-      .then(result => {
-        if (!result.result.ok || result.result.nModified != 1) throw "failed to replace: " + JSON.stringify(result)
+      .then((result) => {
+        if (!result.result.ok || result.result.nModified !== 1) { throw new Error("failed to replace: " + JSON.stringify(result)) }
       })
   }
 
   deleteOne(id: string): Promise<void> {
     return PersistentDb.dbMap[this.database].collection(this.collection).deleteOne({ _id: id })
-      .then(result => {
-        if (!result.result.ok) throw "failed to delete: " + JSON.stringify(result)
+      .then((result) => {
+        if (!result.result.ok) { throw new Error("failed to delete: " + JSON.stringify(result)) }
       })
   }
 
   deleteAll(): Promise<void> {
     return PersistentDb.dbMap[this.database].collection(this.collection).deleteMany({})
-      .then(result => {
-        if (!result.result.ok) throw "failed to delete: " + JSON.stringify(result)
+      .then((result) => {
+        if (!result.result.ok) { throw new Error("failed to delete: " + JSON.stringify(result)) }
       })
   }
 
@@ -99,14 +100,14 @@ export class PersistentDb implements IDb {
     const db = PersistentDb.dbMap[this.database]
     const indexNameList: { [name: string]: any } = {}
     return db.createCollection(this.collection)
-      .then(_ => {
+      .then((_) => {
         return db.collection(this.collection).indexes()
       })
-      .then(indexes => {
+      .then((indexes) => {
         // インデックスの削除
-        const indexPromisies: Promise<any>[] = []
+        const indexPromisies: Array<Promise<any>> = []
         for (const index of indexes) {
-          if (index.name !== '_id_' && !indexMap[index.name]) {
+          if (index.name !== "_id_" && !indexMap[index.name]) {
             indexPromisies.push(db.collection(this.collection).dropIndex(index.name))
           }
           indexNameList[index.name] = true
@@ -115,7 +116,7 @@ export class PersistentDb implements IDb {
       })
       .then(() => {
         // インデックスの追加
-        const indexPromisies: Promise<any>[] = []
+        const indexPromisies: Array<Promise<any>> = []
         for (const indexName in indexMap) {
           if (!indexNameList[indexName]) {
             const fields = indexMap[indexName].index

@@ -1,11 +1,11 @@
 declare module "@chip-in/resource-node" {
-    import * as http from 'http';
+    import * as http from "http";
 
     class Logger {
-        debug(msg: string, ...substN: (string | number)[]): void
-        info(msg: string, ...substN: (string | number)[]): void
-        warn(msg: string, ...substN: (string | number)[]): void
-        error(msg: string, ...substN: (string | number)[]): void
+        debug(msg: string, ...substN: Array<string | number>): void
+        info(msg: string, ...substN: Array<string | number>): void
+        warn(msg: string, ...substN: Array<string | number>): void
+        error(msg: string, ...substN: Array<string | number>): void
     }
 
     interface ServiceEngineConstructor {
@@ -20,8 +20,8 @@ declare module "@chip-in/resource-node" {
         nodeClassName: string
         password: string
         proxies: {}
-        serviceClasses: Object
-        serviceInstances: Array<ServiceEngine>
+        serviceClasses: object
+        serviceInstances: ServiceEngine[]
         sessionTable: {}
         started: boolean
         userId: string

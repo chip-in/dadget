@@ -104,12 +104,12 @@ export const ERROR = {
    * SubsetDb failed to insertAll subset data.
    */
   E1206: { code: 1206, message: "SubsetDb failed to insertAll subset data. cause=%1" },
-  
+
   /**
    * SubsetDb failed to deleteAll subset data.
    */
   E1207: { code: 1207, message: "SubsetDb failed to deleteAll subset data. cause=%1" },
-  
+
   /**
    * ContextManager Config Error
    */
@@ -131,7 +131,7 @@ export const ERROR = {
   E2004: { code: 2004, message: "ContextManagementServer failed to execute a transaction. Csn update is required. cause=%1" },
 
   /**
-   * A bad "before" object caused failing to execute a transaction. 
+   * A bad "before" object caused failing to execute a transaction.
    */
   E2005: { code: 2005, message: 'A bad "before" object caused failing to execute a transaction. for request = %1' },
 
@@ -149,7 +149,7 @@ export const ERROR = {
    * Dadget Undefined Exec Error
    */
   E2103: { code: 2103, message: "Dadget Undefined Exec Error: %1" },
-  
+
   /**
    * DatabaseRegistry Config Error
    */

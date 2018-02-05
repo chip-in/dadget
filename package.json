@@ -22,6 +22,7 @@
     "build": "tsc && babel dest --out-dir lib",
     "start": "node lib/command.js",
     "makedoc": "typedoc --excludeExternals --module commonjs --out ./docs/ ./src/",
+    "lint": "tslint --fix 'src/**/*.ts'",
     "test": "mocha"
   },
   "dependencies": {
@@ -48,6 +49,7 @@
     "chai": "^4.1.2",
     "mocha": "^4.1.0",
     "mongodb-extended-json": "^1.10.0",
+    "tslint": "^5.9.1",
     "typedoc": "^0.9.0",
     "typescript": "^2.6.2"
   },

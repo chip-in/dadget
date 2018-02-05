@@ -1,11 +1,11 @@
-import * as EJSON from '../util/Ejson'
+import * as EJSON from "../util/Ejson"
 
-import { ResourceNode, ServiceEngine } from '@chip-in/resource-node'
-import { DatabaseRegistry, SubsetDef } from "./DatabaseRegistry"
-import { QueryResult, CsnMode } from "./Dadget"
-import { DadgetError } from "../util/DadgetError"
-import { ERROR } from "../Errors"
+import { ResourceNode, ServiceEngine } from "@chip-in/resource-node"
 import { CORE_NODE } from "../Config"
+import { ERROR } from "../Errors"
+import { DadgetError } from "../util/DadgetError"
+import { CsnMode, QueryResult } from "./Dadget"
+import { DatabaseRegistry, SubsetDef } from "./DatabaseRegistry"
 
 /**
  * クエリハンドラコンフィグレーションパラメータ
@@ -63,11 +63,11 @@ export class QueryHandler extends ServiceEngine {
     this.subsetName = this.option.subset
 
     // サブセットの定義を取得する
-    let seList = node.searchServiceEngine("DatabaseRegistry", { database: this.database })
-    if (seList.length != 1) {
+    const seList = node.searchServiceEngine("DatabaseRegistry", { database: this.database })
+    if (seList.length !== 1) {
       return Promise.reject(new DadgetError(ERROR.E2301, ["DatabaseRegistry is missing, or there are multiple ones."]));
     }
-    let registry = seList[0] as DatabaseRegistry
+    const registry = seList[0] as DatabaseRegistry
     this.subsetDefinition = registry.getMetadata().subsets[this.subsetName]
 
     this.logger.debug("QueryHandler is started")
@@ -79,31 +79,24 @@ export class QueryHandler extends ServiceEngine {
   }
 
   query(csn: number, restQuery: object, sort?: object, limit?: number, offset?: number, csnMode?: CsnMode): Promise<QueryResult> {
-    let request = {
-      csn: csn
-      , query: restQuery
-      , sort: sort
-      , limit: limit
-      , offset: offset
-      , csnMode: csnMode
-    }
+    const request = { csn, query: restQuery, sort, limit, offset, csnMode }
     return this.node.fetch(CORE_NODE.PATH_SUBSET
       .replace(/:database\b/g, this.database)
       .replace(/:subset\b/g, this.subsetName) + "/query", {
-        method: 'POST',
-        body: EJSON.stringify(request),
+        method: "POST",
         headers: {
-          "Content-Type": "application/json"
-        }
+          "Content-Type": "application/json",
+        },
+        body: EJSON.stringify(request),
       })
-      .then(result => {
-        if(typeof result.ok !== "undefined" && !result.ok) throw Error("fetch error:" + result.statusText)
+      .then((result) => {
+        if (typeof result.ok !== "undefined" && !result.ok) { throw Error("fetch error:" + result.statusText) }
         return result.json()
       })
-      .then(_ => {
-        let data = EJSON.deserialize(_)
-        if(data.status == "NG") throw data.reason
-        if(data.status == "OK") return data.result
+      .then((_) => {
+        const data = EJSON.deserialize(_)
+        if (data.status === "NG") { throw data.reason }
+        if (data.status === "OK") { return data.result }
         throw new Error("fetch error:" + JSON.stringify(data))
       })
   }

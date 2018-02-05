@@ -1,5 +1,5 @@
 declare module "mongo-parse" {
-  class Parse{
+  class Parse {
     map(callback: (key: string, value: any) => object): object
     mapValues(callback: (field: string, value: any) => object): object
     matches(document: object, validate?: boolean): boolean

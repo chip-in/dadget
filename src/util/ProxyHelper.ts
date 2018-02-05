@@ -1,29 +1,33 @@
-import * as http from 'http';
-import * as EJSON from '../util/Ejson'
-import { DadgetError } from './DadgetError';
-import { ERROR } from '../Errors';
-import { getAccessControlAllowOrigin } from '../Config'
+import * as http from "http";
+import { getAccessControlAllowOrigin } from "../Config"
+import { ERROR } from "../Errors";
+import * as EJSON from "../util/Ejson"
+import { DadgetError } from "./DadgetError";
 
 export class ProxyHelper {
 
-  static procPost(req: http.IncomingMessage, res: http.ServerResponse, proc: (data: string) => object): Promise<http.ServerResponse> {
-    let head: any = {
-      "Content-Type": "application/json"
+  static procPost(
+    req: http.IncomingMessage,
+    res: http.ServerResponse,
+    proc: (data: string) => object): Promise<http.ServerResponse> {
+
+    const head: any = {
+      "Content-Type": "application/json",
     }
-    let allowOrigin = getAccessControlAllowOrigin(req.headers["origin"] as string)
+    const allowOrigin = getAccessControlAllowOrigin(req.headers.origin as string)
     if (allowOrigin) {
       head["Access-Control-Allow-Origin"] = allowOrigin
     }
-    let promise = new Promise<string>((resolve, reject) => {
-      var postData = "";
-      req.on("data", function (chunk) {
+    const promise = new Promise<string>((resolve, reject) => {
+      let postData = "";
+      req.on("data", (chunk) => {
         postData += chunk;
       })
-      req.on("end", function () {
+      req.on("end", () => {
         console.log("procPost receive:", postData)
         resolve(postData)
       })
-      req.on("error", function (error) {
+      req.on("error", (error) => {
         reject(error)
       })
     })
@@ -35,14 +39,14 @@ export class ProxyHelper {
         res.end()
         return res
       })
-      .catch(reason => {
+      .catch((reason) => {
         console.log("procPost error return", reason.toString())
         if (!(reason instanceof DadgetError)) {
           reason = new DadgetError(ERROR.E3001, [reason])
         }
         reason.convertInsertsToString()
         res.writeHead(200, head)
-        res.write(EJSON.stringify({ status: "NG", reason: reason }))
+        res.write(EJSON.stringify({ status: "NG", reason }))
         res.end()
         return res
       })
@@ -50,11 +54,11 @@ export class ProxyHelper {
   }
 
   static procOption(req: http.IncomingMessage, res: http.ServerResponse): Promise<http.ServerResponse> {
-    let head: any = {
-      "Access-Control-Allow-Methods": "POST, GET, OPTIONS"
-      , "Access-Control-Allow-Headers": "Content-Type"
+    const head: any = {
+      "Access-Control-Allow-Headers": "Content-Type",
+      "Access-Control-Allow-Methods": "POST, GET, OPTIONS",
     }
-    let allowOrigin = getAccessControlAllowOrigin(req.headers["origin"] as string)
+    const allowOrigin = getAccessControlAllowOrigin(req.headers.origin as string)
     if (allowOrigin) {
       head["Access-Control-Allow-Origin"] = allowOrigin
     }

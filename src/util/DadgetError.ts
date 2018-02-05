@@ -2,15 +2,19 @@ export class DadgetError {
   public code: number
   public message: string
 
-  constructor(err: { code: number, message: string }, public inserts: (object | string | number)[] = [], public ns: string = "dadget.chip-in.net") {
+  constructor(
+    err: { code: number, message: string },
+    public inserts: Array<object | string | number> = [],
+    public ns: string = "dadget.chip-in.net") {
+
     this.code = err.code
     this.message = err.message
   }
 
   convertInsertsToString() {
-    this.inserts = this.inserts.map(v => {
-      if (typeof v == "string") return v
-      if (v.toString) return v.toString()
+    this.inserts = this.inserts.map((v) => {
+      if (typeof v === "string") { return v }
+      if (v.toString) { return v.toString() }
       return JSON.stringify(v)
     })
   }

@@ -1,29 +1,27 @@
-import { MongoClient, Db } from 'mongodb'
+import { Db, MongoClient } from "mongodb"
 import { Mongo } from "./Config"
 
-let mode = process.argv[2];
-if (!mode) process.exit();
+const mode = process.argv[2];
+if (!mode) { process.exit(); }
 
-if (mode == "reset") {
-  let target = process.argv[3];
+if (mode === "reset") {
+  const target = process.argv[3];
   console.log("reset db:", target)
   let db: Db
-  let dbUrl = Mongo.getUrl() + target
+  const dbUrl = Mongo.getUrl() + target
   MongoClient.connect(dbUrl)
-    .then(_ => {
+    .then((_) => {
       db = _
       return db.admin().listDatabases()
     }).then((dbs) => {
-      dbs = dbs.databases;
       let promise = Promise.resolve()
-      for (var i = 0; i < dbs.length; i++) {
-        if (dbs[i].name.startsWith(target)){
-          console.log(dbs[i].name)
-          let targetDb = db.db(dbs[i].name)
+      for (const curDb of dbs.databases) {
+        if (curDb.name.startsWith(target)) {
+          console.log(curDb.name)
+          const targetDb = db.db(curDb.name)
           promise = promise.then(() => targetDb.dropDatabase())
         }
       }
       promise.then(() => db.close())
     })
 }
-

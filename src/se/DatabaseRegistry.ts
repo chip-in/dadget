@@ -1,6 +1,6 @@
-import { ResourceNode, ServiceEngine } from '@chip-in/resource-node'
-import { DadgetError } from "../util/DadgetError"
+import { ResourceNode, ServiceEngine } from "@chip-in/resource-node"
 import { ERROR } from "../Errors"
+import { DadgetError } from "../util/DadgetError"
 
 /**
  * サブセット定義
@@ -31,7 +31,7 @@ export class IndexDef {
   /**
    * インデックスの属性を指定する。その仕様はmongo db の createIndex の第二引数に準じる
    */
-  property?: {unique: boolean}
+  property?: { unique: boolean }
 }
 
 /**

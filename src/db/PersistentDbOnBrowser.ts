@@ -7,7 +7,7 @@ export class PersistentDb implements IDb {
     console.log("PersistentDbOnBrowser is created")
   }
 
-  setCollection(collection: string){
+  setCollection(collection: string) {
     this.collection = collection
   }
 

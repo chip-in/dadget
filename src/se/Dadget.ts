@@ -1,15 +1,15 @@
-import { ResourceNode, ServiceEngine, Subscriber } from '@chip-in/resource-node'
-import { TransactionRequest, TransactionObject, TransactionType } from '../db/Transaction'
+import { ResourceNode, ServiceEngine, Subscriber } from "@chip-in/resource-node"
+import { v1 as uuidv1 } from "uuid"
+import { CORE_NODE } from "../Config"
+import { TransactionObject, TransactionRequest, TransactionType } from "../db/Transaction"
+import { ERROR } from "../Errors"
+import { DadgetError } from "../util/DadgetError"
+import * as EJSON from "../util/Ejson"
 import { ContextManager } from "./ContextManager"
 import { DatabaseRegistry } from "./DatabaseRegistry"
 import { QueryHandler } from "./QueryHandler"
 import { SubsetStorage } from "./SubsetStorage"
 import { UpdateManager } from "./UpdateManager"
-import { DadgetError } from "../util/DadgetError"
-import { ERROR } from "../Errors"
-import { CORE_NODE } from "../Config"
-import { v1 as uuidv1 } from 'uuid'
-import * as EJSON from '../util/Ejson'
 
 /**
  * Dadgetコンフィグレーションパラメータ
@@ -76,7 +76,7 @@ export default class Dadget extends ServiceEngine {
 
   /**
    * デフォルトサービスクラスを登録
-   * @param node 
+   * @param node
    */
   static registerServiceClasses(node: ResourceNode) {
     node.registerServiceClasses({
@@ -85,7 +85,7 @@ export default class Dadget extends ServiceEngine {
       Dadget,
       UpdateManager,
       QueryHandler,
-      SubsetStorage
+      SubsetStorage,
     });
   }
 
@@ -123,28 +123,37 @@ export default class Dadget extends ServiceEngine {
     return [...resultSet1, ...resultSet2];
   }
 
-  public static _query(node: ResourceNode, database: string, query: object, sort?: object, limit?: number, offset?: number, csn?: number, csnMode?: CsnMode): Promise<QueryResult> {
-    let queryHandlers = node.searchServiceEngine("QueryHandler", { database: database }) as QueryHandler[]
+  public static _query(
+    node: ResourceNode,
+    database: string,
+    query: object,
+    sort?: object,
+    limit?: number,
+    offset?: number,
+    csn?: number,
+    csnMode?: CsnMode): Promise<QueryResult> {
+
+    let queryHandlers = node.searchServiceEngine("QueryHandler", { database }) as QueryHandler[]
     queryHandlers = Dadget.sortQueryHandlers(queryHandlers)
-    if (!csn) csn = 0
-    let resultSet: object[] = []
-    return Promise.resolve({ csn: csn, resultSet: resultSet, restQuery: query, queryHandlers: queryHandlers, csnMode: csnMode })
+    if (!csn) { csn = 0 }
+    const resultSet: object[] = []
+    return Promise.resolve({ csn, resultSet, restQuery: query, queryHandlers, csnMode })
       .then(function queryFallback(request): Promise<QueryResult> {
-        if (!Object.keys(request.restQuery).length) return Promise.resolve(request)
-        if (request.queryHandlers.length == 0) {
-          let error = new Error("The queryHandlers has been empty before completing queries.") as any
+        if (!Object.keys(request.restQuery).length) { return Promise.resolve(request) }
+        if (request.queryHandlers.length === 0) {
+          const error = new Error("The queryHandlers has been empty before completing queries.") as any
           error.queryResult = request
           throw error
         }
-        let qh = request.queryHandlers.shift()
-        if (qh == null) throw new Error("The queryHandlers has been empty before completing queries.")
+        const qh = request.queryHandlers.shift()
+        if (qh == null) { throw new Error("The queryHandlers has been empty before completing queries.") }
         return qh.query(request.csn, request.restQuery, sort, limit, offset, csnMode)
           .then((result) => queryFallback({
             csn: result.csn,
             resultSet: Dadget.margeResultSet(request.resultSet, result.resultSet),
             restQuery: result.restQuery,
             queryHandlers: request.queryHandlers,
-            csnMode: result.csnMode
+            csnMode: result.csnMode,
           }));
       })
   }
@@ -166,14 +175,14 @@ export default class Dadget extends ServiceEngine {
       csnMode = "latest"
     }
     return Dadget._query(this.node, this.database, query, sort, limit, offset, csn, csnMode)
-      .then(result => {
+      .then((result) => {
         // TODO クエリ完了後の処理
         // 通知処理
         // csn が0の場合は代入
         this.currentCsn = result.csn
-        for (let id in this.updateListeners) {
-          let listener = this.updateListeners[id]
-          if (listener.csn == PREQUERY_CSN) {
+        for (const id of Object.keys(this.updateListeners)) {
+          const listener = this.updateListeners[id]
+          if (listener.csn === PREQUERY_CSN) {
             listener.csn = result.csn
             listener.notifyTime = Date.now()
           }
@@ -185,8 +194,8 @@ export default class Dadget extends ServiceEngine {
         // TODO クエリが空にならなかった場合（＝ wholeContents サブセットのサブセットストレージが同期処理中で準備が整っていない場合）5秒ごとに4回くらい再試行した後、エラーとなる
         return result
       })
-      .catch(reason => {
-        let cause = reason instanceof DadgetError ? reason : new DadgetError(ERROR.E2102, [reason.toString()])
+      .catch((reason) => {
+        const cause = reason instanceof DadgetError ? reason : new DadgetError(ERROR.E2102, [reason.toString()])
         return Promise.reject(cause)
       })
   }
@@ -201,7 +210,7 @@ export default class Dadget extends ServiceEngine {
    */
   count(query: object, csn?: number, csnMode?: CsnMode): Promise<number> {
     // TODO 実装の効率化
-    return this.query(query, undefined, undefined, undefined, csn, csnMode).then(result => result.resultSet.length)
+    return this.query(query, undefined, undefined, undefined, csn, csnMode).then((result) => result.resultSet.length)
   }
 
   /**
@@ -220,49 +229,46 @@ export default class Dadget extends ServiceEngine {
    */
   exec(csn: number, request: TransactionRequest): Promise<object> {
     request.type = request.type.toLowerCase() as TransactionType
-    if (request.type != TransactionType.INSERT && request.type != TransactionType.UPDATE && request.type != TransactionType.DELETE) {
+    if (request.type !== TransactionType.INSERT && request.type !== TransactionType.UPDATE && request.type !== TransactionType.DELETE) {
       throw new Error("The TransactionType is not supported.")
     }
-    let sendData = {
-      csn: csn,
-      request: request
-    }
+    const sendData = { csn, request }
     return this.node.fetch(CORE_NODE.PATH_CONTEXT.replace(/:database\b/g, this.database) + "/exec", {
-      method: 'POST',
-      body: EJSON.stringify(sendData),
+      method: "POST",
       headers: {
-        "Content-Type": "application/json"
-      }
+        "Content-Type": "application/json",
+      },
+      body: EJSON.stringify(sendData),
     })
-      .then(fetchResult => {
-        if(typeof fetchResult.ok !== "undefined" && !fetchResult.ok) throw Error(fetchResult.statusText)
+      .then((fetchResult) => {
+        if (typeof fetchResult.ok !== "undefined" && !fetchResult.ok) { throw Error(fetchResult.statusText) }
         return fetchResult.json()
       })
-      .then(_ => {
-        let result = EJSON.deserialize(_)
+      .then((_) => {
+        const result = EJSON.deserialize(_)
         this.logger.debug("exec:", JSON.stringify(result))
-        if (result.status == "OK") {
+        if (result.status === "OK") {
           this.latestCsn = result.csn
           return result.updateObject
         } else if (result.reason) {
-          let reason = result.reason as DadgetError
+          const reason = result.reason as DadgetError
           throw new DadgetError({ code: reason.code, message: reason.message }, reason.inserts, reason.ns)
         } else {
           throw JSON.stringify(result)
         }
       })
-      .catch(reason => {
-        let cause = reason instanceof DadgetError ? reason : new DadgetError(ERROR.E2103, [reason.toString()])
+      .catch((reason) => {
+        const cause = reason instanceof DadgetError ? reason : new DadgetError(ERROR.E2103, [reason.toString()])
         return Promise.reject(cause)
       })
   }
 
   private notifyAll() {
-    for (let id in this.updateListeners) {
-      let listener = this.updateListeners[id]
-      if (listener.csn != PREQUERY_CSN && this.notifyCsn > listener.csn) {
-        let now = Date.now()
-        if (listener.minInterval == 0 || now - listener.notifyTime >= listener.minInterval) {
+    for (const id of Object.keys(this.updateListeners)) {
+      const listener = this.updateListeners[id]
+      if (listener.csn !== PREQUERY_CSN && this.notifyCsn > listener.csn) {
+        const now = Date.now()
+        if (listener.minInterval === 0 || now - listener.notifyTime >= listener.minInterval) {
           listener.notifyTime = now
           listener.csn = this.notifyCsn
           listener.listener(this.notifyCsn)
@@ -282,8 +288,8 @@ export default class Dadget extends ServiceEngine {
    * @return 更新通知取り消しに指定するID
    */
   addUpdateListener(listener: (csn: number) => void, minInterval?: number): string {
-    let parent = this
-    if (Object.keys(this.updateListeners).length == 0) {
+    const parent = this
+    if (Object.keys(this.updateListeners).length === 0) {
       class NotifyListener extends Subscriber {
 
         constructor() {
@@ -292,7 +298,7 @@ export default class Dadget extends ServiceEngine {
         }
 
         onReceive(transctionJSON: string) {
-          let transaction = EJSON.parse(transctionJSON) as TransactionObject
+          const transaction = EJSON.parse(transctionJSON) as TransactionObject
           parent.notifyCsn = transaction.csn
           setTimeout(() => {
             parent.notifyAll()
@@ -302,16 +308,16 @@ export default class Dadget extends ServiceEngine {
 
       if (!this.updateListenerKey) {
         this.node.subscribe(CORE_NODE.PATH_TRANSACTION.replace(/:database\b/g, this.database), new NotifyListener())
-          .then(key => { this.updateListenerKey = key })
+          .then((key) => { this.updateListenerKey = key })
       }
     }
 
-    let id = uuidv1()
+    const id = uuidv1()
     this.updateListeners[id] = {
-      listener: listener
-      , csn: this.currentCsn
-      , minInterval: minInterval || 0
-      , notifyTime: 0
+      listener,
+      csn: this.currentCsn,
+      minInterval: minInterval || 0,
+      notifyTime: 0,
     }
     return id
   }
@@ -322,7 +328,7 @@ export default class Dadget extends ServiceEngine {
    */
   removeUpdateListener(id: string) {
     delete this.updateListeners[id]
-    if (Object.keys(this.updateListeners).length == 0) {
+    if (Object.keys(this.updateListeners).length === 0) {
       if (this.updateListenerKey) {
         this.node.unsubscribe(this.updateListenerKey)
         this.updateListenerKey = null
