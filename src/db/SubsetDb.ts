@@ -46,13 +46,13 @@ export class SubsetDb {
 
   update(obj: { [key: string]: any }): Promise<void> {
     console.log("update:", JSON.stringify(obj));
-    return this.db.replaceOne(obj._id, obj)
+    return this.db.replaceOneById(obj._id, obj)
       .catch((err) => Promise.reject(new DadgetError(ERROR.E1203, [err.toString()])))
   }
 
   delete(obj: { [key: string]: any }): Promise<void> {
     console.log("delete:", JSON.stringify(obj));
-    return this.db.deleteOne(obj._id)
+    return this.db.deleteOneById(obj._id)
       .catch((err) => Promise.reject(new DadgetError(ERROR.E1204, [err.toString()])))
   }
 

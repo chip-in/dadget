@@ -15,15 +15,15 @@ export interface IDb {
 
   insertMany(docs: object[]): Promise<void>
 
-  increment(id: string): Promise<number>
+  increment(id: string, field: string): Promise<number>
 
   updateOneById(id: string, update: object): Promise<void>
 
   updateOne(filter: object, update: object): Promise<void>
 
-  replaceOne(id: string, doc: object): Promise<void>
+  replaceOneById(id: string, doc: object): Promise<void>
 
-  deleteOne(id: string): Promise<void>
+  deleteOneById(id: string): Promise<void>
 
   deleteAll(): Promise<void>
 

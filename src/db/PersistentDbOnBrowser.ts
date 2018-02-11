@@ -35,7 +35,7 @@ export class PersistentDb implements IDb {
     return Promise.resolve()
   }
 
-  increment(id: string): Promise<number> {
+  increment(id: string, field: string): Promise<number> {
     return Promise.resolve(0)
   }
 
@@ -47,11 +47,11 @@ export class PersistentDb implements IDb {
     return Promise.resolve()
   }
 
-  replaceOne(id: string, doc: object): Promise<void> {
+  replaceOneById(id: string, doc: object): Promise<void> {
     return Promise.resolve()
   }
 
-  deleteOne(id: string): Promise<void> {
+  deleteOneById(id: string): Promise<void> {
     return Promise.resolve()
   }
 

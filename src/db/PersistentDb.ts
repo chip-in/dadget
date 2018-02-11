@@ -49,12 +49,12 @@ export class PersistentDb implements IDb {
     return PersistentDb.dbMap[this.database].collection(this.collection).insertMany(docs).then(() => { })
   }
 
-  increment(id: string): Promise<number> {
+  increment(id: string, field: string): Promise<number> {
     return PersistentDb.dbMap[this.database].collection(this.collection)
-      .findOneAndUpdate({ _id: id }, { $inc: { seq: 1 } }, { returnOriginal: false })
+      .findOneAndUpdate({ _id: id }, { $inc: { [field]: 1 } }, { returnOriginal: false })
       .then((result) => {
         if (result.ok) {
-          return result.value.seq
+          return result.value[field]
         } else {
           return Promise.reject(result.lastErrorObject.toString())
         }
@@ -75,14 +75,14 @@ export class PersistentDb implements IDb {
       })
   }
 
-  replaceOne(id: string, doc: object): Promise<void> {
+  replaceOneById(id: string, doc: object): Promise<void> {
     return PersistentDb.dbMap[this.database].collection(this.collection).replaceOne({ _id: id }, doc)
       .then((result) => {
         if (!result.result.ok || result.result.nModified !== 1) { throw new Error("failed to replace: " + JSON.stringify(result)) }
       })
   }
 
-  deleteOne(id: string): Promise<void> {
+  deleteOneById(id: string): Promise<void> {
     return PersistentDb.dbMap[this.database].collection(this.collection).deleteOne({ _id: id })
       .then((result) => {
         if (!result.result.ok) { throw new Error("failed to delete: " + JSON.stringify(result)) }

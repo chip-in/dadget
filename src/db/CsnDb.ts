@@ -28,7 +28,7 @@ export class CsnDb {
    * increment csn
    */
   increment(): Promise<number> {
-    return this.db.increment(CSN_ID)
+    return this.db.increment(CSN_ID, "seq")
       .then((result) => {
         console.log("increment value:", result);
         return result

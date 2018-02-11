@@ -51,16 +51,19 @@ export class TransactionRequest {
   static applyOperator(transaction: TransactionRequest): { [key: string]: any } {
     if (!transaction.before) { throw new Error("transaction.before is missing.") }
     if (!transaction.operator) { throw new Error("transaction.operator is missing.") }
-    let obj = Object.assign({}, transaction.before) as { [key: string]: any }
-    const operator = transaction.operator
+    const obj = Object.assign({}, transaction.before) as { [key: string]: any }
+    const transactionObject = transaction as TransactionObject
+    return TransactionRequest.applyMongodbUpdate(obj, transaction.operator, transactionObject.datetime)
+  }
+
+  static applyMongodbUpdate(obj: object, operator: { [op: string]: object }, currentDate?: Date) {
     for (const op of Object.keys(operator)) {
       const list = operator[op] as { [key: string]: any }
       switch (op) {
         case "$currentDate":
           // Timestamp is not supported.
-          const _transaction = transaction as TransactionObject
           for (const key of Object.keys(list)) {
-            obj = updateField(obj, key.split("."), (org) => _transaction.datetime)
+            obj = updateField(obj, key.split("."), (org) => currentDate)
           }
           break
         case "$inc":
