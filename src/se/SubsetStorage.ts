@@ -1,5 +1,5 @@
 import * as http from "http";
-import * as  ReadWriteLock from "rwlock"
+import * as ReadWriteLock from "rwlock"
 import * as URL from "url"
 import * as EJSON from "../util/Ejson"
 
@@ -13,6 +13,7 @@ import { SubsetDb } from "../db/SubsetDb"
 import { TransactionObject, TransactionRequest, TransactionType } from "../db/Transaction"
 import { ERROR } from "../Errors"
 import { DadgetError } from "../util/DadgetError"
+import { LogicalOperator } from "../util/LogicalOperator";
 import { ProxyHelper } from "../util/ProxyHelper"
 import { CsnMode, default as Dadget, QueryResult } from "./Dadget"
 import { DatabaseRegistry, SubsetDef } from "./DatabaseRegistry"
@@ -32,55 +33,32 @@ class UpdateProcessor extends Subscriber {
   }
 
   onReceive(msg: string) {
+    // TODO キャッシュの場合は到着したトランザクションの時刻基準で1分以上前のジャーナル削除。頻繁に実行されすぎないように
     this.storage.logger.debug("onReceive: " + msg)
     const transaction = EJSON.parse(msg) as TransactionObject;
     this.lock.writeLock((release1) => {
+      this.storage.logger.debug("get writeLock1")
       this.storage.getLock().writeLock((release2) => {
-        this.storage.logger.debug("get writeLock")
+        this.storage.logger.debug("get writeLock2")
         this.storage.getCsnDb().getCurrentCsn()
           .then((csn) => {
             if (csn === 0 && transaction.csn > 1) {
               // Assume that the csn number of a MQTT retain message is advanced.
-              const query = this.subsetDefinition.query ? this.subsetDefinition.query : {}
-              Promise.resolve()
+              this.storage.logger.debug("release writeLock2")
+              release2()
+              this.resetData(transaction.csn)
                 .then(() => {
-                  this.storage.logger.debug("release writeLock")
-                  release2()
-                })
-                .then(() => Dadget._query(this.storage.getNode(), this.database, query, undefined, undefined, undefined, transaction.csn, "latest")
-                  .catch((e) => {
-                    if (e.queryResult) { return e.queryResult }
-                    throw e
-                  }),
-              )
-                .then((result) => {
-                  this.storage.getLock().writeLock((release3) => {
-                    Promise.resolve()
-                      .then(() => this.storage.getSubsetDb().deleteAll())
-                      .then(() => this.storage.getSubsetDb().insertMany(result.resultSet))
-                      .then(() => this.storage.getCsnDb().update(result.csn ? result.csn : transaction.csn))
-                      .then(() => {
-                        this.storage.logger.debug("release writeLock")
-                        release3()
-                        release1()
-                      })
-                      .catch((e) => {
-                        this.storage.logger.error("UpdateProcessor Error: ", e.toString())
-                        this.storage.logger.debug("release writeLock")
-                        release3()
-                        release1()
-                      })
-                  })
+                  this.storage.logger.debug("release writeLock1")
+                  release1()
                 })
                 .catch((e) => {
-                  this.storage.logger.error("UpdateProcessor Error: ", e.toString())
-                  this.storage.logger.debug("release writeLock")
-                  release2()
+                  this.storage.logger.debug("release writeLock1")
                   release1()
                 })
             } else if (csn >= transaction.csn) {
-              this.storage.logger.debug("release writeLock")
+              this.storage.logger.debug("release writeLock2")
               release2()
+              this.storage.logger.debug("release writeLock1")
               release1()
             } else {
               this.updateQueue[transaction.csn] = transaction
@@ -113,25 +91,79 @@ class UpdateProcessor extends Subscriber {
                 })
               }
               promise.then(() => {
-                this.storage.logger.debug("release writeLock")
+                this.storage.logger.debug("release writeLock2")
                 release2()
+                this.storage.logger.debug("release writeLock1")
                 release1()
-              }).catch((e) => {
+                }).catch((e) => {
                 this.storage.logger.error("UpdateProcessor Error: ", e.toString())
-                this.storage.logger.debug("release writeLock")
+                this.storage.logger.debug("release writeLock2")
                 release2()
+                this.storage.logger.debug("release writeLock1")
                 release1()
-              })
+                })
             }
           })
           .catch((e) => {
             this.storage.logger.error("UpdateProcessor Error: ", e.toString())
-            this.storage.logger.debug("release writeLock")
+            this.storage.logger.debug("release writeLock2")
             release2()
+            this.storage.logger.debug("release writeLock1")
             release1()
-          })
+        })
       })
     })
+  }
+
+  resetDataWithLock(csn: number) {
+    this.lock.writeLock((release1) => {
+      this.storage.logger.debug("get writeLock1")
+      this.resetData(csn)
+        .then(() => {
+          this.storage.setReady()
+          this.storage.logger.debug("release writeLock1")
+          release1()
+        })
+        .catch((e) => {
+          this.storage.logger.debug("release writeLock1")
+          release1()
+        })
+    })
+  }
+
+  resetData(csn: number): Promise<void> {
+    const query = this.subsetDefinition.query ? this.subsetDefinition.query : {}
+    const promise = Promise.resolve()
+    return promise.then(() => Dadget._query(this.storage.getNode(), this.database, query, undefined, undefined, undefined, csn, "latest")
+      .catch((e) => {
+        if (e.queryResult) { return e.queryResult }
+        throw e
+      }),
+    )
+      .then((result) => {
+        this.storage.getLock().writeLock((release3) => {
+          this.storage.logger.debug("get writeLock3")
+          Promise.resolve()
+            .then(() => this.storage.getSubsetDb().deleteAll())
+            .then(() => this.storage.getSubsetDb().insertMany(result.resultSet))
+            .then(() => this.storage.getCsnDb().update(result.csn ? result.csn : csn))
+            .then(() => {
+              this.storage.setReady()
+              this.storage.logger.debug("release writeLock3")
+              release3()
+            })
+            .catch((e) => {
+              this.storage.logger.debug("release writeLock3")
+              release3()
+              throw e
+            })
+        })
+      })
+      .catch((e) => {
+        this.storage.logger.error("UpdateProcessor Error: ", e.toString())
+        throw e
+      })
+
   }
 }
 
@@ -182,6 +214,7 @@ export class SubsetStorage extends ServiceEngine implements Proxy {
   private lock: ReadWriteLock
   private queryWaitingList: { [csn: number]: Array<() => void> } = {}
   private subscriberKey: string | null
+  private readyFlag: boolean = false
 
   constructor(option: SubsetStorageConfigDef) {
     super(option)
@@ -208,6 +241,10 @@ export class SubsetStorage extends ServiceEngine implements Proxy {
 
   getLock(): ReadWriteLock {
     return this.lock
+  }
+
+  setReady(): void {
+    this.readyFlag = true
   }
 
   pullQueryWaitingList(csn: number): Array<() => void> {
@@ -278,6 +315,11 @@ export class SubsetStorage extends ServiceEngine implements Proxy {
     ).then((value) => {
       this.mountHandle = value
     })
+    if (this.type === "cache") {
+      promise = promise.then(() => listener.resetDataWithLock(0))
+    } else {
+      this.setReady()
+    }
 
     this.logger.debug("SubsetStorage is started")
     return promise
@@ -307,7 +349,7 @@ export class SubsetStorage extends ServiceEngine implements Proxy {
       return ProxyHelper.procPost(req, res, (data) => {
         this.logger.debug("/query")
         const request = EJSON.parse(data)
-        return this.query(request.csn, request.query, request.sort, request.limit, request.offset, request.csnMode)
+        return this.query(request.csn, request.query, request.sort, request.limit, request.csnMode)
           .then((result) => ({ status: "OK", result }))
       })
     } else {
@@ -316,15 +358,11 @@ export class SubsetStorage extends ServiceEngine implements Proxy {
     }
   }
 
-  query(csn: number, restQuery: object, sort?: object, limit?: number, offset?: number, csnMode?: CsnMode): Promise<QueryResult> {
+  query(csn: number, query: object, sort?: object, limit?: number, csnMode?: CsnMode): Promise<QueryResult> {
     // TODO csn が0の場合は、最新のcsnを取得、それ以外の場合はcsnを一致させる
-    if (this.type === "cache") {
-      // TODO cacheの場合 とりあえず空レスポンス
-      this.logger.debug("query: cache")
-      return Promise.resolve({ csn, resultSet: [], restQuery, csnMode })
-    } else if (this.type === "persistent") {
-      // TODO persistentの場合
-      this.logger.debug("query: persistent")
+    const innerQuery = LogicalOperator.getInsideOfCache(query, this.subsetDefinition.query)
+    if (innerQuery && this.readyFlag) {
+      const restQuery = LogicalOperator.getOutsideOfCache(query, this.subsetDefinition.query)
       // TODO csnが0以外の場合はそのcsnに合わせる csnが変更されないようにロックが必要
       let release: () => void
       const promise = new Promise<void>((resolve, reject) => {
@@ -339,25 +377,19 @@ export class SubsetStorage extends ServiceEngine implements Proxy {
         .then(() => this.getCsnDb().getCurrentCsn())
         .then((_) => {
           currentCsn = _
-          if (csn > 1 && currentCsn === 0) {
-            // Data not acquired yet
-            this.logger.debug("Data not acquired yet")
-            this.logger.debug("release readLock")
-            release()
-            return { csn, resultSet: [], restQuery }
-          } else if (csn === 0 || csn === currentCsn || (csn < currentCsn && csnMode === "latest")) {
-            return this.getSubsetDb().find(restQuery, sort, limit, offset)
+          if (csn === 0 || csn === currentCsn || (csn < currentCsn && csnMode === "latest")) {
+            return this.getSubsetDb().find(innerQuery, sort, limit)
               .then((result) => {
                 this.logger.debug("release readLock")
                 release()
-                return { csn: currentCsn, resultSet: result, restQuery: {} }
+                return { csn: currentCsn, resultSet: result, restQuery }
               })
           } else if (csn < currentCsn) {
             this.logger.debug("rollback transactions", String(csn), String(currentCsn))
             // rollback transactions
             // TODO 先にJournalから影響するトランザクションを取得して影響するオブジェクト件数分を多く取得
             let result: object
-            return this.getSubsetDb().find(restQuery, sort, limit, offset)
+            return this.getSubsetDb().find(innerQuery, sort, limit)
               .then((_) => {
                 result = _
                 this.logger.debug("release readLock")
@@ -366,11 +398,11 @@ export class SubsetStorage extends ServiceEngine implements Proxy {
               })
               .then((transactions) => {
                 if (transactions.length < currentCsn - csn) {
-                  return { csn, resultSet: [], restQuery }
+                  return { csn, resultSet: [], restQuery: query }
                 }
                 // TODO 検索条件に合うかどうかで結果に加えるかあるいは除外するかなどの処理
 
-                return { csn, resultSet: result, restQuery: {} }
+                return { csn, resultSet: result, restQuery }
               })
           } else {
             this.logger.debug("wait for transactions", String(csn), String(currentCsn))
@@ -378,9 +410,9 @@ export class SubsetStorage extends ServiceEngine implements Proxy {
             return new Promise<QueryResult>((resolve, reject) => {
               if (!this.queryWaitingList[csn]) { this.queryWaitingList[csn] = [] }
               this.queryWaitingList[csn].push(() => {
-                return this.getSubsetDb().find(restQuery, sort, limit, offset)
+                return this.getSubsetDb().find(innerQuery, sort, limit)
                   .then((result) => {
-                    resolve({ csn, resultSet: result, restQuery: {} })
+                    resolve({ csn, resultSet: result, restQuery })
                   })
               })
               this.logger.debug("release readLock")
@@ -394,6 +426,6 @@ export class SubsetStorage extends ServiceEngine implements Proxy {
           return Promise.reject(e)
         })
     }
-    throw new Error(`SubsetStorage type ${this.type} is not supported.`)
+    return Promise.resolve({ csn, resultSet: [], restQuery: query, csnMode })
   }
 }

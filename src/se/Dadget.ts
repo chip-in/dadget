@@ -1,5 +1,7 @@
-import { ResourceNode, ServiceEngine, Subscriber } from "@chip-in/resource-node"
+import * as parser from "mongo-parse"
 import { v1 as uuidv1 } from "uuid"
+
+import { ResourceNode, ServiceEngine, Subscriber } from "@chip-in/resource-node"
 import { CORE_NODE } from "../Config"
 import { TransactionObject, TransactionRequest, TransactionType } from "../db/Transaction"
 import { ERROR } from "../Errors"
@@ -42,7 +44,7 @@ export class QueryResult {
   /**
    * 問い合わせに対するオブジェクトを全て列挙できなかった場合に、残った集合に対するクエリ（サブセットのクエリハンドラの場合のみで、クエリルータの返却時は undefined）
    */
-  restQuery: object
+  restQuery: object | undefined
 
   queryHandlers?: QueryHandler[]
 
@@ -113,16 +115,6 @@ export default class Dadget extends ServiceEngine {
     return seList;
   }
 
-  /**
-   * サブセットのクエリの結果をマージ
-   * @param resultSet1
-   * @param resultSet2
-   */
-  static margeResultSet(resultSet1: object[], resultSet2: object[]): object[] {
-    // TODO ソート？
-    return [...resultSet1, ...resultSet2];
-  }
-
   public static _query(
     node: ResourceNode,
     database: string,
@@ -136,25 +128,62 @@ export default class Dadget extends ServiceEngine {
     let queryHandlers = node.searchServiceEngine("QueryHandler", { database }) as QueryHandler[]
     queryHandlers = Dadget.sortQueryHandlers(queryHandlers)
     if (!csn) { csn = 0 }
+    const _offset = offset ? offset : 0
+    const maxLimit = limit ? limit + _offset : undefined
     const resultSet: object[] = []
-    return Promise.resolve({ csn, resultSet, restQuery: query, queryHandlers, csnMode })
+    return Promise.resolve({ csn, resultSet, restQuery: query, queryHandlers, csnMode } as QueryResult)
       .then(function queryFallback(request): Promise<QueryResult> {
-        if (!Object.keys(request.restQuery).length) { return Promise.resolve(request) }
-        if (request.queryHandlers.length === 0) {
+        if (!request.restQuery) { return Promise.resolve(request) }
+        if (!request.queryHandlers || request.queryHandlers.length === 0) {
           const error = new Error("The queryHandlers has been empty before completing queries.") as any
           error.queryResult = request
           throw error
         }
         const qh = request.queryHandlers.shift()
         if (qh == null) { throw new Error("The queryHandlers has been empty before completing queries.") }
-        return qh.query(request.csn, request.restQuery, sort, limit, offset, csnMode)
+        return qh.query(request.csn, request.restQuery, sort, maxLimit, csnMode)
           .then((result) => queryFallback({
             csn: result.csn,
-            resultSet: Dadget.margeResultSet(request.resultSet, result.resultSet),
+            resultSet: [...request.resultSet, ...result.resultSet],
             restQuery: result.restQuery,
             queryHandlers: request.queryHandlers,
             csnMode: result.csnMode,
           }));
+      })
+      .then((result) => {
+        const itemMap: { [id: string]: any } = {}
+        let hasDupulicate = false
+        for (const item of result.resultSet as Array<{ _id: string }>) {
+          if (itemMap[item._id]) {
+            console.log("hasDupulicate:" + item._id)
+            hasDupulicate = true
+          }
+          itemMap[item._id] = item
+        }
+        let list: object[]
+        if (hasDupulicate) {
+          list = []
+          for (const id of Object.keys(itemMap)) {
+            list.push(itemMap[id])
+          }
+        } else {
+          list = result.resultSet
+        }
+        if (sort) {
+          list = parser.search(list, {}, sort) as object[]
+          if (_offset) {
+            if (limit) {
+              list = list.slice(_offset, _offset + limit)
+            } else {
+              list = list.slice(_offset)
+            }
+          } else {
+            if (limit) {
+              list = list.slice(0, limit)
+            }
+          }
+        }
+        return { ...result, resultSet: list }
       })
   }
 

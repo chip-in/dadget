@@ -78,8 +78,8 @@ export class QueryHandler extends ServiceEngine {
     return Promise.resolve()
   }
 
-  query(csn: number, restQuery: object, sort?: object, limit?: number, offset?: number, csnMode?: CsnMode): Promise<QueryResult> {
-    const request = { csn, query: restQuery, sort, limit, offset, csnMode }
+  query(csn: number, query: object, sort?: object, limit?: number, csnMode?: CsnMode): Promise<QueryResult> {
+    const request = { csn, query, sort, limit, csnMode }
     return this.node.fetch(CORE_NODE.PATH_SUBSET
       .replace(/:database\b/g, this.database)
       .replace(/:subset\b/g, this.subsetName) + "/query", {

@@ -1,8 +1,9 @@
+import * as parser from "mongo-parse"
 import * as EJSON from "../util/Ejson"
 
 import { ResourceNode, ServiceEngine, Subscriber } from "@chip-in/resource-node"
 import { CORE_NODE } from "../Config"
-import { TransactionObject } from "../db/Transaction"
+import { TransactionObject, TransactionRequest, TransactionType } from "../db/Transaction"
 import { ERROR } from "../Errors"
 import { DadgetError } from "../util/DadgetError"
 import { DatabaseRegistry, SubsetDef } from "./DatabaseRegistry"
@@ -71,8 +72,53 @@ export class UpdateManager extends ServiceEngine {
       }
 
       convertTransactionForSubset(transaction: TransactionObject): TransactionObject {
-        // TODO サブセット用のトランザクション内容に変換
-        return transaction
+        // サブセット用のトランザクション内容に変換
+
+        if (!this.subsetDefinition.query) { return transaction }
+        const query = parser.parse(this.subsetDefinition.query)
+
+        if (transaction.type === TransactionType.INSERT && transaction.new) {
+          if (query.matches(transaction.new, false)) {
+            // insert in INSERT
+            return transaction
+          } else {
+            // insert out NONE
+            return { ...transaction, type: TransactionType.NONE, new: undefined }
+          }
+        }
+
+        if (transaction.type === TransactionType.UPDATE && transaction.before) {
+          const updateObj = TransactionRequest.applyOperator(transaction)
+          if (query.matches(transaction.before, false)) {
+            if (query.matches(updateObj, false)) {
+              // update in -> in UPDATE
+              return transaction
+            } else {
+              // update in -> out DELETE
+              return { ...transaction, type: TransactionType.DELETE, operator: undefined }
+            }
+          } else {
+            if (query.matches(updateObj, false)) {
+              // update out -> in INSERT
+              return { ...transaction, type: TransactionType.INSERT, new: updateObj, before: undefined, operator: undefined }
+            } else {
+              // update out -> out NONE
+              return { ...transaction, type: TransactionType.NONE, before: undefined, operator: undefined }
+            }
+          }
+        }
+
+        if (transaction.type === TransactionType.DELETE && transaction.before) {
+          if (query.matches(transaction.before, false)) {
+            // delete in DELETE
+            return transaction
+          } else {
+            // delete out NONE
+            return { ...transaction, type: TransactionType.NONE, before: undefined }
+          }
+        }
+        this.logger.warn("Bad transaction data:", JSON.stringify(transaction))
+        throw new Error("Bad transaction data")
       }
 
       onReceive(transctionJSON: string) {
