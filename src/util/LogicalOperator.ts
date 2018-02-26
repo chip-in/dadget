@@ -1,62 +1,256 @@
 import { diff } from "deep-diff"
 
-const $and = "$and"
-const $or = "$or"
-const $not = "$not"
-
 // TODO 簡易形式からの展開とコンパクト化
 
 export class LogicalOperator {
+  static isEqual(cond1: any, cond2: any): boolean {
+    // expandLogicalQueryしてから同一か確認？
+    return false;
+  }
   static getInsideOfCache(cond: any, cacheCond: any): object | undefined {
     if (cacheCond === undefined) { return cond }
-    let query: any = { $and: [cond, cacheCond] }
+    let query: Operator
     indent = 0
-    let result = query
+    let result = Operator.fromMongo({ $and: [cond, cacheCond] })
     do {
       query = result
       result = expandLogicalQuery(query)
-    } while (diff(result, query))
-    if (result === false) { return undefined }
-    //    if (result === true) { return cond }
-    return result
+    } while (diff(result.toMongo(), query.toMongo()))
+    if (result instanceof FalseOperator) { return undefined }
+    if (result instanceof TrueOperator) { return cond }
+    return Operator.toMongo(result)
   }
 
   static getOutsideOfCache(cond: any, cacheCond: any): object | undefined {
     if (cacheCond === undefined) { return undefined }
-    let query: any = { $and: [cond, { $not: cacheCond }] }
+    let query: Operator
     indent = 0
-    let result = query
+    let result = Operator.fromMongo({ $and: [cond, { $not: cacheCond }] })
     do {
       query = result
       result = expandLogicalQuery(query)
-    } while (diff(result, query))
-    if (result === false) { return undefined }
-    if (result === true) { return cond }
-    return result
+    } while (diff(result.toMongo(), query.toMongo()))
+    if (result instanceof FalseOperator) { return undefined }
+    if (result instanceof TrueOperator) { return cond }
+    return Operator.toMongo(result)
+  }
+}
+
+const parserMap: { [key: string]: (query: any) => Operator } = {}
+
+parserMap.$and = (query: any): Operator => {
+  if (query instanceof Array) {
+    return new AndOperator(query.map((val) => Operator.fromMongo(val)))
+  }
+  throw new Error("Not supported query:" + JSON.stringify(query))
+}
+
+parserMap.$not = (query: any): Operator => {
+  return new NotOperator(Operator.fromMongo(query))
+}
+
+parserMap.$nor = (query: any): Operator => {
+  if (query instanceof Array) {
+    return new NotOperator(new OrOperator(query.map((val) => Operator.fromMongo(val))))
+  }
+  throw new Error("Not supported query:" + JSON.stringify(query))
+}
+
+parserMap.$or = (query: any): Operator => {
+  if (query instanceof Array) {
+    return new OrOperator(query.map((val) => Operator.fromMongo(val)))
+  }
+  throw new Error("Not supported query:" + JSON.stringify(query))
+}
+
+const comparisonParserMap: { [key: string]: (field: string, val: any, wholeQuery: any) => Operator | false } = {}
+
+comparisonParserMap.$eq = (field: string, val: any, wholeQuery: any): Operator | false => {
+  return new EqOperator(field, val)
+}
+
+comparisonParserMap.$gt = (field: string, val: any, wholeQuery: any): Operator | false => {
+  return new GtOperator(field, val)
+}
+
+comparisonParserMap.$gte = (field: string, val: any, wholeQuery: any): Operator | false => {
+  return new GteOperator(field, val)
+}
+
+comparisonParserMap.$in = (field: string, val: any, wholeQuery: any): Operator | false => {
+  if (val instanceof Array) { return new InOperator(field, val) }
+  throw new Error("Not supported query:" + JSON.stringify(wholeQuery))
+}
+
+comparisonParserMap.$lt = (field: string, val: any, wholeQuery: any): Operator | false => {
+  return new LtOperator(field, val)
+}
+
+comparisonParserMap.$lte = (field: string, val: any, wholeQuery: any): Operator | false => {
+  return new LteOperator(field, val)
+}
+
+comparisonParserMap.$ne = (field: string, val: any, wholeQuery: any): Operator | false => {
+  return new NotValueOperator(field, new EqOperator(field, val))
+}
+
+comparisonParserMap.$nin = (field: string, val: any, wholeQuery: any): Operator | false => {
+  if (val instanceof Array) { return new NotValueOperator(field, new InOperator(field, val)) }
+  throw new Error("Not supported query:" + JSON.stringify(wholeQuery))
+}
+
+comparisonParserMap.$regex = (field: string, val: any, wholeQuery: any): Operator | false => {
+  return new RegexOperator(field, val, wholeQuery.$options)
+}
+
+comparisonParserMap.$options = (field: string, val: any, wholeQuery: any): Operator | false => {
+  return false
+}
+
+comparisonParserMap.$not = (field: string, val: any, wholeQuery: any): Operator | false => {
+  const op = ValueOperator.fromFieldAndQuery(field, val)
+  if (op instanceof ValueOperator) { return new NotValueOperator(field, op) }
+  throw new Error("Not supported query:" + JSON.stringify(wholeQuery))
+}
+
+abstract class Operator {
+  static fromMongo(query: any): Operator {
+    if (query instanceof Object) {
+      const opList: Operator[] = []
+      for (const key of Object.keys(query)) {
+        if (key in parserMap) {
+          opList.push(parserMap[key](query[key]))
+        } else {
+          opList.push(ValueOperator.fromFieldAndQuery(key, query[key]))
+        }
+      }
+      return new AndOperator(opList)
+    }
+    return FALSE
+  }
+
+  static toMongo(query: Operator): object | undefined {
+    if (query === undefined) { return undefined }
+    if (query instanceof FalseOperator) { return undefined }
+    return query.toMongo()
+  }
+
+  abstract toMongo(): object
+
+  toString() { return JSON.stringify(this.toMongo()) }
+}
+
+class TrueOperator extends Operator {
+  toMongo(): object { return {} }
+}
+
+class FalseOperator extends Operator {
+  toMongo(): object { return { bool: false } }
+}
+
+const TRUE = new TrueOperator()
+const FALSE = new FalseOperator()
+
+class AndOperator extends Operator {
+  constructor(public opList: Operator[]) { super() }
+  toMongo(): object { return { $and: this.opList.map((val) => val.toMongo()) } }
+}
+
+class OrOperator extends Operator {
+  constructor(public opList: Operator[]) { super() }
+  toMongo(): object { return { $or: this.opList.map((val) => val.toMongo()) } }
+}
+
+class NotOperator extends Operator {
+  constructor(public op: Operator) { super() }
+  toMongo(): object {
+    if (this.op instanceof OrOperator) { return { $nor: this.op.opList.map((val) => val.toMongo()) } }
+    return { $not: this.op.toMongo() }
+  }
+}
+
+abstract class ValueOperator extends Operator {
+  constructor(public field: string) { super() }
+
+  static fromFieldAndQuery(field: string, query: any): Operator {
+    if (query instanceof Array) {
+      return new EqOperator(field, query)
+
+    } else if (query instanceof Object) {
+      const opList: Operator[] = []
+      for (const op of Object.keys(query)) {
+        if (op in comparisonParserMap) {
+          const _op = comparisonParserMap[op](field, query[op], query)
+          if (_op) { opList.push(_op) }
+        } else {
+          opList.push(ValueOperator.fromFieldAndQuery(field, query[op]))
+        }
+      }
+      if (opList.length === 1) { return opList[0] }
+      return new AndOperator(opList)
+    }
+    return new EqOperator(field, query)
+  }
+}
+
+class NotValueOperator extends ValueOperator {
+  constructor(field: string, public op: ValueOperator) { super(field) }
+  toMongo(): object {
+    if (this.op instanceof EqOperator) { return { [this.field]: { $ne: this.op.val } } }
+    if (this.op instanceof InOperator) { return { [this.field]: { $nin: this.op.val } } }
+    //    if (this.op instanceof RegexOperator) { throw new Error("未対応") } TODO 検索前変更
+    const valueOp = this.op.toMongo() as any
+    const exp: any = valueOp[this.field]
+    return { [this.field]: { $not: exp } }
+  }
+}
+class EqOperator extends ValueOperator {
+  constructor(field: string, public val: any) { super(field) }
+  toMongo(): object { return { [this.field]: this.val } }
+}
+class GtOperator extends ValueOperator {
+  constructor(field: string, public val: any) { super(field) }
+  toMongo(): object { return { [this.field]: { $gt: this.val } } }
+}
+class GteOperator extends ValueOperator {
+  constructor(field: string, public val: any) { super(field) }
+  toMongo(): object { return { [this.field]: { $gte: this.val } } }
+}
+class InOperator extends ValueOperator {
+  constructor(field: string, public val: any[]) { super(field) }
+  toMongo(): object { return { [this.field]: { $in: this.val } } }
+}
+class LtOperator extends ValueOperator {
+  constructor(field: string, public val: any) { super(field) }
+  toMongo(): object { return { [this.field]: { $lt: this.val } } }
+}
+class LteOperator extends ValueOperator {
+  constructor(field: string, public val: any) { super(field) }
+  toMongo(): object { return { [this.field]: { $lte: this.val } } }
+}
+class RegexOperator extends ValueOperator {
+  constructor(field: string, public val: any, public options?: any) { super(field) }
+  toMongo(): object {
+    if (this.options) { return { [this.field]: { $regex: this.val, $options: this.options } } }
+    return { [this.field]: { $regex: this.val } }
   }
 }
 
 let indent = 0
 
-const expandLogicalQuery = (query: any): any => {
-  if (query === true || query === false) { return query }
+const expandLogicalQuery = (query: Operator): Operator => {
+  if (query instanceof TrueOperator || query instanceof FalseOperator) { return query }
   indent++;
   try {
-    console.log(" ".repeat(indent) + JSON.stringify(query))
-    if ($and in query) {
-      if (query.$and === false) { return false }
-      if (query.$and === true) { return true }
-      if (query.$and.length === 0) { return false } // falseが空集合
-      return query.$and.reduce(expandAndOperand, true)
+    console.log(" ".repeat(indent) + query)
+    if (query instanceof AndOperator) {
+      return query.opList.reduce(expandAndOperand, TRUE)
     }
-    if ($or in query) {
-      if (query.$or === false) { return false }
-      if (query.$or === true) { return true }
-      if (query.$or.length === 0) { return false }
-      return query.$or.reduce(expandOrOperand, false)
+    if (query instanceof OrOperator) {
+      return query.opList.reduce(expandOrOperand, FALSE)
     }
-    if ($not in query) {
-      return expandNotOperand(query.$not)
+    if (query instanceof NotOperator) {
+      return expandNotOperand(query.op)
     }
     return query
   } finally {
@@ -64,168 +258,184 @@ const expandLogicalQuery = (query: any): any => {
   }
 }
 
-const expandAndOperand = (a: any, b: any) => {
+const expandAndOperand = (a: Operator, b: Operator): Operator => {
   indent++;
   try {
-    console.log(" ".repeat(indent) + JSON.stringify(a) + " and " + JSON.stringify(b))
+    console.log(" ".repeat(indent) + a + " and " + b)
     b = expandLogicalQuery(b)
-    if (a === true) { return b }
-    if (b === true) { return a }
-    if (a === false || b === false) { return false }
-    let c: any = {}
-    if ($and in a) {
-      if ($and in b) {
-        c.$and = combineLogicalAnd(a.$and, b.$and);
-      } else if ($or in b) {
-        c.$or = b.$or.map((x: any) => expandAndOperand(a, x))
-        c = expandLogicalQuery(c)
-      } else {
-        c.$and = combineLogicalAnd(a.$and, b);
-      }
-    } else if ($or in a) {
-      c.$or = a.$or.map((x: any) => expandAndOperand(x, b))
+    if (a instanceof TrueOperator) { return b }
+    if (b instanceof TrueOperator) { return a }
+    if (a instanceof FalseOperator || b instanceof FalseOperator) { return FALSE }
+    let c: Operator
+    if (a instanceof AndOperator) {
+      c = combineLogicalAnd(a, b);
+    } else if (a instanceof OrOperator) {
+      c = new OrOperator(a.opList.map((x: any) => expandAndOperand(x, b)))
       c = expandLogicalQuery(c)
     } else {
-      if ($and in b) {
-        c.$and = combineLogicalAnd([a], b.$and);
-      } else if ($or in b) {
-        c.$or = b.$or.map((x: any) => expandAndOperand(a, x))
+      if (b instanceof AndOperator) {
+        c = combineLogicalAnd(b, a);
+      } else if (b instanceof OrOperator) {
+        c = new OrOperator(b.opList.map((x: any) => expandAndOperand(a, x)))
         c = expandLogicalQuery(c)
       } else {
-        c.$and = combineLogicalAnd([a], b)
+        c = combineLogicalAnd(new AndOperator([a]), b)
       }
     }
-    console.log(" ".repeat(indent) + JSON.stringify(c))
+    console.log(" ".repeat(indent) + c)
     return c
   } finally {
     indent--;
   }
 }
 
-const simplifyVal = (a: any): any => a instanceof Object ? ("$eq" in a ? omitEq(a) : ("$not" in a ? omitNot(a) : a)) : a
-const omitNot = (a: any) => a instanceof Object && "$not" in a && a.$not instanceof Object && "$not" in a.$not ? simplifyVal(a.$not.$not) : a
-const omitEq = (a: any) => a instanceof Object && "$eq" in a ? simplifyVal(a.$eq) : a
-const isPrimitive = (a: any) => a === null || typeof a === "boolean" || typeof a === "number" || typeof a === "string"
-const notAnd = (a: any, b: any) => a instanceof Object && $not in a && !diff(omitEq(a.$not), b)
-const unequalPrimitive = (a: any, b: any) => isPrimitive(a) && isPrimitive(b) && a !== b
-const checkContradiction = (a: any, b: any) => {
-  const aGt = a.$gt ? a.$gt : (a.$not instanceof Object && "$lte" in a.$not ? a.$not.$lte : undefined)
-  const aGte = a.$gte ? a.$gte : (a.$not instanceof Object && "$lt" in a.$not ? a.$not.$lt : undefined)
-  const bLt = b.$lt ? b.$lt : (b.$not instanceof Object && "$gte" in b.$not ? b.$not.$gte : undefined)
-  const bLte = b.$lte ? b.$lte : (b.$not instanceof Object && "$gt" in b.$not ? b.$not.$gt : undefined)
+// const isPrimitive = (a: any) => a === null || typeof a === "boolean" || typeof a === "number" || typeof a === "string"
+const notAnd = (a: ValueOperator, b: ValueOperator) => a instanceof NotValueOperator && !diff(a.op.toMongo(), b.toMongo())
+const unequalPrimitive = (a: ValueOperator, b: ValueOperator) => a instanceof EqOperator && b instanceof EqOperator && diff(a.val, b.val)
+const checkContradiction = (a: ValueOperator, b: ValueOperator) => {
+  const aGt = a instanceof GtOperator ? a.val : (a instanceof NotValueOperator && a.op instanceof LteOperator ? a.op.val : undefined)
+  const aGte = a instanceof GteOperator ? a.val : (a instanceof NotValueOperator && a.op instanceof LtOperator ? a.op.val : undefined)
+  const bLt = b instanceof LtOperator ? b.val : (b instanceof NotValueOperator && b.op instanceof GteOperator ? b.op.val : undefined)
+  const bLte = b instanceof LteOperator ? b.val : (b instanceof NotValueOperator && b.op instanceof GtOperator ? b.op.val : undefined)
   return (aGt !== undefined && bLt !== undefined && aGt >= bLt) ||
     (aGte !== undefined && bLt !== undefined && aGte >= bLt) ||
     (aGt !== undefined && bLte !== undefined && aGt >= bLte)
 }
+const containCond = (a: ValueOperator, b: ValueOperator) => {
+  const aGt = a instanceof GtOperator ? a.val : undefined
+  const aGte = a instanceof GteOperator ? a.val : undefined
+  const aLt = a instanceof LtOperator ? a.val : undefined
+  const aLte = a instanceof LteOperator ? a.val : undefined
+  const bGt = b instanceof GtOperator ? b.val : undefined
+  const bGte = b instanceof GteOperator ? b.val : undefined
+  const bLt = b instanceof LtOperator ? b.val : undefined
+  const bLte = b instanceof LteOperator ? b.val : undefined
+  return (aGt !== undefined && bGt !== undefined && aGt >= bGt) ||
+    (aGte !== undefined && bGt !== undefined && aGte > bGt) ||
+    (aGt !== undefined && bGte !== undefined && aGt >= bGte) ||
+    (aGte !== undefined && bGte !== undefined && aGte >= bGte) ||
+    (aLt !== undefined && bLt !== undefined && aLt <= bLt) ||
+    (aLte !== undefined && bLt !== undefined && aLte <= bLt) ||
+    (aLt !== undefined && bLte !== undefined && aLt < bLte) ||
+    (aLte !== undefined && bLte !== undefined && aLte <= bLte)
+}
 
-const combineLogicalAnd = (list: any, condA: any) => {
+const andInAndIn = (a: any[], b: any[]): any[] => {
+  return a.filter((value, index, self) => b.indexOf(value) >= 0)
+}
+
+const combineLogicalAnd = (base: AndOperator, addition: Operator): Operator => {
   indent++;
   try {
-    console.log(" ".repeat(indent) + "combineLogicalAnd " + JSON.stringify(list) + " and " + JSON.stringify(condA))
-    if (list === false) { return false }
-    if (list === true) { return [condA] }
-    if (($and in condA) || ($or in condA) || ($not in condA)) {
-      return list.concat(condA);
-    }
-    for (const key of Object.keys(condA)) {
-      for (const idx of Object.keys(list)) {
-        const condB = list[idx]
-        if (key in condB) {
-          const a = simplifyVal(condA[key])
-          const b = simplifyVal(condB[key])
-          if (!diff(a, b)) {
-            return list;
+    console.log(" ".repeat(indent) + "combineLogicalAnd " + base + " and " + addition)
+    if (addition instanceof ValueOperator) {
+      for (let i = 0; i < base.opList.length; i++) {
+        const cond = base.opList[i]
+        if (cond instanceof ValueOperator && cond.field === addition.field) {
+          if (!diff(cond.toMongo(), addition.toMongo())) { return base }
+          if (notAnd(cond, addition) || notAnd(addition, cond)) { return FALSE }
+          if (unequalPrimitive(cond, addition)) { return FALSE }
+          if (checkContradiction(cond, addition) || checkContradiction(addition, cond)) { return FALSE }
+          if (containCond(cond, addition)) { return base }
+          if (containCond(addition, cond)) {
+            return new AndOperator([...base.opList.slice(0, i), addition, ...base.opList.slice(i + 1)]);
           }
-          if (notAnd(a, b) || notAnd(b, a)) { return false }
-          if (unequalPrimitive(a, b)) { return false }
-          if (a instanceof Object && b instanceof Object) {
-            if (checkContradiction(a, b) || checkContradiction(b, a)) { return false }
-
+          if (cond instanceof InOperator && addition instanceof InOperator) {
+            const val = andInAndIn(cond.val, addition.val)
+            if (val.length === 0) { return FALSE }
+            return new AndOperator([...base.opList.slice(0, i), new InOperator(cond.field, val), ...base.opList.slice(i + 1)]);
+          }
+          if (cond instanceof InOperator && addition instanceof EqOperator) {
+            const val = andInAndIn(cond.val, [addition.val])
+            if (val.length === 0) { return FALSE }
+            return new AndOperator([...base.opList.slice(0, i), addition, ...base.opList.slice(i + 1)]);
+          }
+          if (cond instanceof EqOperator && addition instanceof InOperator) {
+            const val = andInAndIn([cond.val], addition.val)
+            if (val.length === 0) { return FALSE }
+            return base;
+          }
+          if (cond instanceof EqOperator && addition instanceof NotValueOperator && addition.op instanceof InOperator) {
+            if (addition.op.val.indexOf(cond.val) >= 0) { return FALSE }
+            return base;
+          }
+          if (addition instanceof EqOperator && cond instanceof NotValueOperator && cond.op instanceof InOperator) {
+            if (cond.op.val.indexOf(addition.val) >= 0) { return FALSE }
+            return new AndOperator([...base.opList.slice(0, i), addition, ...base.opList.slice(i + 1)]);
+          }
+          if (cond instanceof NotValueOperator && cond.op instanceof InOperator &&
+            addition instanceof NotValueOperator && addition.op instanceof InOperator) {
+            const val = Array.from(new Set([...cond.op.val, ...addition.op.val]))
+            return new AndOperator([
+              ...base.opList.slice(0, i),
+              new NotValueOperator(cond.field, new InOperator(cond.field, val)),
+              ...base.opList.slice(i + 1)]);
           }
         }
       }
     }
-    return list.concat(condA);
+    return new AndOperator([...base.opList, addition]);
   } finally {
     indent--;
   }
 }
 
-const expandOrOperand = (a: any, b: any) => {
+const expandOrOperand = (a: Operator, b: Operator): Operator => {
   indent++;
   try {
-    console.log(" ".repeat(indent) + JSON.stringify(a) + " or " + JSON.stringify(b))
+    console.log(" ".repeat(indent) + a + " or " + b)
     b = expandLogicalQuery(b)
-    if (a === false) { return b }
-    if (b === false) { return a }
-    if (a === true || b === true) { return true }
-    let c: any = {}
-    if ($and in a) {
-      if ($and in b) {
-        if (!diff(a, b)) {
-          c = a
-        } else {
-          c.$or = [a, b]
-        }
-      } else if ($or in b) {
-        c.$or = [a].concat(b.$or)
-      }
-    } else if ($or in a) {
-      if ($or in b) {
-        c.$or = a.$or.concat(b.$or)
+    if (a instanceof FalseOperator) { return b }
+    if (b instanceof FalseOperator) { return a }
+    if (a instanceof TrueOperator || b instanceof TrueOperator) { return TRUE }
+    let c: Operator
+    if (!diff(a.toMongo(), b.toMongo())) {
+      c = a
+    } else if (a instanceof OrOperator) {
+      if (b instanceof OrOperator) {
+        c = new OrOperator([...a.opList, ...b.opList])
       } else {
-        c.$or = a.$or.concat(b)
+        c = new OrOperator([...a.opList, b])
       }
+    } else if (b instanceof OrOperator) {
+      c = new OrOperator([a, ...b.opList])
     } else {
-      if ($and in b) {
-        c.$or = [a, b]
-      } else if ($or in b) {
-        c.$or = [a].concat(b.$or);
-      } else {
-        c.$or = [a, b]
-      }
+      c = new OrOperator([a, b])
     }
-    console.log(" ".repeat(indent) + JSON.stringify(c))
+    console.log(" ".repeat(indent) + c)
     return c
   } finally {
     indent--;
   }
 }
 
-const expandNotOperand = (a: any) => {
+const expandNotOperand = (a: Operator): Operator => {
   indent++;
   try {
-    console.log(" ".repeat(indent) + "not " + JSON.stringify(a))
-    a = simplifyVal(a)
-    if (a === false) { return true }
-    if (a === true) { return false }
-    if (isPrimitive(a)) { return { $not: a } }
+    console.log(" ".repeat(indent) + "not " + a)
+    if (a instanceof FalseOperator) { return TRUE }
+    if (a instanceof TrueOperator) { return FALSE }
+    if (a instanceof NotValueOperator) { return a.op }
+    if (a instanceof ValueOperator) { return new NotValueOperator(a.field, a) }
     a = expandLogicalQuery(a)
-    a = simplifyVal(a)
-    if (a === false) { return true }
-    if (a === true) { return false }
-    if (isPrimitive(a)) { return { $not: a } }
-    let c: any = {}
-    if ($and in a) {
-      c.$or = a.$and.map((x: any) => expandNotOperand(x))
+    if (a instanceof FalseOperator) { return TRUE }
+    if (a instanceof TrueOperator) { return FALSE }
+    if (a instanceof NotValueOperator) { return a.op }
+    if (a instanceof ValueOperator) { return new NotValueOperator(a.field, a) }
+    let c: Operator
+    if (a instanceof AndOperator) {
+      c = new OrOperator(a.opList.map((x: any) => expandNotOperand(x)))
       c = expandLogicalQuery(c)
-    } else if ($or in a) {
-      c.$and = a.$or.map((x: any) => expandNotOperand(x))
+    } else if (a instanceof OrOperator) {
+      c = new AndOperator(a.opList.map((x: any) => expandNotOperand(x)))
       c = expandLogicalQuery(c)
-    } else if ($not in a) {
-      c = expandLogicalQuery(a.$not)
+    } else if (a instanceof NotOperator) {
+      c = expandLogicalQuery(a.op)
     } else {
-      const keys = Object.keys(a)
-      if (keys.length === 1) {
-        const key = keys[0]
-        c[key] = { $not: a[key] }
-      } else {
-        c.$or = keys.map((key: string) => ({ [key]: expandNotOperand(a[key]) }))
-        c = expandLogicalQuery(c)
-      }
+      c = new NotOperator(a)
     }
-    console.log(" ".repeat(indent) + JSON.stringify(c))
-    return simplifyVal(c)
+    console.log(" ".repeat(indent) + c)
+    return c
   } finally {
     indent--;
   }

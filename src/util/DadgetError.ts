@@ -11,6 +11,10 @@ export class DadgetError {
     this.message = err.message
   }
 
+  static from(from: any): DadgetError {
+    return new DadgetError({ code: from.code, message: from.message }, from.inserts, from.ns)
+  }
+
   convertInsertsToString() {
     this.inserts = this.inserts.map((v) => {
       if (typeof v === "string") { return v }

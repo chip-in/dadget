@@ -6,6 +6,17 @@ export class PersistentDb implements IDb {
   private static dbMap: { [database: string]: Db } = {}
   private collection: string
 
+  static convertQuery(query: any): object {
+    for (const key of Object.keys(query)) {
+      if (key === "$not" && query.$not.$regex) {
+        query.$not = new RegExp(query.$not.$regex, query.$not.$options)
+      } else if (query[key] instanceof Object) {
+        query[key] = PersistentDb.convertQuery(query[key])
+      }
+    }
+    return query
+  }
+
   constructor(protected database: string) {
     console.log("PersistentDb is created")
   }
@@ -26,15 +37,15 @@ export class PersistentDb implements IDb {
   }
 
   findOne(query: object): Promise<object | null> {
-    return PersistentDb.dbMap[this.database].collection(this.collection).findOne(query)
+    return PersistentDb.dbMap[this.database].collection(this.collection).findOne(PersistentDb.convertQuery(query))
   }
 
   findOneBySort(query: object, sort: object): Promise<any> {
-    return PersistentDb.dbMap[this.database].collection(this.collection).find(query).sort(sort).limit(1).next()
+    return PersistentDb.dbMap[this.database].collection(this.collection).find(PersistentDb.convertQuery(query)).sort(sort).limit(1).next()
   }
 
   find(query: object, sort?: object, limit?: number, offset?: number): Promise<any> {
-    let cursor = PersistentDb.dbMap[this.database].collection(this.collection).find(query)
+    let cursor = PersistentDb.dbMap[this.database].collection(this.collection).find(PersistentDb.convertQuery(query))
     if (sort) { cursor = cursor.sort(sort) }
     if (offset) { cursor = cursor.skip(offset) }
     if (limit) { cursor = cursor.limit(limit) }

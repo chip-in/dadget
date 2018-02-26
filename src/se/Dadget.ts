@@ -224,7 +224,9 @@ export default class Dadget extends ServiceEngine {
         return result
       })
       .catch((reason) => {
-        const cause = reason instanceof DadgetError ? reason : new DadgetError(ERROR.E2102, [reason.toString()])
+        console.dir(reason)
+        const cause = reason instanceof DadgetError ? reason :
+          (reason.code ? DadgetError.from(reason) : new DadgetError(ERROR.E2102, [reason.toString()]))
         return Promise.reject(cause)
       })
   }
