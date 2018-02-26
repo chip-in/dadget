@@ -1,4 +1,4 @@
-import { diff } from "deep-diff"
+import equal = require("deep-equal");
 
 // TODO 簡易形式からの展開とコンパクト化
 
@@ -15,7 +15,7 @@ export class LogicalOperator {
     do {
       query = result
       result = expandLogicalQuery(query)
-    } while (diff(result.toMongo(), query.toMongo()))
+    } while (!equal(result.toMongo(), query.toMongo()))
     if (result instanceof FalseOperator) { return undefined }
     if (result instanceof TrueOperator) { return cond }
     return Operator.toMongo(result)
@@ -29,7 +29,7 @@ export class LogicalOperator {
     do {
       query = result
       result = expandLogicalQuery(query)
-    } while (diff(result.toMongo(), query.toMongo()))
+    } while (!equal(result.toMongo(), query.toMongo()))
     if (result instanceof FalseOperator) { return undefined }
     if (result instanceof TrueOperator) { return cond }
     return Operator.toMongo(result)
@@ -290,8 +290,8 @@ const expandAndOperand = (a: Operator, b: Operator): Operator => {
 }
 
 // const isPrimitive = (a: any) => a === null || typeof a === "boolean" || typeof a === "number" || typeof a === "string"
-const notAnd = (a: ValueOperator, b: ValueOperator) => a instanceof NotValueOperator && !diff(a.op.toMongo(), b.toMongo())
-const unequalPrimitive = (a: ValueOperator, b: ValueOperator) => a instanceof EqOperator && b instanceof EqOperator && diff(a.val, b.val)
+const notAnd = (a: ValueOperator, b: ValueOperator) => a instanceof NotValueOperator && equal(a.op.toMongo(), b.toMongo())
+const unequalPrimitive = (a: ValueOperator, b: ValueOperator) => a instanceof EqOperator && b instanceof EqOperator && !equal(a.val, b.val)
 const checkContradiction = (a: ValueOperator, b: ValueOperator) => {
   const aGt = a instanceof GtOperator ? a.val : (a instanceof NotValueOperator && a.op instanceof LteOperator ? a.op.val : undefined)
   const aGte = a instanceof GteOperator ? a.val : (a instanceof NotValueOperator && a.op instanceof LtOperator ? a.op.val : undefined)
@@ -332,7 +332,7 @@ const combineLogicalAnd = (base: AndOperator, addition: Operator): Operator => {
       for (let i = 0; i < base.opList.length; i++) {
         const cond = base.opList[i]
         if (cond instanceof ValueOperator && cond.field === addition.field) {
-          if (!diff(cond.toMongo(), addition.toMongo())) { return base }
+          if (equal(cond.toMongo(), addition.toMongo())) { return base }
           if (notAnd(cond, addition) || notAnd(addition, cond)) { return FALSE }
           if (unequalPrimitive(cond, addition)) { return FALSE }
           if (checkContradiction(cond, addition) || checkContradiction(addition, cond)) { return FALSE }
@@ -389,7 +389,7 @@ const expandOrOperand = (a: Operator, b: Operator): Operator => {
     if (b instanceof FalseOperator) { return a }
     if (a instanceof TrueOperator || b instanceof TrueOperator) { return TRUE }
     let c: Operator
-    if (!diff(a.toMongo(), b.toMongo())) {
+    if (equal(a.toMongo(), b.toMongo())) {
       c = a
     } else if (a instanceof OrOperator) {
       if (b instanceof OrOperator) {
