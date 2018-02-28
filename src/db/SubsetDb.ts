@@ -39,7 +39,7 @@ export class SubsetDb {
 
   insertMany(obj: object[]): Promise<void> {
     if (obj.length === 0) { return Promise.resolve() }
-    console.log("insertAll:");
+    console.log("insertMany:");
     return this.db.insertMany(obj)
       .catch((err) => Promise.reject(new DadgetError(ERROR.E1206, [err.toString()])))
   }

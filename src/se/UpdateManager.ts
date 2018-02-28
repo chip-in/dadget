@@ -89,6 +89,7 @@ export class UpdateManager extends ServiceEngine {
 
         if (transaction.type === TransactionType.UPDATE && transaction.before) {
           const updateObj = TransactionRequest.applyOperator(transaction)
+          updateObj.csn = transaction.csn
           if (query.matches(transaction.before, false)) {
             if (query.matches(updateObj, false)) {
               // update in -> in UPDATE
