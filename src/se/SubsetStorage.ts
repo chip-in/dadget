@@ -74,7 +74,6 @@ class UpdateProcessor extends Subscriber {
                   promise = promise.then(() => this.storage.getSubsetDb().insert(obj))
                 } else if (transaction.type === TransactionType.UPDATE && transaction.before) {
                   const updateObj = TransactionRequest.applyOperator(transaction)
-                  updateObj.csn = transaction.csn
                   promise = promise.then(() => this.storage.getSubsetDb().update(updateObj))
                 } else if (transaction.type === TransactionType.DELETE && transaction.before) {
                   const before = transaction.before

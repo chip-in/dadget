@@ -53,10 +53,12 @@ export class TransactionRequest {
     if (!transaction.operator) { throw new Error("transaction.operator is missing.") }
     const obj = Object.assign({}, transaction.before) as { [key: string]: any }
     const transactionObject = transaction as TransactionObject
-    return TransactionRequest.applyMongodbUpdate(obj, transaction.operator, transactionObject.datetime)
+    const updateObj = TransactionRequest.applyMongodbUpdate(obj, transaction.operator, transactionObject.datetime)
+    if (transactionObject.csn) { updateObj.csn = transactionObject.csn }
+    return updateObj
   }
 
-  static applyMongodbUpdate(obj: object, operator: { [op: string]: object }, currentDate?: Date) {
+  static applyMongodbUpdate(obj: object, operator: { [op: string]: object }, currentDate?: Date): { [key: string]: any } {
     for (const op of Object.keys(operator)) {
       const list = operator[op] as { [key: string]: any }
       switch (op) {
