@@ -6,6 +6,7 @@ export const enum TransactionType {
   UPDATE = "update",
   DELETE = "delete",
   NONE = "none",
+  ROLLBACK = "rollback",
 }
 
 /**

@@ -34,6 +34,7 @@ class UpdateProcessor extends Subscriber {
 
   onReceive(msg: string) {
     // TODO キャッシュの場合は到着したトランザクションの時刻基準で1分以上前のジャーナル削除。頻繁に実行されすぎないように
+    // TODO キャッシュの場合は10件まで。それ以前が必要な場合は上位に投げる
     this.storage.logger.debug("onReceive: " + msg)
     const transaction = EJSON.parse(msg) as TransactionObject;
     this.lock.writeLock((release1) => {
@@ -55,6 +56,12 @@ class UpdateProcessor extends Subscriber {
                   this.storage.logger.debug("release writeLock1")
                   release1()
                 })
+            } else if (transaction.type === TransactionType.ROLLBACK) {
+              // TODO 実装
+              this.storage.logger.debug("release writeLock2")
+              release2()
+              this.storage.logger.debug("release writeLock1")
+              release1()
             } else if (csn >= transaction.csn) {
               this.storage.logger.debug("release writeLock2")
               release2()

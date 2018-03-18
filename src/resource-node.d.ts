@@ -28,7 +28,7 @@ declare module "@chip-in/resource-node" {
 
         constructor(coreNodeURL: string, nodeClassName: string)
         fetch(path: string, option?: {}): Promise<Response>
-        mount(path: string, mode: string, proxy: Proxy): Promise<string>
+        mount(path: string, mode: string, proxy: Proxy, option?: object): Promise<string>
         publish(topicName: string, message: string): Promise<void>
         registerServiceClasses(mapping: { [key: string]: ServiceEngineConstructor }): void
         searchServiceEngine(serviceClassName: string, query: { [key: string]: any }): ServiceEngine[]

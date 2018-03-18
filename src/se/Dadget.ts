@@ -312,6 +312,15 @@ export default class Dadget extends ServiceEngine {
     }
   }
 
+  private notifyRollback(notifyCsn: number) {
+    for (const id of Object.keys(this.updateListeners)) {
+      const listener = this.updateListeners[id]
+      if (listener.csn !== PREQUERY_CSN && listener.csn > notifyCsn) {
+        listener.csn = notifyCsn
+      }
+    }
+  }
+
   /**
    * データベースの更新通知のリスナを登録する
    * @param listener 更新があった場合、csn を引数にしてこの関数を呼び出す
@@ -330,10 +339,15 @@ export default class Dadget extends ServiceEngine {
 
         onReceive(transctionJSON: string) {
           const transaction = EJSON.parse(transctionJSON) as TransactionObject
-          parent.notifyCsn = transaction.csn
-          setTimeout(() => {
-            parent.notifyAll()
-          })
+          if (transaction.type === TransactionType.ROLLBACK) {
+            parent.notifyCsn = transaction.csn
+            parent.notifyRollback(transaction.csn)
+          } else if (transaction.csn > parent.notifyCsn) {
+            parent.notifyCsn = transaction.csn
+            setTimeout(() => {
+              parent.notifyAll()
+            })
+          }
         }
       }
 

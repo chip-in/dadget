@@ -13,6 +13,9 @@ import { DadgetError } from "../util/DadgetError"
 import * as EJSON from "../util/Ejson"
 import { ProxyHelper } from "../util/ProxyHelper"
 
+const KEEP_TIME_AFTER_CONTEXT_MANAGER_MASTER_ACQUIRED = 3000; // 3000ms
+const KEEP_TIME_AFTER_SENDING_ROLLBACK = 1000; // 1000ms
+
 /**
  * コンテキストマネージャコンフィグレーションパラメータ
  */
@@ -28,8 +31,8 @@ class TransactionJournalSubscriber extends Subscriber {
 
   constructor(
     protected context: ContextManager,
-    protected journalDB: JournalDb,
-    protected csnDB: CsnDb) {
+    protected journalDb: JournalDb,
+    protected csnDb: CsnDb) {
 
     super()
     context.logger.debug("TransactionJournalSubscriber is created")
@@ -39,31 +42,31 @@ class TransactionJournalSubscriber extends Subscriber {
     //    console.log("onReceive:", msg)
     const transaction: TransactionObject = EJSON.parse(msg)
     this.context.getLock().acquire("transaction", () => {
+      if (transaction.type === TransactionType.ROLLBACK) {
+        // TODO 実装
+        return
+      }
       // 自分がスレーブになっていれば保存
-      return this.csnDB.getCurrentCsn()
+      return this.csnDb.getCurrentCsn()
         .then((csn) => {
           if (csn < transaction.csn) {
-            return this.csnDB.update(transaction.csn)
+            return this.csnDb.update(transaction.csn)
           }
           return Promise.resolve()
         })
         .then(() => {
-          return this.journalDB.findByCsn(transaction.csn)
+          return this.journalDb.findByCsn(transaction.csn)
         })
         .then((savedTransaction) => {
           if (!savedTransaction) {
             // トランザクションオブジェクトをジャーナルに追加
-            return this.journalDB.insert(transaction)
+            return this.journalDb.insert(transaction)
           } else {
             let promise = Promise.resolve()
             if (savedTransaction.digest !== transaction.digest) {
               // ダイジェストが異なる場合は更新して、それ以降でtimeがこのトランザクション以前のジャーナルを削除
-              promise = promise.then(() => this.journalDB.updateAndDeleteAfter(transaction))
+              promise = promise.then(() => this.journalDb.updateAndDeleteAfter(transaction))
             }
-            // マスター権を喪失している場合は再接続
-            //            if (this.context.getMountHandle()) {
-            //              promise = promise.then(() => this.context.connect())
-            //            }
             return promise
           }
         })
@@ -79,8 +82,8 @@ class ContextManagementServer extends Proxy {
 
   constructor(
     protected context: ContextManager,
-    protected journalDB: JournalDb,
-    protected csnDB: CsnDb) {
+    protected journalDb: JournalDb,
+    protected csnDb: CsnDb) {
 
     super()
     context.logger.debug("ContextManagementServer is created")
@@ -140,62 +143,62 @@ class ContextManagementServer extends Proxy {
       })
     }
 
-    // TODO マスターを取得したばかりの時は時間待ち
-
     // コンテキスト通番をインクリメントしてトランザクションオブジェクトを作成
     return new Promise((resolve, reject) => {
-      this.context.getLock().acquire("transaction", () => {
-        const _request = { ...request, datetime: new Date() }
-        if (this.lastBeforeObj && request.before
-          && (!request.before._id || this.lastBeforeObj._id === request.before._id)) {
-          const objDiff = diff(this.lastBeforeObj, request.before)
-          if (objDiff) {
-            this.context.logger.error("a mismatch of request.before", JSON.stringify(objDiff))
-            // throw new DadgetError(ERROR.E2005, [JSON.stringify(request)])
-          } else {
-            this.context.logger.debug("lastBeforeObj check passed")
+      this.context.getLock().acquire("master", () => {
+        return this.context.getLock().acquire("transaction", () => {
+          const _request = { ...request, datetime: new Date() }
+          if (this.lastBeforeObj && request.before
+            && (!request.before._id || this.lastBeforeObj._id === request.before._id)) {
+            const objDiff = diff(this.lastBeforeObj, request.before)
+            if (objDiff) {
+              this.context.logger.error("a mismatch of request.before", JSON.stringify(objDiff))
+              // throw new DadgetError(ERROR.E2005, [JSON.stringify(request)])
+            } else {
+              this.context.logger.debug("lastBeforeObj check passed")
+            }
           }
-        }
-        // ジャーナルと照合して矛盾がないかチェック
-        return this.journalDB.checkConsistent(csn, _request)
-          .then(() => this.context.checkUniqueConstraint(csn, _request))
-          .then((_) => {
-            updateObject = _
-            return Promise.all([this.csnDB.increment(), this.journalDB.getLastDigest()])
-              .then((values) => {
-                newCsn = values[0]
-                const lastDigest = values[1]
-                transaction = Object.assign({
-                  csn: newCsn
-                  , beforeDigest: lastDigest,
-                }, _request)
-                transaction.digest = TransactionObject.calcDigest(transaction);
-                // トランザクションオブジェクトをジャーナルに追加
-                return this.journalDB.insert(transaction)
-              })
-          }).then(() => {
-            // トランザクションオブジェクトを配信
-            return this.context.getNode().publish(
-              CORE_NODE.PATH_TRANSACTION.replace(/:database\b/g, this.context.getDatabase())
-              , EJSON.stringify(transaction))
+          // ジャーナルと照合して矛盾がないかチェック
+          return this.journalDb.checkConsistent(csn, _request)
+            .then(() => this.context.checkUniqueConstraint(csn, _request))
+            .then((_) => {
+              updateObject = _
+              return Promise.all([this.csnDb.increment(), this.journalDb.getLastDigest()])
+                .then((values) => {
+                  newCsn = values[0]
+                  const lastDigest = values[1]
+                  transaction = Object.assign({
+                    csn: newCsn
+                    , beforeDigest: lastDigest,
+                  }, _request)
+                  transaction.digest = TransactionObject.calcDigest(transaction);
+                  // トランザクションオブジェクトをジャーナルに追加
+                  return this.journalDb.insert(transaction)
+                })
+            }).then(() => {
+              // トランザクションオブジェクトを配信
+              return this.context.getNode().publish(
+                CORE_NODE.PATH_TRANSACTION.replace(/:database\b/g, this.context.getDatabase())
+                , EJSON.stringify(transaction))
+            })
+        }).then(() => {
+          if (!updateObject._id) { updateObject._id = transaction.target }
+          updateObject.csn = newCsn
+          this.lastBeforeObj = updateObject
+          resolve({
+            status: "OK",
+            csn: newCsn,
+            updateObject,
           })
-      }).then(() => {
-        if (!updateObject._id) { updateObject._id = transaction.target }
-        updateObject.csn = newCsn
-        this.lastBeforeObj = updateObject
-        resolve({
-          status: "OK",
-          csn: newCsn,
-          updateObject,
-        })
-      }, (reason) => {
-        // トランザクションエラー
-        let cause = reason instanceof DadgetError ? reason : new DadgetError(ERROR.E2003, [reason])
-        if (cause.code === ERROR.E1105.code) { cause = new DadgetError(ERROR.E2004, [cause]) }
-        cause.convertInsertsToString()
-        resolve({
-          status: "NG",
-          reason: cause,
+        }, (reason) => {
+          // トランザクションエラー
+          let cause = reason instanceof DadgetError ? reason : new DadgetError(ERROR.E2003, [reason])
+          if (cause.code === ERROR.E1105.code) { cause = new DadgetError(ERROR.E2004, [cause]) }
+          cause.convertInsertsToString()
+          resolve({
+            status: "NG",
+            reason: cause,
+          })
         })
       })
     })
@@ -286,25 +289,50 @@ export class ContextManager extends ServiceEngine {
 
   connect(): Promise<void> {
     let promise = Promise.resolve()
-    const mountHandle = this.mountHandle
-    this.mountHandle = undefined
-
-    if (mountHandle) {
-      promise = promise.then(() => this.node.unmount(mountHandle).catch())
-    }
     promise = promise.then(() => {
-      this.node.mount(CORE_NODE.PATH_CONTEXT.replace(/:database\b/g, this.database), "singletonMaster", this.server)
+      this.node.mount(CORE_NODE.PATH_CONTEXT.replace(/:database\b/g, this.database), "singletonMaster", this.server, {
+        onDisconnect: () => {
+          this.logger.info("ContextManagementServer is disconnected")
+          this.mountHandle = undefined
+        },
+        onRemount: (mountHandle: string) => {
+          this.logger.info("ContextManagementServer is remounted")
+          this.procAfterContextManagementServerConnect(mountHandle)
+        },
+      })
         .then((mountHandle) => {
           // マスターを取得した場合のみ実行される
-          // TODO 時間待ちのための時刻保存
-          // TODO マスターを取得した場合、他のサブセットを自分と同じcsnまでロールバックさせるメッセージを送信
-          this.mountHandle = mountHandle
+          this.logger.info("ContextManagementServer is connected")
+          this.procAfterContextManagementServerConnect(mountHandle)
         })
     })
-    promise = promise.then(() => new Promise<void>((resolve) => {
-      setTimeout(resolve, 3000)
-    }))
     return promise
+  }
+
+  private procAfterContextManagementServerConnect(mountHandle: string) {
+    this.mountHandle = mountHandle
+    this.getLock().acquire("master", () => {
+      return new Promise<void>((resolve) => {
+        setTimeout(resolve, KEEP_TIME_AFTER_CONTEXT_MANAGER_MASTER_ACQUIRED)
+      })
+        .then(() => {
+          return this.csnDb.getCurrentCsn()
+            .then((csn) => {
+              const transaction = new TransactionObject()
+              transaction.csn = csn
+              transaction.type = TransactionType.ROLLBACK
+              // マスターを取得した場合、他のサブセットを自分と同じcsnまでロールバックさせるメッセージを送信
+              return this.getNode().publish(
+                CORE_NODE.PATH_TRANSACTION.replace(/:database\b/g, this.getDatabase())
+                , EJSON.stringify(transaction))
+            })
+            .then(() => {
+              return new Promise<void>((resolve) => {
+                setTimeout(resolve, KEEP_TIME_AFTER_SENDING_ROLLBACK)
+              })
+            })
+        })
+    })
   }
 
   checkUniqueConstraint(csn: number, request: TransactionRequest): Promise<object> {

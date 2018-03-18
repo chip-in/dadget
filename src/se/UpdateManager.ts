@@ -58,7 +58,6 @@ export class UpdateManager extends ServiceEngine {
     }
     const subset = this.subset = this.option.subset
 
-    // (参照コードの再現のため内部クラスにしたケース)
     class UpdateListener extends Subscriber {
 
       protected database: string
@@ -74,15 +73,18 @@ export class UpdateManager extends ServiceEngine {
       convertTransactionForSubset(transaction: TransactionObject): TransactionObject {
         // サブセット用のトランザクション内容に変換
 
+        if (transaction.type === TransactionType.ROLLBACK) {
+          return transaction
+        }
         if (!this.subsetDefinition.query) { return transaction }
         const query = parser.parse(this.subsetDefinition.query)
 
         if (transaction.type === TransactionType.INSERT && transaction.new) {
           if (query.matches(transaction.new, false)) {
-            // insert in INSERT
+            // insert to inner -> INSERT
             return transaction
           } else {
-            // insert out NONE
+            // insert to outer -> NONE
             return { ...transaction, type: TransactionType.NONE, new: undefined }
           }
         }
@@ -91,18 +93,18 @@ export class UpdateManager extends ServiceEngine {
           const updateObj = TransactionRequest.applyOperator(transaction)
           if (query.matches(transaction.before, false)) {
             if (query.matches(updateObj, false)) {
-              // update in -> in UPDATE
+              // update from inner to inner -> UPDATE
               return transaction
             } else {
-              // update in -> out DELETE
+              // update from inner to outer -> DELETE
               return { ...transaction, type: TransactionType.DELETE, operator: undefined }
             }
           } else {
             if (query.matches(updateObj, false)) {
-              // update out -> in INSERT
+              // update from outer to inner -> INSERT
               return { ...transaction, type: TransactionType.INSERT, new: updateObj, before: undefined, operator: undefined }
             } else {
-              // update out -> out NONE
+              // update from outer to outer -> NONE
               return { ...transaction, type: TransactionType.NONE, before: undefined, operator: undefined }
             }
           }
@@ -110,10 +112,10 @@ export class UpdateManager extends ServiceEngine {
 
         if (transaction.type === TransactionType.DELETE && transaction.before) {
           if (query.matches(transaction.before, false)) {
-            // delete in DELETE
+            // delete from inner -> DELETE
             return transaction
           } else {
-            // delete out NONE
+            // delete from out -> NONE
             return { ...transaction, type: TransactionType.NONE, before: undefined }
           }
         }
