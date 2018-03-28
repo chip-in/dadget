@@ -24,10 +24,8 @@ export class SubsetDb {
         indexMap[name] = indexDef
       }
     }
+    this.db.setIndexes(indexMap)
     return this.db.start()
-      .then(() => {
-        return this.db.createIndexes(indexMap)
-      })
       .catch((err) => Promise.reject(new DadgetError(ERROR.E1201, [err.toString()])))
   }
 
@@ -62,8 +60,8 @@ export class SubsetDb {
       .catch((err) => Promise.reject(new DadgetError(ERROR.E1207, [err.toString()])))
   }
 
-  find(query: object, sort?: object, limit?: number, offset?: number): Promise<any> {
-    return this.db.find(query, sort, limit, offset)
+  find(query: object, sort?: object, limit?: number): Promise<any[]> {
+    return this.db.find(query, sort, limit)
       .then((result) => {
         console.log("find:", JSON.stringify(result));
         return result

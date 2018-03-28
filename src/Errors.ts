@@ -1,29 +1,29 @@
 export const ERROR = {
 
   /**
-   * CsnOnMongoDB failed to start.
+   * CsnDB failed to start.
    */
-  E1001: { code: 1001, message: "CsnOnMongoDB failed to start. cause=%1" },
+  E1001: { code: 1001, message: "CsnDB failed to start. cause=%1" },
 
   /**
-   * CsnOnMongoDB failed to increment.
+   * CsnDB failed to increment.
    */
-  E1002: { code: 1002, message: "CsnOnMongoDB failed to increment. cause=%1" },
+  E1002: { code: 1002, message: "CsnDB failed to increment. cause=%1" },
 
   /**
-   * CsnOnMongoDB failed to get current value.
+   * CsnDB failed to get current value.
    */
-  E1003: { code: 1003, message: "CsnOnMongoDB failed to get current value. cause=%1" },
+  E1003: { code: 1003, message: "CsnDB failed to get current value. cause=%1" },
 
   /**
-   * CsnOnMongoDB failed to update csn.
+   * CsnDB failed to update csn.
    */
-  E1004: { code: 1004, message: "CsnOnMongoDB failed to update csn. cause=%1" },
+  E1004: { code: 1004, message: "CsnDB failed to update csn. cause=%1" },
 
   /**
-   * JournalOnMongoDB failed to start.
+   * JournalDB failed to start.
    */
-  E1101: { code: 1101, message: "JournalOnMongoDB failed to start. cause=%1" },
+  E1101: { code: 1101, message: "JournalDB failed to start. cause=%1" },
 
   /**
    * checkConsistent error: already exists
@@ -51,29 +51,29 @@ export const ERROR = {
   E1106: { code: 1106, message: 'checkConsistent error: "before" data is required' },
 
   /**
-   * JournalOnMongoDB failed to get a last digest.
+   * JournalDB failed to get a last digest.
    */
-  E1107: { code: 1107, message: "JournalOnMongoDB failed to get a last digest. cause=%1" },
+  E1107: { code: 1107, message: "JournalDB failed to get a last digest. cause=%1" },
 
   /**
-   * JournalOnMongoDB failed to insert a transaction.
+   * JournalDB failed to insert a transaction.
    */
-  E1108: { code: 1108, message: "JournalOnMongoDB failed to insert a transaction. cause=%1" },
+  E1108: { code: 1108, message: "JournalDB failed to insert a transaction. cause=%1" },
 
   /**
-   * JournalOnMongoDB failed to do findOne by csn.
+   * JournalDB failed to do findOne by csn.
    */
-  E1109: { code: 1109, message: "JournalOnMongoDB failed to do findOne by csn. cause=%1" },
+  E1109: { code: 1109, message: "JournalDB failed to do findOne by csn. cause=%1" },
 
   /**
-   * JournalOnMongoDB failed to do find by csn.
+   * JournalDB failed to do find by csn.
    */
-  E1110: { code: 1110, message: "JournalOnMongoDB failed to do find by csn. cause=%1" },
+  E1110: { code: 1110, message: "JournalDB failed to do find by csn. cause=%1" },
 
   /**
-   * JournalOnMongoDB failed to rebase journals.
+   * JournalDB failed to rebase journals.
    */
-  E1111: { code: 1111, message: "JournalOnMongoDB failed to rebase journals. cause=%1" },
+  E1111: { code: 1111, message: "JournalDB failed to rebase journals. cause=%1" },
 
   /**
    * SubsetDb failed to start.

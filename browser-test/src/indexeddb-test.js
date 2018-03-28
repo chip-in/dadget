@@ -1,11 +1,14 @@
 var chai = require('chai')
-var { CacheDb } = require('../lib/db/CacheDb')
+var { PersistentDb } = require('../../lib/db/PersistentDbOnBrowser')
 
-describe('CacheDb', () => {
+describe('PersistentDb', () => {
   it('increment', () => {
-    const db = new CacheDb("test");
+    const db = new PersistentDb("test");
     db.setCollection("Collection");
     return db.start()
+      .then(() => {
+        return db.deleteAll()
+      })
       .then(() => {
         return db.insertOne({ _id: "test", seq: 1 })
       })
@@ -21,112 +24,178 @@ describe('CacheDb', () => {
   });
 
   it('many', () => {
-    const db = new CacheDb("test_many");
+    const db = new PersistentDb("test_many");
     db.setCollection("Collection");
-    const db2 = new CacheDb("test_many");
-    db2.setCollection("Collection");
-    return db.start()
+    return Promise.resolve()
       .then(() => {
+        return new Promise((resolve, reject) => {
+          var req = indexedDB.deleteDatabase("test_many__Collection")
+          req.onsuccess = function () {
+            console.log("Deleted database successfully");
+            resolve();
+          };
+          req.onerror = function () {
+            reject("Couldn't delete database");
+          };
+          req.onblocked = function () {
+            reject("Couldn't delete database due to the operation being blocked");
+          };
+        })
+      })
+      .then(() => {
+        db.setIndexes({
+          a_num_index: {
+            index: { a: 1, num: 1 }
+          },
+          num_index: {
+            index: { num: 1 }
+          }
+        })
+      })
+      .then(() => {
+        console.log("a")
+        return db.start()
+      })
+      .then(() => {
+        console.log("c")
+        return db.deleteAll()
+      })
+      .then(() => {
+        console.log("d")
         return db.insertMany([{ _id: "test1", num: 1, a: 1 }, { _id: "test2", num: 2, a: 1 }])
       })
       .then(() => {
-        return db2.find({ a: 1 })
+        console.log("e")
+        return db.find({ a: 1 })
       })
       .then((val) => {
         chai.assert.deepEqual(val, [{ _id: "test1", num: 1, a: 1 }, { _id: "test2", num: 2, a: 1 }])
       })
       .then(() => {
-        return db2.find({ a: 1 }, { num: -1 })
+        console.log("f")
+        return db.find({ a: 1 }, { num: -1 })
       })
       .then((val) => {
+        console.log("f2")
+        console.dir(val)
         chai.assert.deepEqual(val, [{ _id: "test2", num: 2, a: 1 }, { _id: "test1", num: 1, a: 1 }])
       })
       .then(() => {
-        return db2.find({ a: 1 }, { num: -1 }, 1)
+        console.log("g")
+        return db.find({ a: 1 }, { num: -1 }, 1)
       })
       .then((val) => {
         chai.assert.deepEqual(val, [{ _id: "test2", num: 2, a: 1 }])
       })
       .then(() => {
-        return db2.find({ a: 1 }, { num: -1 }, 1, 1)
+        console.log("h")
+        return db.find({ a: 1 }, { num: -1 }, 1, 1)
       })
       .then((val) => {
         chai.assert.deepEqual(val, [{ _id: "test1", num: 1, a: 1 }])
       })
       .then(() => {
-        return db2.findOneBySort({ a: 1 }, { num: -1 })
+        console.log("i")
+        return db.findOneBySort({ a: 1 }, { num: -1 })
       })
       .then((val) => {
         chai.assert.deepEqual(val, { _id: "test2", num: 2, a: 1 })
       })
       .then(() => {
+        console.log("j")
         return db.updateOneById("test1", { "$set": { num: 3 } })
       })
       .then(() => {
-        return db2.find({ a: 1 })
+        console.log("k")
+        return db.find({ a: 1 })
       })
       .then((val) => {
         chai.assert.deepEqual(val, [{ _id: "test1", num: 3, a: 1 }, { _id: "test2", num: 2, a: 1 }])
       })
       .then(() => {
+        console.log("k2")
+        return db.findOne({ num: 2 })
+      })
+      .then((val) => {
+        chai.assert.deepEqual(val, { _id: "test2", num: 2, a: 1 })
+      })
+      .then(() => {
+        console.log("l")
         return db.updateOne({ num: 2 }, { "$set": { num: 4 } })
       })
       .then(() => {
-        return db2.find({ a: 1 })
+        console.log("l2")
+        return db.updateOne({ num: 99 }, { "$set": { num: 9 } })
+      })
+      .then(() => {
+        console.log("m")
+        return db.find({ a: 1 })
       })
       .then((val) => {
+        console.dir(val)
         chai.assert.deepEqual(val, [{ _id: "test1", num: 3, a: 1 }, { _id: "test2", num: 4, a: 1 }])
       })
       .then(() => {
+        console.log("n")
         return db.replaceOneById("test2", { _id: "test2", num: 5, a: 6 })
       })
       .then(() => {
-        return db2.find({})
+        console.log("o")
+        return db.find({})
       })
       .then((val) => {
         chai.assert.deepEqual(val, [{ _id: "test1", num: 3, a: 1 }, { _id: "test2", num: 5, a: 6 }])
       })
       .then(() => {
+        console.log("findByRange")
         return db.findByRange("num", 3, 5, 1)
       })
       .then((val) => {
         chai.assert.deepEqual(val, [{ _id: "test1", num: 3, a: 1 }, { _id: "test2", num: 5, a: 6 }])
       })
       .then(() => {
+        console.log("findByRange1")
         return db.findByRange("num", 3, 5, -1)
       })
       .then((val) => {
         chai.assert.deepEqual(val, [{ _id: "test2", num: 5, a: 6 }, { _id: "test1", num: 3, a: 1 }])
       })
       .then(() => {
+        console.log("findByRange2")
         return db.findByRange("num", 3, 4, -1)
       })
       .then((val) => {
         chai.assert.deepEqual(val, [{ _id: "test1", num: 3, a: 1 }])
       })
       .then(() => {
+        console.log("p")
         return db.deleteOneById("test2")
       })
       .then(() => {
-        return db2.find({})
+        console.log("q")
+        return db.find({})
       })
       .then((val) => {
         chai.assert.deepEqual(val, [{ _id: "test1", num: 3, a: 1 }])
       })
       .then(() => {
+        console.log("r")
         return db.insertOne({ _id: "test", seq: 1 })
       })
       .then(() => {
-        return db2.find({})
+        console.log("s")
+        return db.find({})
       })
       .then((val) => {
-        chai.assert.deepEqual(val, [{ _id: "test1", num: 3, a: 1 }, { _id: "test", seq: 1 }])
+        chai.assert.deepEqual(val, [{ _id: "test", seq: 1 }, { _id: "test1", num: 3, a: 1 }])
       })
       .then(() => {
+        console.log("t")
         return db.deleteAll()
       })
       .then(() => {
-        return db2.find({})
+        console.log("u")
+        return db.find({})
       })
       .then((val) => {
         chai.assert.deepEqual(val, [])

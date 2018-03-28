@@ -3,13 +3,17 @@ export interface IDb {
 
   setCollection(collection: string): void
 
+  setIndexes(indexMap: { [name: string]: { index: object, property?: object } }): void
+
   start(): Promise<void>
 
   findOne(query: object): Promise<object | null>
 
+  findByRange(field: string, from: any, to: any, dir: number): Promise<any[]>
+
   findOneBySort(query: object, sort: object): Promise<any>
 
-  find(query: object, sort?: object, limit?: number, offset?: number): Promise<any>
+  find(query: object, sort?: object, limit?: number, offset?: number): Promise<any[]>
 
   insertOne(doc: object): Promise<void>
 
@@ -26,6 +30,4 @@ export interface IDb {
   deleteOneById(id: string): Promise<void>
 
   deleteAll(): Promise<void>
-
-  createIndexes(indexMap: { [name: string]: { index: object, property?: object } }): Promise<void>
 }

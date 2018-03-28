@@ -15,18 +15,16 @@ export class JournalDb {
   }
 
   start(): Promise<void> {
+    this.db.setIndexes({
+      csn_index: {
+        index: { csn: -1 },
+        property: { unique: true },
+      },
+      target_index: {
+        index: { target: 1, csn: -1 },
+      },
+    })
     return this.db.start()
-      .then((_) => {
-        return this.db.createIndexes({
-          csn_index: {
-            index: { csn: -1 },
-            property: { unique: true },
-          },
-          target_index: {
-            index: { target: 1, csn: -1 },
-          },
-        })
-      })
       .catch((err) => Promise.reject(new DadgetError(ERROR.E1101, [err.toString()])))
   }
 
@@ -92,7 +90,7 @@ export class JournalDb {
 
   findByCsnRange(from: number, to: number): Promise<TransactionObject[]> {
     console.log("findByCsnRange:", from, to);
-    return this.db.find({ $and: [{ csn: { $gte: from } }, { csn: { $lte: to } }] }, { csn: -1 })
+    return this.db.findByRange("csn", from, to, -1)
       .catch((err) => Promise.reject(new DadgetError(ERROR.E1110, [err.toString()])))
   }
 

@@ -23,6 +23,9 @@ export class CacheDb implements IDb {
     }
   }
 
+  setIndexes(indexMap: { [name: string]: { index: object, property?: object } }): void {
+  }
+
   start(): Promise<void> {
     return Promise.resolve()
   }
@@ -40,6 +43,10 @@ export class CacheDb implements IDb {
     return Promise.resolve(null)
   }
 
+  findByRange(field: string, from: any, to: any, dir: number): Promise<any[]> {
+    return this.find({ $and: [{ [field]: { $gte: from } }, { [field]: { $lte: to } }] }, { [field]: dir })
+  }
+
   findOneBySort(query: object, sort: object): Promise<any> {
     const dataList = []
     for (const _id of Object.keys(this.data)) {
@@ -53,7 +60,7 @@ export class CacheDb implements IDb {
     return Promise.resolve(null)
   }
 
-  find(query: object, sort?: object, limit?: number, offset?: number): Promise<any> {
+  find(query: object, sort?: object, limit?: number, offset?: number): Promise<any[]> {
     const dataList = []
     for (const _id of Object.keys(this.data)) {
       dataList.push(this.data[_id])
@@ -122,10 +129,6 @@ export class CacheDb implements IDb {
     for (const id of Object.keys(this.data)) {
       delete this.data[id]
     }
-    return Promise.resolve()
-  }
-
-  createIndexes(indexMap: { [name: string]: { index: object, property?: object } }): Promise<void> {
     return Promise.resolve()
   }
 }

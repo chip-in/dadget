@@ -398,7 +398,11 @@ export class SubsetStorage extends ServiceEngine implements Proxy {
       .then(() => this.getCsnDb().getCurrentCsn())
       .then((_) => {
         currentCsn = _
-        if (csn === 0 || csn === currentCsn || (csn < currentCsn && csnMode === "latest")) {
+        if (currentCsn === 0) {
+          this.logger.debug("release readLock")
+          release()
+          return { csn, resultSet: [], restQuery: query, csnMode }
+        } else if (csn === 0 || csn === currentCsn || (csn < currentCsn && csnMode === "latest")) {
           return this.getSubsetDb().find(innerQuery, sort, limit)
             .then((result) => {
               this.logger.debug("release readLock")
@@ -409,7 +413,7 @@ export class SubsetStorage extends ServiceEngine implements Proxy {
           this.logger.debug("rollback transactions", String(csn), String(currentCsn))
           // rollback transactions
           // TODO 先にJournalから影響するトランザクションを取得して影響するオブジェクト件数分を多く取得
-          let result: object
+          let result: object[]
           return this.getSubsetDb().find(innerQuery, sort, limit)
             .then((_) => {
               result = _

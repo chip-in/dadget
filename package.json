@@ -23,7 +23,8 @@
     "start": "node lib/command.js",
     "makedoc": "typedoc --excludeExternals --module commonjs --out ./docs/ ./src/",
     "lint": "tslint --fix 'src/**/*.ts'",
-    "test": "mocha"
+    "test": "mocha",
+    "browser-test": "cd browser-test && browserify src/indexeddb-test.js -o dest/test.js && cp src/index.html dest/ && http-server dest -c-1"
   },
   "dependencies": {
     "@chip-in/resource-node": "*",
@@ -48,7 +49,9 @@
     "babel-cli": "^6.24.1",
     "babel-plugin-transform-remove-console": "^6.9.0",
     "babel-preset-env": "^1.6.1",
+    "browserify": "^16.1.1",
     "chai": "^4.1.2",
+    "http-server": "^0.11.1",
     "mocha": "^4.1.0",
     "mongodb-extended-json": "^1.10.0",
     "tslint": "^5.9.1",
