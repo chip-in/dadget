@@ -108,30 +108,24 @@ export class PersistentDb implements IDb {
   private createIndexes(objectStore: IDBObjectStore): void {
     if (!this.indexMap) { return }
     const indexMap = this.indexMap
-    const indexNameList: { [name: string]: any } = {}
     const indexNames: string[] = []
     // tslint:disable-next-line:prefer-for-of
     for (let i = 0; i < objectStore.indexNames.length; i++) {
       indexNames.push(objectStore.indexNames[i])
     }
     for (const indexName of indexNames) {
-      if (!indexMap[indexName]) {
-        objectStore.deleteIndex(indexName);
-      }
-      indexNameList[indexName] = true
+      objectStore.deleteIndex(indexName);
     }
-    for (const indexName in indexMap) {
-      if (!indexNameList[indexName]) {
-        const indexDef = indexMap[indexName]
-        const fields = Object.keys(indexDef.index)
-        const keyPath = fields.length === 1 ? fields[0] : fields
-        const fieldsName = fields.join(",")
-        console.log("create index:" + fieldsName)
-        if (!this.indexRevMap[fieldsName]) {
-          this.indexRevMap[fieldsName] = indexName
-          const unique = indexDef.property && (indexDef.property as any).unique ? (indexDef.property as any).unique : false
-          objectStore.createIndex(indexName, keyPath, { unique });
-        }
+    for (const indexName of Object.keys(indexMap)) {
+      const indexDef = indexMap[indexName]
+      const fields = Object.keys(indexDef.index)
+      const keyPath = fields.length === 1 ? fields[0] : fields
+      const fieldsName = fields.join(",")
+      console.log("create index:" + fieldsName)
+      if (!this.indexRevMap[fieldsName]) {
+        this.indexRevMap[fieldsName] = indexName
+        const unique = (indexDef.property && (indexDef.property as any).unique) ? (indexDef.property as any).unique : false
+        objectStore.createIndex(indexName, keyPath, { unique });
       }
     }
   }
