@@ -174,4 +174,4 @@ export const ERROR = {
    * Undefined Error
    */
   E3001: { code: 3001, message: "Undefined Error: %1" },
-}
+};

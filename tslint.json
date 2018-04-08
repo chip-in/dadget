@@ -5,9 +5,6 @@
     ],
     "jsRules": {},
     "rules": {
-        "semicolon": [
-            false
-        ],
         "max-line-length": [true, 150],
         "member-access": false,
         "no-bitwise": false,

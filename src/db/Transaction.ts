@@ -1,5 +1,5 @@
-import * as parser from "mongo-parse"
-import * as hash from "object-hash"
+import * as parser from "mongo-parse";
+import * as hash from "object-hash";
 
 export const enum TransactionType {
   INSERT = "insert",
@@ -17,289 +17,289 @@ export class TransactionRequest {
   /**
    * "insert", "update", "delete" のいずれか
    */
-  type: TransactionType
+  type: TransactionType;
 
   /**
    * RFC4122 準拠のUUIDであり、オブジェクトの_id属性の値である。
    */
-  target: string
+  target: string;
 
   /**
    * insertのときのみ
    *
    * 追加するオブジェクト。中身の形式は自由であるが、chip-in で予約されている _id, csn の2つの属性を含んでいてはいけない
    */
-  new?: object
+  new?: object;
 
   /**
    * update,delete のとき
    *
    * 更新/削除するオブジェクトの直前の値（前提となるコンテキスト通番での値）で、_id, csn の2つの属性を含んでいなければならない
    */
-  before?: { [key: string]: any }
+  before?: { [key: string]: any };
 
   /**
    * updateのときのみ
    *
    * 更新内容を記述するオペレータ。意味はmongoDB に準ずる。
    */
-  operator?: { [op: string]: any }
+  operator?: { [op: string]: any };
 
   /**
    * 更新operator適用
    * @param transaction
    */
   static applyOperator(transaction: TransactionRequest): { [key: string]: any } {
-    if (!transaction.before) { throw new Error("transaction.before is missing.") }
-    if (!transaction.operator) { throw new Error("transaction.operator is missing.") }
-    const obj = Object.assign({}, transaction.before) as { [key: string]: any }
-    const transactionObject = transaction as TransactionObject
-    const updateObj = TransactionRequest.applyMongodbUpdate(obj, transaction.operator, transactionObject.datetime)
-    if (transactionObject.csn) { updateObj.csn = transactionObject.csn }
-    return updateObj
+    if (!transaction.before) { throw new Error("transaction.before is missing."); }
+    if (!transaction.operator) { throw new Error("transaction.operator is missing."); }
+    const obj = Object.assign({}, transaction.before) as { [key: string]: any };
+    const transactionObject = transaction as TransactionObject;
+    const updateObj = TransactionRequest.applyMongodbUpdate(obj, transaction.operator, transactionObject.datetime);
+    if (transactionObject.csn) { updateObj.csn = transactionObject.csn; }
+    return updateObj;
   }
 
   static applyMongodbUpdate(obj: object, operator: { [op: string]: object }, currentDate?: Date): { [key: string]: any } {
     for (const op of Object.keys(operator)) {
-      const list = operator[op] as { [key: string]: any }
+      const list = operator[op] as { [key: string]: any };
       switch (op) {
         case "$currentDate":
           // Timestamp is not supported.
           for (const key of Object.keys(list)) {
-            obj = updateField(obj, key.split("."), (org) => currentDate)
+            obj = updateField(obj, key.split("."), (org) => currentDate);
           }
-          break
+          break;
         case "$inc":
           for (const key of Object.keys(list)) {
-            if (!Number.isInteger(list[key])) { throw new Error("$inc must be Integer") }
+            if (!Number.isInteger(list[key])) { throw new Error("$inc must be Integer"); }
             obj = updateField(obj, key.split("."), (org) => {
-              const val = typeof org === "undefined" ? 0 : org
-              if (!Number.isInteger(val)) { throw new Error("A value of the field is not Integer:" + key + ", " + JSON.stringify(val)) }
-              return val + list[key]
-            })
+              const val = typeof org === "undefined" ? 0 : org;
+              if (!Number.isInteger(val)) { throw new Error("A value of the field is not Integer:" + key + ", " + JSON.stringify(val)); }
+              return val + list[key];
+            });
           }
-          break
+          break;
         case "$min":
           for (const key of Object.keys(list)) {
-            obj = updateField(obj, key.split("."), (org) => Math.min(org, list[key]))
+            obj = updateField(obj, key.split("."), (org) => Math.min(org, list[key]));
           }
-          break
+          break;
         case "$max":
           for (const key of Object.keys(list)) {
-            obj = updateField(obj, key.split("."), (org) => Math.max(org, list[key]))
+            obj = updateField(obj, key.split("."), (org) => Math.max(org, list[key]));
           }
-          break
+          break;
         case "$mul":
           for (const key of Object.keys(list)) {
-            if (!Number.isInteger(list[key])) { throw new Error("$inc must be Integer") }
+            if (!Number.isInteger(list[key])) { throw new Error("$inc must be Integer"); }
             obj = updateField(obj, key.split("."), (org) => {
-              const val = typeof org === "undefined" ? 0 : org
-              if (!Number.isInteger(val)) { throw new Error("A value of the field is not Integer:" + key + ", " + JSON.stringify(val)) }
-              return val * list[key]
-            })
+              const val = typeof org === "undefined" ? 0 : org;
+              if (!Number.isInteger(val)) { throw new Error("A value of the field is not Integer:" + key + ", " + JSON.stringify(val)); }
+              return val * list[key];
+            });
           }
-          break
+          break;
         case "$rename":
           for (const key of Object.keys(list)) {
-            const newField = list[key]
-            let val: any
+            const newField = list[key];
+            let val: any;
             obj = updateField(obj, key.split("."), (org) => {
-              val = org
-              return undefined
-            })
-            obj = updateField(obj, newField.split("."), (org) => val)
+              val = org;
+              return undefined;
+            });
+            obj = updateField(obj, newField.split("."), (org) => val);
           }
-          break
+          break;
         case "$set":
           for (const key of Object.keys(list)) {
-            obj = updateField(obj, key.split("."), (org) => list[key])
+            obj = updateField(obj, key.split("."), (org) => list[key]);
           }
-          break
+          break;
         case "$setOnInsert":
-          throw new Error("$setOnInsert is not supported")
+          throw new Error("$setOnInsert is not supported");
         case "$unset":
           for (const key of Object.keys(list)) {
-            obj = updateField(obj, key.split("."), (org) => undefined)
+            obj = updateField(obj, key.split("."), (org) => undefined);
           }
-          break
+          break;
         case "$":
-          throw new Error("Update Operator $ is not supported")
+          throw new Error("Update Operator $ is not supported");
         case "$addToSet":
           for (const key of Object.keys(list)) {
             obj = updateField(obj, key.split("."), (org) => {
-              let newVal: any[] = typeof org === "undefined" ? [] : org
-              if (!Array.isArray(newVal)) { throw new Error("A value of the field is not Array:" + key + ", " + JSON.stringify(newVal)) }
-              newVal = [...newVal]
-              const values: any[] = list[key].$each ? list[key].$each : [list[key]]
-              if (!Array.isArray(values)) { throw new Error("$each value must be Array:" + key + ", " + JSON.stringify(values)) }
+              let newVal: any[] = typeof org === "undefined" ? [] : org;
+              if (!Array.isArray(newVal)) { throw new Error("A value of the field is not Array:" + key + ", " + JSON.stringify(newVal)); }
+              newVal = [...newVal];
+              const values: any[] = list[key].$each ? list[key].$each : [list[key]];
+              if (!Array.isArray(values)) { throw new Error("$each value must be Array:" + key + ", " + JSON.stringify(values)); }
               for (const value of values) {
-                if (newVal.indexOf(value) < 0) { newVal.push(value) }
+                if (newVal.indexOf(value) < 0) { newVal.push(value); }
               }
-              return newVal
-            })
+              return newVal;
+            });
           }
-          break
+          break;
         case "$pop":
           for (const key of Object.keys(list)) {
             obj = updateField(obj, key.split("."), (org) => {
-              if (typeof org === "undefined") { return org }
-              if (!Array.isArray(org)) { throw new Error("A value of the field is not Array:" + key + ", " + JSON.stringify(org)) }
-              if (!Number.isInteger(list[key])) { throw new Error("$pop value must be Integer") }
-              if (org.length === 0) { return org }
-              return list[key] < 0 ? org.slice(1) : org.slice(0, -1)
-            })
+              if (typeof org === "undefined") { return org; }
+              if (!Array.isArray(org)) { throw new Error("A value of the field is not Array:" + key + ", " + JSON.stringify(org)); }
+              if (!Number.isInteger(list[key])) { throw new Error("$pop value must be Integer"); }
+              if (org.length === 0) { return org; }
+              return list[key] < 0 ? org.slice(1) : org.slice(0, -1);
+            });
           }
-          break
+          break;
         case "$pull":
           for (const key of Object.keys(list)) {
             obj = updateField(obj, key.split("."), (org) => {
-              if (typeof org === "undefined") { return org }
-              if (!Array.isArray(org)) { throw new Error("A value of the field is not Array:" + key + ", " + JSON.stringify(org)) }
-              if (org.length === 0) { return org }
-              const newVal: any[] = []
+              if (typeof org === "undefined") { return org; }
+              if (!Array.isArray(org)) { throw new Error("A value of the field is not Array:" + key + ", " + JSON.stringify(org)); }
+              if (org.length === 0) { return org; }
+              const newVal: any[] = [];
               if (typeof list[key] !== "object" || list[key] instanceof Date) {
                 for (const value of org) {
-                  if (!isEqual(value, list[key])) { newVal.push(value) }
+                  if (!isEqual(value, list[key])) { newVal.push(value); }
                 }
               } else {
                 if (Object.keys(list[key])[0].startsWith("$")) {
-                  const query = parser.parse({ _: list[key] })
+                  const query = parser.parse({ _: list[key] });
                   for (const value of org) {
-                    if (!query.matches({ _: value }, false)) { newVal.push(value) }
+                    if (!query.matches({ _: value }, false)) { newVal.push(value); }
                   }
                 } else {
-                  const query = parser.parse(list[key])
+                  const query = parser.parse(list[key]);
                   for (const value of org) {
-                    if (!query.matches(value, false)) { newVal.push(value) }
+                    if (!query.matches(value, false)) { newVal.push(value); }
                   }
                 }
               }
-              return newVal
-            })
+              return newVal;
+            });
           }
-          break
+          break;
         case "$pushAll":
           for (const key of Object.keys(list)) {
             obj = updateField(obj, key.split("."), (org) => {
-              let newVal: any[] = typeof org === "undefined" ? [] : org
-              if (!Array.isArray(list[key])) { throw new Error("$pushAll must be Array") }
-              if (!Array.isArray(newVal)) { throw new Error("A value of the field is not Array:" + key + ", " + JSON.stringify(newVal)) }
-              newVal = [...newVal, ...list[key]]
-              return newVal
-            })
+              let newVal: any[] = typeof org === "undefined" ? [] : org;
+              if (!Array.isArray(list[key])) { throw new Error("$pushAll must be Array"); }
+              if (!Array.isArray(newVal)) { throw new Error("A value of the field is not Array:" + key + ", " + JSON.stringify(newVal)); }
+              newVal = [...newVal, ...list[key]];
+              return newVal;
+            });
           }
-          break
+          break;
         case "$push":
           for (const key of Object.keys(list)) {
             obj = updateField(obj, key.split("."), (org) => {
-              let newVal: any[] = typeof org === "undefined" ? [] : [...org]
+              let newVal: any[] = typeof org === "undefined" ? [] : [...org];
               if (typeof list[key] === "object" && list[key].$each) {
-                if (!Array.isArray(list[key].$each)) { throw new Error("$each must be Array") }
+                if (!Array.isArray(list[key].$each)) { throw new Error("$each must be Array"); }
                 if (typeof list[key].$position !== "undefined") {
-                  const pos = list[key].$position
-                  if (!Number.isInteger(pos)) { throw new Error("$position must be Integer") }
-                  newVal = [...newVal.slice(0, pos), ...list[key].$each, ...newVal.slice(pos)]
+                  const pos = list[key].$position;
+                  if (!Number.isInteger(pos)) { throw new Error("$position must be Integer"); }
+                  newVal = [...newVal.slice(0, pos), ...list[key].$each, ...newVal.slice(pos)];
                 } else {
-                  newVal = [...newVal, ...list[key].$each]
+                  newVal = [...newVal, ...list[key].$each];
                 }
                 if (typeof list[key].$sort !== "undefined") {
-                  newVal = parser.search(newVal, {}, list[key].$sort, false)
+                  newVal = parser.search(newVal, {}, list[key].$sort, false);
                 }
                 if (typeof list[key].$slice !== "undefined") {
-                  if (!Number.isInteger(list[key].$slice)) { throw new Error("$slice must be Integer") }
-                  newVal = newVal.slice(0, list[key].$slice)
+                  if (!Number.isInteger(list[key].$slice)) { throw new Error("$slice must be Integer"); }
+                  newVal = newVal.slice(0, list[key].$slice);
                 }
               } else {
-                newVal.push(list[key])
+                newVal.push(list[key]);
               }
-              return newVal
-            })
+              return newVal;
+            });
           }
-          break
+          break;
         case "$pullAll":
           for (const key of Object.keys(list)) {
             obj = updateField(obj, key.split("."), (org) => {
-              if (typeof org === "undefined") { return org }
-              if (!Array.isArray(org)) { throw new Error("A value of the field is not Array:" + key + ", " + JSON.stringify(org)) }
-              if (org.length === 0) { return org }
-              const newVal: any[] = []
+              if (typeof org === "undefined") { return org; }
+              if (!Array.isArray(org)) { throw new Error("A value of the field is not Array:" + key + ", " + JSON.stringify(org)); }
+              if (org.length === 0) { return org; }
+              const newVal: any[] = [];
               for (const value of org) {
-                if (!inArray(value, list[key])) { newVal.push(value) }
+                if (!inArray(value, list[key])) { newVal.push(value); }
               }
-              return newVal
-            })
+              return newVal;
+            });
           }
-          break
+          break;
         case "$bit":
           for (const key of Object.keys(list)) {
             obj = updateField(obj, key.split("."), (org) => {
-              if (!Number.isInteger(org)) { throw new Error("A value of the field is not Integer:" + key + ", " + JSON.stringify(org)) }
-              const val = list[key]
+              if (!Number.isInteger(org)) { throw new Error("A value of the field is not Integer:" + key + ", " + JSON.stringify(org)); }
+              const val = list[key];
               if (val.and) {
-                if (!Number.isInteger(val.and)) { throw new Error("The bit AND operator value is not Integer:" + val.and) }
-                return org & val.and
+                if (!Number.isInteger(val.and)) { throw new Error("The bit AND operator value is not Integer:" + val.and); }
+                return org & val.and;
               } else if (val.or) {
-                if (!Number.isInteger(val.or)) { throw new Error("The bit OR operator value is not Integer:" + val.or) }
-                return org | val.or
+                if (!Number.isInteger(val.or)) { throw new Error("The bit OR operator value is not Integer:" + val.or); }
+                return org | val.or;
               } else if (val.xor) {
-                if (!Number.isInteger(val.xor)) { throw new Error("The bit XOR operator value is not Integer:" + val.xor) }
-                return org ^ val.xor
+                if (!Number.isInteger(val.xor)) { throw new Error("The bit XOR operator value is not Integer:" + val.xor); }
+                return org ^ val.xor;
               }
-            })
+            });
           }
-          break
+          break;
         default:
-          throw new Error("Not supported operator: " + op)
+          throw new Error("Not supported operator: " + op);
       }
     }
-    return obj
+    return obj;
   }
 }
 
 function isEqual(a: any, b: any) {
   if (a instanceof Date) {
-    return b instanceof Date && a.getTime() === b.getTime()
+    return b instanceof Date && a.getTime() === b.getTime();
   } else {
-    return a === b
+    return a === b;
   }
 }
 
 function inArray(a: any, obj: any[]) {
-  if (!Array.isArray(obj)) { throw new Error("The value is not Array:" + JSON.stringify(obj)) }
+  if (!Array.isArray(obj)) { throw new Error("The value is not Array:" + JSON.stringify(obj)); }
   for (const val of obj) {
-    if (isEqual(a, val)) { return true }
+    if (isEqual(a, val)) { return true; }
   }
-  return false
+  return false;
 }
 
 function updateField(obj: { [key: string]: any }, keys: string[], func: (org: any) => any): { [key: string]: any } {
-  const key = keys.shift()
-  if (key == null) { throw new Error() }
+  const key = keys.shift();
+  if (key == null) { throw new Error(); }
   if (keys.length === 0) {
     if (Array.isArray(obj)) {
-      const pos = Number(key)
-      if (!Number.isInteger(pos)) { throw new Error("An value of position is not Integer:" + pos) }
-      const newVal = func(obj[pos])
+      const pos = Number(key);
+      if (!Number.isInteger(pos)) { throw new Error("An value of position is not Integer:" + pos); }
+      const newVal = func(obj[pos]);
       if (typeof newVal === "undefined") {
-        return [...obj.slice(0, pos), ...obj.slice(pos + 1)]
+        return [...obj.slice(0, pos), ...obj.slice(pos + 1)];
       }
-      return [...obj.slice(0, pos), newVal, ...obj.slice(pos + 1)]
+      return [...obj.slice(0, pos), newVal, ...obj.slice(pos + 1)];
     } else {
-      const newVal = func(obj[key])
+      const newVal = func(obj[key]);
       if (typeof newVal === "undefined") {
-        const newObj = { ...obj }
-        delete newObj[key]
-        return newObj
+        const newObj = { ...obj };
+        delete newObj[key];
+        return newObj;
       }
-      return { ...obj, [key]: newVal }
+      return { ...obj, [key]: newVal };
     }
   } else {
     if (Array.isArray(obj)) {
-      const pos = Number(key)
-      if (!Number.isInteger(pos)) { throw new Error("An value of position is not Integer:" + pos) }
-      return [...obj.slice(0, pos), updateField(obj[pos], keys, func), ...obj.slice(pos + 1)]
+      const pos = Number(key);
+      if (!Number.isInteger(pos)) { throw new Error("An value of position is not Integer:" + pos); }
+      return [...obj.slice(0, pos), updateField(obj[pos], keys, func), ...obj.slice(pos + 1)];
     } else {
-      return { ...obj, [key]: updateField(obj[key], keys, func) }
+      return { ...obj, [key]: updateField(obj[key], keys, func) };
     }
   }
 }
@@ -314,26 +314,26 @@ export class TransactionObject extends TransactionRequest {
    * @param transaction
    */
   static calcDigest(transaction: TransactionObject) {
-    return hash(transaction, { algorithm: "md5", encoding: "base64" })
+    return hash(transaction, { algorithm: "md5", encoding: "base64" });
   }
 
   /**
    * トランザクションをコミットしたコンテキスト通番
    */
-  csn: number
+  csn: number;
 
   /**
    * 	トランザクションをコミットした時刻
    */
-  datetime: Date
+  datetime: Date;
 
   /**
    * 1個前のトランザクションオブジェクトのdigestの値
    */
-  beforeDigest: string
+  beforeDigest: string;
 
   /**
    * トランザクションオブジェクトからこの属性を除いたものを object-hash により、{ algorithm: "md5", encoding: "base64" }ハッシュした値
    */
-  digest?: string
+  digest?: string;
 }

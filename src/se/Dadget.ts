@@ -1,17 +1,17 @@
-import * as parser from "mongo-parse"
-import { v1 as uuidv1 } from "uuid"
+import * as parser from "mongo-parse";
+import { v1 as uuidv1 } from "uuid";
 
-import { ResourceNode, ServiceEngine, Subscriber } from "@chip-in/resource-node"
-import { CORE_NODE } from "../Config"
-import { TransactionObject, TransactionRequest, TransactionType } from "../db/Transaction"
-import { ERROR } from "../Errors"
-import { DadgetError } from "../util/DadgetError"
-import * as EJSON from "../util/Ejson"
-import { ContextManager } from "./ContextManager"
-import { DatabaseRegistry } from "./DatabaseRegistry"
-import { QueryHandler } from "./QueryHandler"
-import { SubsetStorage } from "./SubsetStorage"
-import { UpdateManager } from "./UpdateManager"
+import { ResourceNode, ServiceEngine, Subscriber } from "@chip-in/resource-node";
+import { CORE_NODE } from "../Config";
+import { TransactionObject, TransactionRequest, TransactionType } from "../db/Transaction";
+import { ERROR } from "../Errors";
+import { DadgetError } from "../util/DadgetError";
+import * as EJSON from "../util/Ejson";
+import { ContextManager } from "./ContextManager";
+import { DatabaseRegistry } from "./DatabaseRegistry";
+import { QueryHandler } from "./QueryHandler";
+import { SubsetStorage } from "./SubsetStorage";
+import { UpdateManager } from "./UpdateManager";
 
 /**
  * Dadgetコンフィグレーションパラメータ
@@ -21,10 +21,10 @@ export class DadgetConfigDef {
   /**
    * データベース名
    */
-  database: string
+  database: string;
 }
 
-export type CsnMode = "strict" | "latest"
+export type CsnMode = "strict" | "latest";
 
 /**
  * 結果オブジェクト
@@ -34,24 +34,24 @@ export class QueryResult {
   /**
    * トランザクションをコミットしたコンテキスト通番
    */
-  csn: number
+  csn: number;
 
   /**
    * クエリに合致したオブジェクトの配列
    */
-  resultSet: object[]
+  resultSet: object[];
 
   /**
    * 問い合わせに対するオブジェクトを全て列挙できなかった場合に、残った集合に対するクエリ（サブセットのクエリハンドラの場合のみで、クエリルータの返却時は undefined）
    */
-  restQuery: object | undefined
+  restQuery: object | undefined;
 
-  queryHandlers?: QueryHandler[]
+  queryHandlers?: QueryHandler[];
 
-  csnMode?: CsnMode
+  csnMode?: CsnMode;
 }
 
-const PREQUERY_CSN = -1
+const PREQUERY_CSN = -1;
 
 /**
  * API(Dadget)
@@ -60,20 +60,20 @@ const PREQUERY_CSN = -1
  */
 export default class Dadget extends ServiceEngine {
 
-  public bootOrder = 60
-  private option: DadgetConfigDef
-  private node: ResourceNode
-  private database: string
-  private currentCsn: number = PREQUERY_CSN
-  private notifyCsn: number = 0
-  private updateListeners: { [id: string]: { listener: (csn: number) => void, csn: number, minInterval: number, notifyTime: number } } = {}
-  private updateListenerKey: string | null
-  private latestCsn: number
+  public bootOrder = 60;
+  private option: DadgetConfigDef;
+  private node: ResourceNode;
+  private database: string;
+  private currentCsn: number = PREQUERY_CSN;
+  private notifyCsn: number = 0;
+  private updateListeners: { [id: string]: { listener: (csn: number) => void, csn: number, minInterval: number, notifyTime: number } } = {};
+  private updateListenerKey: string | null;
+  private latestCsn: number;
 
   constructor(option: DadgetConfigDef) {
-    super(option)
-    this.logger.debug(JSON.stringify(option))
-    this.option = option
+    super(option);
+    this.logger.debug(JSON.stringify(option));
+    this.option = option;
   }
 
   /**
@@ -92,13 +92,13 @@ export default class Dadget extends ServiceEngine {
   }
 
   start(node: ResourceNode): Promise<void> {
-    this.node = node
-    this.logger.debug("Dadget is starting")
+    this.node = node;
+    this.logger.debug("Dadget is starting");
     if (!this.option.database) {
       return Promise.reject(new DadgetError(ERROR.E2101, ["Database name is missing."]));
     }
-    this.database = this.option.database
-    this.logger.debug("Dadget is started")
+    this.database = this.option.database;
+    this.logger.debug("Dadget is started");
     return Promise.resolve();
   }
 
@@ -111,7 +111,7 @@ export default class Dadget extends ServiceEngine {
    * @param seList
    */
   static sortQueryHandlers(seList: QueryHandler[]): QueryHandler[] {
-    seList.sort((a, b) => b.getPriority() - a.getPriority())
+    seList.sort((a, b) => b.getPriority() - a.getPriority());
     return seList;
   }
 
@@ -125,22 +125,22 @@ export default class Dadget extends ServiceEngine {
     csn?: number,
     csnMode?: CsnMode): Promise<QueryResult> {
 
-    let queryHandlers = node.searchServiceEngine("QueryHandler", { database }) as QueryHandler[]
-    queryHandlers = Dadget.sortQueryHandlers(queryHandlers)
-    if (!csn) { csn = 0 }
-    const _offset = offset ? offset : 0
-    const maxLimit = limit ? limit + _offset : undefined
-    const resultSet: object[] = []
+    let queryHandlers = node.searchServiceEngine("QueryHandler", { database }) as QueryHandler[];
+    queryHandlers = Dadget.sortQueryHandlers(queryHandlers);
+    if (!csn) { csn = 0; }
+    const _offset = offset ? offset : 0;
+    const maxLimit = limit ? limit + _offset : undefined;
+    const resultSet: object[] = [];
     return Promise.resolve({ csn, resultSet, restQuery: query, queryHandlers, csnMode } as QueryResult)
       .then(function queryFallback(request): Promise<QueryResult> {
-        if (!request.restQuery) { return Promise.resolve(request) }
+        if (!request.restQuery) { return Promise.resolve(request); }
         if (!request.queryHandlers || request.queryHandlers.length === 0) {
-          const error = new Error("The queryHandlers has been empty before completing queries.") as any
-          error.queryResult = request
-          throw error
+          const error = new Error("The queryHandlers has been empty before completing queries.") as any;
+          error.queryResult = request;
+          throw error;
         }
-        const qh = request.queryHandlers.shift()
-        if (qh == null) { throw new Error("The queryHandlers has been empty before completing queries.") }
+        const qh = request.queryHandlers.shift();
+        if (qh == null) { throw new Error("The queryHandlers has been empty before completing queries."); }
         return qh.query(request.csn, request.restQuery, sort, maxLimit, csnMode)
           .then((result) => queryFallback({
             csn: result.csn,
@@ -151,40 +151,40 @@ export default class Dadget extends ServiceEngine {
           }));
       })
       .then((result) => {
-        const itemMap: { [id: string]: any } = {}
-        let hasDupulicate = false
+        const itemMap: { [id: string]: any } = {};
+        let hasDupulicate = false;
         for (const item of result.resultSet as Array<{ _id: string }>) {
           if (itemMap[item._id]) {
-            console.log("hasDupulicate:" + item._id)
-            hasDupulicate = true
+            console.log("hasDupulicate:" + item._id);
+            hasDupulicate = true;
           }
-          itemMap[item._id] = item
+          itemMap[item._id] = item;
         }
-        let list: object[]
+        let list: object[];
         if (hasDupulicate) {
-          list = []
+          list = [];
           for (const id of Object.keys(itemMap)) {
-            list.push(itemMap[id])
+            list.push(itemMap[id]);
           }
         } else {
-          list = result.resultSet
+          list = result.resultSet;
         }
         if (sort) {
-          list = parser.search(list, {}, sort) as object[]
+          list = parser.search(list, {}, sort) as object[];
           if (_offset) {
             if (limit) {
-              list = list.slice(_offset, _offset + limit)
+              list = list.slice(_offset, _offset + limit);
             } else {
-              list = list.slice(_offset)
+              list = list.slice(_offset);
             }
           } else {
             if (limit) {
-              list = list.slice(0, limit)
+              list = list.slice(0, limit);
             }
           }
         }
-        return { ...result, resultSet: list }
-      })
+        return { ...result, resultSet: list };
+      });
   }
 
   /**
@@ -200,35 +200,35 @@ export default class Dadget extends ServiceEngine {
    */
   query(query: object, sort?: object, limit?: number, offset?: number, csn?: number, csnMode?: CsnMode): Promise<QueryResult> {
     if (this.latestCsn && !csn) {
-      csn = this.latestCsn
-      csnMode = "latest"
+      csn = this.latestCsn;
+      csnMode = "latest";
     }
     return Dadget._query(this.node, this.database, query, sort, limit, offset, csn, csnMode)
       .then((result) => {
         // TODO クエリ完了後の処理
         // 通知処理
         // csn が0の場合は代入
-        this.currentCsn = result.csn
+        this.currentCsn = result.csn;
         for (const id of Object.keys(this.updateListeners)) {
-          const listener = this.updateListeners[id]
+          const listener = this.updateListeners[id];
           if (listener.csn === PREQUERY_CSN) {
-            listener.csn = result.csn
-            listener.notifyTime = Date.now()
+            listener.csn = result.csn;
+            listener.notifyTime = Date.now();
           }
         }
         setTimeout(() => {
-          this.notifyAll()
-        })
+          this.notifyAll();
+        });
 
         // TODO クエリが空にならなかった場合（＝ wholeContents サブセットのサブセットストレージが同期処理中で準備が整っていない場合）5秒ごとに4回くらい再試行した後、エラーとなる
-        return result
+        return result;
       })
       .catch((reason) => {
-        console.dir(reason)
+        console.dir(reason);
         const cause = reason instanceof DadgetError ? reason :
-          (reason.code ? DadgetError.from(reason) : new DadgetError(ERROR.E2102, [reason.toString()]))
-        return Promise.reject(cause)
-      })
+          (reason.code ? DadgetError.from(reason) : new DadgetError(ERROR.E2102, [reason.toString()]));
+        return Promise.reject(cause);
+      });
   }
 
   /**
@@ -241,14 +241,14 @@ export default class Dadget extends ServiceEngine {
    */
   count(query: object, csn?: number, csnMode?: CsnMode): Promise<number> {
     // TODO 実装の効率化
-    return this.query(query, undefined, undefined, undefined, csn, csnMode).then((result) => result.resultSet.length)
+    return this.query(query, undefined, undefined, undefined, csn, csnMode).then((result) => result.resultSet.length);
   }
 
   /**
    * targetに設定するUUIDを生成
    */
   static uuidGen(): string {
-    return uuidv1()
+    return uuidv1();
   }
 
   /**
@@ -259,11 +259,11 @@ export default class Dadget extends ServiceEngine {
    * @return 更新されたオブジェクト
    */
   exec(csn: number, request: TransactionRequest): Promise<object> {
-    request.type = request.type.toLowerCase() as TransactionType
+    request.type = request.type.toLowerCase() as TransactionType;
     if (request.type !== TransactionType.INSERT && request.type !== TransactionType.UPDATE && request.type !== TransactionType.DELETE) {
-      throw new Error("The TransactionType is not supported.")
+      throw new Error("The TransactionType is not supported.");
     }
-    const sendData = { csn, request }
+    const sendData = { csn, request };
     return this.node.fetch(CORE_NODE.PATH_CONTEXT.replace(/:database\b/g, this.database) + "/exec", {
       method: "POST",
       headers: {
@@ -272,40 +272,40 @@ export default class Dadget extends ServiceEngine {
       body: EJSON.stringify(sendData),
     })
       .then((fetchResult) => {
-        if (typeof fetchResult.ok !== "undefined" && !fetchResult.ok) { throw Error(fetchResult.statusText) }
-        return fetchResult.json()
+        if (typeof fetchResult.ok !== "undefined" && !fetchResult.ok) { throw Error(fetchResult.statusText); }
+        return fetchResult.json();
       })
       .then((_) => {
-        const result = EJSON.deserialize(_)
-        this.logger.debug("exec:", JSON.stringify(result))
+        const result = EJSON.deserialize(_);
+        this.logger.debug("exec:", JSON.stringify(result));
         if (result.status === "OK") {
-          this.latestCsn = result.csn
-          return result.updateObject
+          this.latestCsn = result.csn;
+          return result.updateObject;
         } else if (result.reason) {
-          const reason = result.reason as DadgetError
-          throw new DadgetError({ code: reason.code, message: reason.message }, reason.inserts, reason.ns)
+          const reason = result.reason as DadgetError;
+          throw new DadgetError({ code: reason.code, message: reason.message }, reason.inserts, reason.ns);
         } else {
-          throw JSON.stringify(result)
+          throw JSON.stringify(result);
         }
       })
       .catch((reason) => {
-        const cause = reason instanceof DadgetError ? reason : new DadgetError(ERROR.E2103, [reason.toString()])
-        return Promise.reject(cause)
-      })
+        const cause = reason instanceof DadgetError ? reason : new DadgetError(ERROR.E2103, [reason.toString()]);
+        return Promise.reject(cause);
+      });
   }
 
   private notifyAll() {
     for (const id of Object.keys(this.updateListeners)) {
-      const listener = this.updateListeners[id]
+      const listener = this.updateListeners[id];
       if (listener.csn !== PREQUERY_CSN && this.notifyCsn > listener.csn) {
-        const now = Date.now()
+        const now = Date.now();
         if (listener.minInterval === 0 || now - listener.notifyTime >= listener.minInterval) {
-          listener.notifyTime = now
-          listener.csn = this.notifyCsn
-          listener.listener(this.notifyCsn)
+          listener.notifyTime = now;
+          listener.csn = this.notifyCsn;
+          listener.listener(this.notifyCsn);
         } else {
           setTimeout(() => {
-            this.notifyAll()
+            this.notifyAll();
           }, now - listener.notifyTime);
         }
       }
@@ -314,9 +314,9 @@ export default class Dadget extends ServiceEngine {
 
   private notifyRollback(notifyCsn: number) {
     for (const id of Object.keys(this.updateListeners)) {
-      const listener = this.updateListeners[id]
+      const listener = this.updateListeners[id];
       if (listener.csn !== PREQUERY_CSN && listener.csn > notifyCsn) {
-        listener.csn = notifyCsn
+        listener.csn = notifyCsn;
       }
     }
   }
@@ -328,43 +328,43 @@ export default class Dadget extends ServiceEngine {
    * @return 更新通知取り消しに指定するID
    */
   addUpdateListener(listener: (csn: number) => void, minInterval?: number): string {
-    const parent = this
+    const parent = this;
     if (Object.keys(this.updateListeners).length === 0) {
       class NotifyListener extends Subscriber {
 
         constructor() {
-          super()
-          this.logger.debug("NotifyListener is created")
+          super();
+          this.logger.debug("NotifyListener is created");
         }
 
         onReceive(transctionJSON: string) {
-          const transaction = EJSON.parse(transctionJSON) as TransactionObject
+          const transaction = EJSON.parse(transctionJSON) as TransactionObject;
           if (transaction.type === TransactionType.ROLLBACK) {
-            parent.notifyCsn = transaction.csn
-            parent.notifyRollback(transaction.csn)
+            parent.notifyCsn = transaction.csn;
+            parent.notifyRollback(transaction.csn);
           } else if (transaction.csn > parent.notifyCsn) {
-            parent.notifyCsn = transaction.csn
+            parent.notifyCsn = transaction.csn;
             setTimeout(() => {
-              parent.notifyAll()
-            })
+              parent.notifyAll();
+            });
           }
         }
       }
 
       if (!this.updateListenerKey) {
         this.node.subscribe(CORE_NODE.PATH_TRANSACTION.replace(/:database\b/g, this.database), new NotifyListener())
-          .then((key) => { this.updateListenerKey = key })
+          .then((key) => { this.updateListenerKey = key; });
       }
     }
 
-    const id = uuidv1()
+    const id = uuidv1();
     this.updateListeners[id] = {
       listener,
       csn: this.currentCsn,
       minInterval: minInterval || 0,
       notifyTime: 0,
-    }
-    return id
+    };
+    return id;
   }
 
   /**
@@ -372,11 +372,11 @@ export default class Dadget extends ServiceEngine {
    * @param id 登録時のID
    */
   removeUpdateListener(id: string) {
-    delete this.updateListeners[id]
+    delete this.updateListeners[id];
     if (Object.keys(this.updateListeners).length === 0) {
       if (this.updateListenerKey) {
-        this.node.unsubscribe(this.updateListenerKey)
-        this.updateListenerKey = null
+        this.node.unsubscribe(this.updateListenerKey);
+        this.updateListenerKey = null;
       }
     }
   }
@@ -385,10 +385,10 @@ export default class Dadget extends ServiceEngine {
    * データベースの更新通知のリスナを全解除
    */
   resetUpdateListener() {
-    this.updateListeners = {}
+    this.updateListeners = {};
     if (this.updateListenerKey) {
-      this.node.unsubscribe(this.updateListenerKey)
-      this.updateListenerKey = null
+      this.node.unsubscribe(this.updateListenerKey);
+      this.updateListenerKey = null;
     }
   }
 

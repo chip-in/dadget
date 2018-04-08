@@ -1,22 +1,22 @@
 
 export class Mongo {
   static getUrl() {
-    let url = (process.env.MONGODB_URL ? process.env.MONGODB_URL : "mongodb://localhost:27017/") as string
-    if (url.slice(-1) !== "/") { url += "/" }
-    return url
+    let url = (process.env.MONGODB_URL ? process.env.MONGODB_URL : "mongodb://localhost:27017/") as string;
+    if (url.slice(-1) !== "/") { url += "/"; }
+    return url;
   }
 }
 
-const ACCESS_CONTROL_ALLOW_ORIGIN = process.env.ACCESS_CONTROL_ALLOW_ORIGIN
+const ACCESS_CONTROL_ALLOW_ORIGIN = process.env.ACCESS_CONTROL_ALLOW_ORIGIN;
 
 export function getAccessControlAllowOrigin(origin: string) {
-  if (!origin) { return null }
-  if (!ACCESS_CONTROL_ALLOW_ORIGIN) { return null }
-  const allowOrigins = ACCESS_CONTROL_ALLOW_ORIGIN.split(",")
+  if (!origin) { return null; }
+  if (!ACCESS_CONTROL_ALLOW_ORIGIN) { return null; }
+  const allowOrigins = ACCESS_CONTROL_ALLOW_ORIGIN.split(",");
   for (const allowOrigin of allowOrigins) {
-    if (allowOrigin.toLowerCase().replace(/\/$/, "") === origin.toLowerCase().replace(/\/$/, "")) { return origin }
+    if (allowOrigin.toLowerCase().replace(/\/$/, "") === origin.toLowerCase().replace(/\/$/, "")) { return origin; }
   }
-  return null
+  return null;
 }
 
 export const CORE_NODE = {
@@ -30,4 +30,4 @@ export const CORE_NODE = {
   PATH_CONTEXT: "/d/:database/context",
   PATH_SUBSET_TRANSACTION: "/m/d/:database/subset/:subset/transaction",
   PATH_SUBSET: "/d/:database/subset/:subset",
-}
+};

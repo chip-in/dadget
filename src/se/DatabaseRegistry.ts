@@ -1,6 +1,6 @@
-import { ResourceNode, ServiceEngine } from "@chip-in/resource-node"
-import { ERROR } from "../Errors"
-import { DadgetError } from "../util/DadgetError"
+import { ResourceNode, ServiceEngine } from "@chip-in/resource-node";
+import { ERROR } from "../Errors";
+import { DadgetError } from "../util/DadgetError";
 
 /**
  * サブセット定義
@@ -10,12 +10,12 @@ export class SubsetDef {
   /**
    * 優先度
    */
-  priority: number
+  priority: number;
 
   /**
    * サブセットのクエリ
    */
-  query?: object
+  query?: object;
 }
 
 /**
@@ -26,12 +26,12 @@ export class IndexDef {
   /**
    * インデックスの属性名をキーとしたハッシュオブジェクトで値はインデックスが昇順(1)か降順(-1)かを示す。その仕様はmongo db の createIndex の第一引数に準じる
    */
-  index: object
+  index: object;
 
   /**
    * インデックスの属性を指定する。その仕様はmongo db の createIndex の第二引数に準じる
    */
-  property?: { unique: boolean }
+  property?: { unique: boolean };
 }
 
 /**
@@ -42,12 +42,12 @@ export class DatabaseMetadata {
   /**
    * インデックス設定
    */
-  indexes: IndexDef[]
+  indexes: IndexDef[];
 
   /**
    * サブセット定義
    */
-  subsets: { [subsetName: string]: SubsetDef }
+  subsets: { [subsetName: string]: SubsetDef };
 }
 
 /**
@@ -58,12 +58,12 @@ export class DatabaseRegistryConfigDef {
   /**
    * データベース名
    */
-  database: string
+  database: string;
 
   /**
    * メタデータ
    */
-  metadata: DatabaseMetadata
+  metadata: DatabaseMetadata;
 }
 
 /**
@@ -71,23 +71,23 @@ export class DatabaseRegistryConfigDef {
  */
 export class DatabaseRegistry extends ServiceEngine {
 
-  public bootOrder = 10
-  private option: DatabaseRegistryConfigDef
-  private node: ResourceNode
+  public bootOrder = 10;
+  private option: DatabaseRegistryConfigDef;
+  private node: ResourceNode;
 
   constructor(option: DatabaseRegistryConfigDef) {
-    super(option)
-    this.logger.debug(JSON.stringify(option))
-    this.option = option
+    super(option);
+    this.logger.debug(JSON.stringify(option));
+    this.option = option;
   }
 
   start(node: ResourceNode): Promise<void> {
-    this.node = node
-    this.logger.debug("DatabaseRegistry is starting")
+    this.node = node;
+    this.logger.debug("DatabaseRegistry is starting");
     if (!this.option.metadata) {
       return Promise.reject(new DadgetError(ERROR.E2201, ["metadata is missing."]));
     }
-    this.logger.debug("DatabaseRegistry is started")
+    this.logger.debug("DatabaseRegistry is started");
     return Promise.resolve();
   }
 
@@ -96,6 +96,6 @@ export class DatabaseRegistry extends ServiceEngine {
   }
 
   getMetadata(): DatabaseMetadata {
-    return this.option.metadata
+    return this.option.metadata;
   }
 }
