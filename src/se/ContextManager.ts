@@ -39,35 +39,35 @@ class TransactionJournalSubscriber extends Subscriber {
   }
 
   onReceive(msg: string) {
-    //    console.log("onReceive:", msg)
+    console.log("TransactionJournalSubscriber onReceive:", msg.toString());
     const transaction: TransactionObject = EJSON.parse(msg);
     this.context.getLock().acquire("transaction", () => {
       if (transaction.type === TransactionType.ROLLBACK) {
-        // TODO 実装
-        return;
+        this.context.logger.warn("[TransactionJournalSubscriber] onReceive: ROLLBACK, " + transaction.csn);
+        // TODO ROLLBACKの指示が来た場合、csnの問い合わせを行う？　ダイジェストが一致するまで一つずつバックしながら問い合わせ？
+        return this.journalDb.deleteAfter(transaction.csn);
       }
       // 自分がスレーブになっていれば保存
       return this.csnDb.getCurrentCsn()
         .then((csn) => {
           if (csn < transaction.csn) {
+            this.context.logger.info("[TransactionJournalSubscriber] onReceive: forward csn, " + transaction.csn);
             return this.csnDb.update(transaction.csn);
           }
-          return Promise.resolve();
         })
         .then(() => {
           return this.journalDb.findByCsn(transaction.csn);
         })
         .then((savedTransaction) => {
           if (!savedTransaction) {
-            // トランザクションオブジェクトをジャーナルに追加
+            this.context.logger.info("[TransactionJournalSubscriber] onReceive: insert transaction, " + transaction.csn);
             return this.journalDb.insert(transaction);
           } else {
-            let promise = Promise.resolve();
             if (savedTransaction.digest !== transaction.digest) {
               // ダイジェストが異なる場合は更新して、それ以降でtimeがこのトランザクション以前のジャーナルを削除
-              promise = promise.then(() => this.journalDb.updateAndDeleteAfter(transaction));
+              this.context.logger.warn("[TransactionJournalSubscriber] onReceive: updateAndDeleteAfter, " + transaction.csn);
+              return this.journalDb.updateAndDeleteAfter(transaction);
             }
-            return promise;
           }
         })
         .catch((err) => {

@@ -88,21 +88,21 @@ export class PersistentDb implements IDb {
   updateOneById(id: string, update: object): Promise<void> {
     return this.db.collection(this.collection).updateOne({ _id: id }, update)
       .then((result) => {
-        if (!result.result.ok || result.result.nModified !== 1) { throw new Error("failed to update: " + JSON.stringify(result)); }
+        if (!result.result.ok || result.result.n !== 1) { throw new Error("failed to update: " + JSON.stringify(result)); }
       });
   }
 
   updateOne(filter: object, update: object): Promise<void> {
     return this.db.collection(this.collection).updateOne(filter, update)
       .then((result) => {
-        if (!result.result.ok || result.result.nModified !== 1) { throw new Error("failed to update: " + JSON.stringify(result)); }
+        if (!result.result.ok || result.result.n !== 1) { throw new Error("failed to update: " + JSON.stringify(result)); }
       });
   }
 
   replaceOneById(id: string, doc: object): Promise<void> {
     return this.db.collection(this.collection).replaceOne({ _id: id }, doc)
       .then((result) => {
-        if (!result.result.ok || result.result.nModified !== 1) { throw new Error("failed to replace: " + JSON.stringify(result)); }
+        if (!result.result.ok || result.result.n !== 1) { throw new Error("failed to replace: " + JSON.stringify(result)); }
       });
   }
 

@@ -1,5 +1,6 @@
 import * as EJSON from "../util/Ejson";
 
+import { Logger } from "@chip-in/resource-node";
 import { TransactionObject, TransactionRequest, TransactionType } from "../db/Transaction";
 import { ERROR } from "../Errors";
 import { DadgetError } from "../util/DadgetError";
@@ -94,10 +95,29 @@ export class JournalDb {
       .catch((err) => Promise.reject(new DadgetError(ERROR.E1110, [err.toString()])));
   }
 
+  deleteAfter(csn: number): Promise<void> {
+    console.log("deleteAfter:", csn);
+    return this.findByCsnRange(csn + 1, Number.MAX_VALUE)
+      .then((transactions) => {
+        let promise = Promise.resolve();
+        for (const transaction of transactions) {
+          promise = promise.then(() => this.db.deleteOneById((transaction as any)._id));
+        }
+        return promise;
+      })
+      .catch((err) => Promise.reject(new DadgetError(ERROR.E1112, [err.toString()])));
+  }
+
+  deleteAll(): Promise<void> {
+    console.log("deleteAll");
+    return this.db.deleteAll()
+      .catch((err) => Promise.reject(new DadgetError(ERROR.E1112, [err.toString()])));
+  }
+
   updateAndDeleteAfter(transaction: TransactionObject): Promise<void> {
-    // TODO 廃棄トランザクションをログへ出力し、削除
     console.log("update:", JSON.stringify(transaction));
-    return this.db.updateOne({ csn: transaction.csn }, transaction)
+    return this.deleteAfter(transaction.csn)
+      .then(() => this.db.updateOne({ csn: transaction.csn }, transaction))
       .catch((err) => Promise.reject(new DadgetError(ERROR.E1111, [err.toString()])));
   }
 }

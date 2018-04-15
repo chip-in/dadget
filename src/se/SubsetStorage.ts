@@ -35,7 +35,7 @@ class UpdateProcessor extends Subscriber {
   onReceive(msg: string) {
     // TODO キャッシュの場合は到着したトランザクションの時刻基準で1分以上前のジャーナル削除。頻繁に実行されすぎないように
     // TODO キャッシュの場合は10件まで。それ以前が必要な場合は上位に投げる
-    this.storage.logger.debug("onReceive: " + msg);
+    this.storage.logger.debug("UpdateProcessor onReceive: " + msg.toString());
     const transaction = EJSON.parse(msg) as TransactionObject;
     this.lock.writeLock((release1) => {
       this.storage.logger.debug("get writeLock1");
@@ -43,21 +43,26 @@ class UpdateProcessor extends Subscriber {
         this.storage.logger.debug("get writeLock2");
         this.storage.getCsnDb().getCurrentCsn()
           .then((csn) => {
-            if (csn === 0 && transaction.csn > 1) {
-              // Assume that the csn number of a MQTT retain message is advanced.
+            if (!this.storage.getReady()) {
               this.storage.logger.debug("release writeLock2");
               release2();
-              this.resetData(transaction.csn)
-                .then(() => {
-                  this.storage.logger.debug("release writeLock1");
-                  release1();
-                })
-                .catch((e) => {
-                  this.storage.logger.debug("release writeLock1");
-                  release1();
-                });
+              if (csn === transaction.csn) {
+                this.storage.setReady();
+                this.storage.logger.debug("release writeLock1");
+                release1();
+              } else {
+                this.resetData(transaction.csn)
+                  .then(() => {
+                    this.storage.logger.debug("release writeLock1");
+                    release1();
+                  })
+                  .catch((e) => {
+                    this.storage.logger.debug("release writeLock1");
+                    release1();
+                  });
+              }
             } else if (transaction.type === TransactionType.ROLLBACK) {
-              // TODO 実装
+              // TODO 実装 ロールバックでもダイジェスト確認？
               this.storage.logger.debug("release writeLock2");
               release2();
               this.storage.logger.debug("release writeLock1");
@@ -121,47 +126,28 @@ class UpdateProcessor extends Subscriber {
     });
   }
 
-  resetDataWithLock(csn: number): Promise<void> {
-    return new Promise<void>((resolve, reject) => {
-      this.lock.writeLock((release1) => {
-        this.storage.logger.debug("get writeLock1");
-        this.resetData(csn)
-          .then(() => {
-            this.storage.setReady();
-            this.storage.logger.debug("release writeLock1");
-            release1();
-            resolve();
-          })
-          .catch((e) => {
-            this.storage.logger.error(e.toString());
-            this.storage.logger.debug("release writeLock1");
-            release1();
-            resolve();
-          });
-      });
-    });
-  }
-
   resetData(csn: number): Promise<void> {
+    console.log("resetData:" + csn);
     const query = this.subsetDefinition.query ? this.subsetDefinition.query : {};
     const promise = Promise.resolve();
     return promise.then(() => Dadget._query(this.storage.getNode(), this.database, query, undefined, undefined, undefined, csn, "latest")
       .catch((e) => {
         if (e.queryResult) { return e.queryResult; }
         throw e;
-      }),
-    )
+      }))
       .then((result) => {
         return new Promise<void>((resolve, reject) => {
           this.storage.getLock().writeLock((release3) => {
             this.storage.logger.debug("get writeLock3");
             Promise.resolve()
+              .then(() => this.storage.getJournalDb().deleteAll())
               .then(() => this.storage.getSubsetDb().deleteAll())
               .then(() => this.storage.getSubsetDb().insertMany(result.resultSet))
               .then(() => this.storage.getCsnDb().update(result.csn ? result.csn : csn))
               .then(() => {
                 this.storage.logger.debug("release writeLock3");
                 release3();
+                this.storage.setReady();
                 resolve();
               })
               .catch((e) => {
@@ -176,7 +162,6 @@ class UpdateProcessor extends Subscriber {
         this.storage.logger.error("UpdateProcessor Error: ", e.toString());
         throw e;
       });
-
   }
 }
 
@@ -256,7 +241,12 @@ export class SubsetStorage extends ServiceEngine implements Proxy {
     return this.lock;
   }
 
+  getReady(): boolean {
+    return this.readyFlag;
+  }
+
   setReady(): void {
+    console.log("setReady");
     this.readyFlag = true;
   }
 
@@ -323,11 +313,6 @@ export class SubsetStorage extends ServiceEngine implements Proxy {
     ).then((value) => {
       this.mountHandle = value;
     });
-    if (this.type === "cache") {
-      promise = promise.then(() => listener.resetDataWithLock(0));
-    } else {
-      this.setReady();
-    }
     promise = promise.then(() =>
       node.subscribe(CORE_NODE.PATH_SUBSET_TRANSACTION
         .replace(/:database\b/g, this.database)
@@ -393,16 +378,10 @@ export class SubsetStorage extends ServiceEngine implements Proxy {
         resolve();
       });
     });
-    let currentCsn: number;
     return promise
       .then(() => this.getCsnDb().getCurrentCsn())
-      .then((_) => {
-        currentCsn = _;
-        if (currentCsn === 0) {
-          this.logger.debug("release readLock");
-          release();
-          return { csn, resultSet: [], restQuery: query, csnMode };
-        } else if (csn === 0 || csn === currentCsn || (csn < currentCsn && csnMode === "latest")) {
+      .then((currentCsn) => {
+        if (csn === 0 || csn === currentCsn || (csn < currentCsn && csnMode === "latest")) {
           return this.getSubsetDb().find(innerQuery, sort, limit)
             .then((result) => {
               this.logger.debug("release readLock");

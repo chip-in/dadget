@@ -76,6 +76,11 @@ export const ERROR = {
   E1111: { code: 1111, message: "JournalDB failed to rebase journals. cause=%1" },
 
   /**
+   * JournalDB failed to delete journals.
+   */
+  E1112: { code: 1112, message: "JournalDB failed to delete journals. cause=%1" },
+
+  /**
    * SubsetDb failed to start.
    */
   E1201: { code: 1201, message: "SubsetDb failed to start. cause=%1" },
