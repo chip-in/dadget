@@ -13,6 +13,9 @@ import { QueryHandler } from "./QueryHandler";
 import { SubsetStorage } from "./SubsetStorage";
 import { UpdateManager } from "./UpdateManager";
 
+const QUERY_ERROR_RETRY_COUNT = 4;
+const QUERY_ERROR_WAIT_TIME = 5000;
+
 /**
  * Dadgetコンフィグレーションパラメータ
  */
@@ -126,6 +129,7 @@ export default class Dadget extends ServiceEngine {
     csnMode?: CsnMode): Promise<QueryResult> {
 
     let queryHandlers = node.searchServiceEngine("QueryHandler", { database }) as QueryHandler[];
+    if (queryHandlers.length === 0) { throw new Error("QueryHandlers required"); }
     queryHandlers = Dadget.sortQueryHandlers(queryHandlers);
     if (!csn) { csn = 0; }
     const _offset = offset ? offset : 0;
@@ -135,12 +139,10 @@ export default class Dadget extends ServiceEngine {
       .then(function queryFallback(request): Promise<QueryResult> {
         if (!request.restQuery) { return Promise.resolve(request); }
         if (!request.queryHandlers || request.queryHandlers.length === 0) {
-          const error = new Error("The queryHandlers has been empty before completing queries.") as any;
-          error.queryResult = request;
-          throw error;
+          return Promise.resolve(request);
         }
         const qh = request.queryHandlers.shift();
-        if (qh == null) { throw new Error("The queryHandlers has been empty before completing queries."); }
+        if (qh == null) { throw new Error("never happen"); }
         return qh.query(request.csn, request.restQuery, sort, maxLimit, csnMode)
           .then((result) => queryFallback({
             csn: result.csn,
@@ -203,11 +205,22 @@ export default class Dadget extends ServiceEngine {
       csn = this.latestCsn;
       csnMode = "latest";
     }
+    let count = QUERY_ERROR_RETRY_COUNT;
+    const retryAction = (_: any) => {
+      count--;
+      return new Promise<QueryResult>((resolve) => {
+        setTimeout(() => {
+          Dadget._query(this.node, this.database, query, sort, limit, offset, csn, csnMode)
+            .then((result) => {
+              resolve(result);
+            });
+        }, QUERY_ERROR_WAIT_TIME);
+      });
+    };
     return Dadget._query(this.node, this.database, query, sort, limit, offset, csn, csnMode)
+      .then((result) => whileQueryResult(result, (result) => !!(result.restQuery && count > 0), retryAction))
       .then((result) => {
-        // TODO クエリ完了後の処理
-        // 通知処理
-        // csn が0の場合は代入
+        if (result.restQuery) { throw new Error("The queryHandlers has been empty before completing queries."); }
         this.currentCsn = result.csn;
         for (const id of Object.keys(this.updateListeners)) {
           const listener = this.updateListeners[id];
@@ -219,8 +232,6 @@ export default class Dadget extends ServiceEngine {
         setTimeout(() => {
           this.notifyAll();
         });
-
-        // TODO クエリが空にならなかった場合（＝ wholeContents サブセットのサブセットストレージが同期処理中で準備が整っていない場合）5秒ごとに4回くらい再試行した後、エラーとなる
         return result;
       })
       .catch((reason) => {
@@ -397,3 +408,12 @@ export default class Dadget extends ServiceEngine {
   }
 
 }
+
+const whileQueryResult = (data: QueryResult, condition: (data: QueryResult) => boolean, action: (data: QueryResult) => Promise<QueryResult>) => {
+  const whilst = (data: QueryResult): Promise<QueryResult> => {
+    return condition(data) ?
+      action(data).then(whilst) :
+      Promise.resolve(data);
+  };
+  return whilst(data);
+};

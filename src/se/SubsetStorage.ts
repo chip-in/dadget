@@ -130,11 +130,7 @@ class UpdateProcessor extends Subscriber {
     console.log("resetData:" + csn);
     const query = this.subsetDefinition.query ? this.subsetDefinition.query : {};
     const promise = Promise.resolve();
-    return promise.then(() => Dadget._query(this.storage.getNode(), this.database, query, undefined, undefined, undefined, csn, "latest")
-      .catch((e) => {
-        if (e.queryResult) { return e.queryResult; }
-        throw e;
-      }))
+    return promise.then(() => Dadget._query(this.storage.getNode(), this.database, query, undefined, undefined, undefined, csn, "latest"))
       .then((result) => {
         return new Promise<void>((resolve, reject) => {
           this.storage.getLock().writeLock((release3) => {
