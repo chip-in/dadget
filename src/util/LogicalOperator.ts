@@ -1,12 +1,6 @@
 import equal = require("deep-equal");
 
-// TODO 簡易形式からの展開とコンパクト化
-
 export class LogicalOperator {
-  static isEqual(cond1: any, cond2: any): boolean {
-    // expandLogicalQueryしてから同一か確認？
-    return false;
-  }
   static getInsideOfCache(cond: any, cacheCond: any): object | undefined {
     if (cacheCond === undefined) { return cond; }
     let query: Operator;
@@ -198,7 +192,6 @@ class NotValueOperator extends ValueOperator {
   toMongo(): object {
     if (this.op instanceof EqOperator) { return { [this.field]: { $ne: this.op.val } }; }
     if (this.op instanceof InOperator) { return { [this.field]: { $nin: this.op.val } }; }
-    //    if (this.op instanceof RegexOperator) { throw new Error("未対応") } TODO 検索前変更
     const valueOp = this.op.toMongo() as any;
     const exp: any = valueOp[this.field];
     return { [this.field]: { $not: exp } };
