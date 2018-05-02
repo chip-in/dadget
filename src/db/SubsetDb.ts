@@ -37,20 +37,20 @@ export class SubsetDb {
 
   insertMany(obj: object[]): Promise<void> {
     if (obj.length === 0) { return Promise.resolve(); }
-    console.log("insertMany:");
+    console.log("insertMany:", JSON.stringify(obj));
     return this.db.insertMany(obj)
       .catch((err) => Promise.reject(new DadgetError(ERROR.E1206, [err.toString()])));
   }
 
-  update(obj: { [key: string]: any }): Promise<void> {
-    console.log("update:", JSON.stringify(obj));
-    return this.db.replaceOneById(obj._id, obj)
+  update(id: string, obj: object): Promise<void> {
+    console.log("update:", id, JSON.stringify(obj));
+    return this.db.replaceOneById(id, obj)
       .catch((err) => Promise.reject(new DadgetError(ERROR.E1203, [err.toString()])));
   }
 
-  delete(obj: { [key: string]: any }): Promise<void> {
-    console.log("delete:", JSON.stringify(obj));
-    return this.db.deleteOneById(obj._id)
+  deleteById(id: string): Promise<void> {
+    console.log("deleteById:", id);
+    return this.db.deleteOneById(id)
       .catch((err) => Promise.reject(new DadgetError(ERROR.E1204, [err.toString()])));
   }
 

@@ -44,10 +44,23 @@ class TransactionJournalSubscriber extends Subscriber {
     this.context.getLock().acquire("transaction", () => {
       if (transaction.type === TransactionType.ROLLBACK) {
         this.context.logger.warn("[TransactionJournalSubscriber] onReceive: ROLLBACK, " + transaction.csn);
-        // TODO ROLLBACKの指示が来た場合、csnの問い合わせを行う？　ダイジェストが一致するまで一つずつバックしながら問い合わせ？
-        return this.journalDb.deleteAfter(transaction.csn);
+        return this.csnDb.update(transaction.csn)
+          .then(() => {
+            if (!transaction.digest) {
+              return this.journalDb.deleteAll();
+            }
+            return this.journalDb.findByCsn(transaction.csn)
+              .then((tr) => {
+                if (!tr || tr.digest !== transaction.digest) {
+                  // TODO ContextManagerのJournalは不足分を確認してチェックポイントまで取得
+                  return this.journalDb.deleteAll();
+                } else {
+                  return this.journalDb.deleteAfter(transaction.csn);
+                }
+              });
+          });
       }
-      // 自分がスレーブになっていれば保存
+      // Assume this is a slave.
       return this.csnDb.getCurrentCsn()
         .then((csn) => {
           if (csn < transaction.csn) {
@@ -142,6 +155,8 @@ class ContextManagementServer extends Proxy {
         reason: new DadgetError(ERROR.E2002, [err]),
       });
     }
+
+    // TODO 72時間以上前の Journal 削除(前回実行時より1時間経過している場合)
 
     // コンテキスト通番をインクリメントしてトランザクションオブジェクトを作成
     return new Promise((resolve, reject) => {
@@ -318,13 +333,19 @@ export class ContextManager extends ServiceEngine {
         .then(() => {
           return this.csnDb.getCurrentCsn()
             .then((csn) => {
-              const transaction = new TransactionObject();
-              transaction.csn = csn;
-              transaction.type = TransactionType.ROLLBACK;
-              // マスターを取得した場合、他のサブセットを自分と同じcsnまでロールバックさせるメッセージを送信
-              return this.getNode().publish(
-                CORE_NODE.PATH_TRANSACTION.replace(/:database\b/g, this.getDatabase())
-                , EJSON.stringify(transaction));
+              return this.journalDb.findByCsn(csn)
+                .then((tr) => {
+                  const transaction = new TransactionObject();
+                  if (tr) {
+                    transaction.digest = tr.digest;
+                  }
+                  transaction.csn = csn;
+                  transaction.type = TransactionType.ROLLBACK;
+                  // As this is a master, other slaves must be rollback.
+                  return this.getNode().publish(
+                    CORE_NODE.PATH_TRANSACTION.replace(/:database\b/g, this.getDatabase())
+                    , EJSON.stringify(transaction));
+                });
             })
             .then(() => {
               return new Promise<void>((resolve) => {
