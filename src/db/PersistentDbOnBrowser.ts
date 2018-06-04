@@ -310,6 +310,10 @@ export class PersistentDb implements IDb {
     });
   }
 
+  count(query: object): Promise<number> {
+    return this.find(query).then((list) => list.length);
+  }
+
   insertOne(doc: object): Promise<void> {
     return new Promise((resolve, reject) => {
       const transaction = this.db.transaction(OBJECT_STORE_NAME, "readwrite");

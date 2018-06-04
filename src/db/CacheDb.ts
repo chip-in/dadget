@@ -81,6 +81,17 @@ export class CacheDb implements IDb {
     return Promise.resolve(list);
   }
 
+  count(query: object): Promise<number> {
+    const dataList = [];
+    for (const _id of Object.keys(this.data)) {
+      dataList.push(this.data[_id]);
+    }
+    const list = parser.search(dataList, query) as object[];
+    const count = list.length;
+    console.log("CacheDb count:" + count);
+    return Promise.resolve(count);
+  }
+
   insertOne(doc: { _id: string }): Promise<void> {
     this.data[doc._id] = doc;
     return Promise.resolve();

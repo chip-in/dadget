@@ -9,6 +9,7 @@ import { IDb } from "./IDb";
 const JOURNAL_COLLECTION = "__journal__";
 
 export class JournalDb {
+  private protectedCsn: number = 0;
 
   constructor(private db: IDb) {
     db.setCollection(JOURNAL_COLLECTION);
@@ -26,20 +27,32 @@ export class JournalDb {
       },
     });
     return this.db.start()
+      .then(() => this.db.findOneBySort({}, { csn: 1 }))
+      .then((_) => {
+        if (_) { this.protectedCsn = _.csn; }
+        console.log("protectedCsn: ", this.protectedCsn);
+      })
       .catch((err) => Promise.reject(new DadgetError(ERROR.E1101, [err.toString()])));
   }
 
-  checkConsistent(csn: number, request: TransactionRequest): Promise<void> {
+  checkConsistent(postulatedCsn: number, request: TransactionRequest): Promise<void> {
     return this.db.findOneBySort({ target: request.target }, { csn: -1 })
       .then((result) => {
+        if (postulatedCsn && postulatedCsn < this.protectedCsn) {
+          throw new DadgetError(ERROR.E1113, [postulatedCsn, this.protectedCsn]);
+        }
+        // TODO TEST チェックポイント以前は見つからなくても問題ない
         console.log("checkConsistent", JSON.stringify(result));
         if (request.type === TransactionType.INSERT && request.new) {
           if (!result || result.type === TransactionType.DELETE) { return; }
-          throw new DadgetError(ERROR.E1102);
+          throw new DadgetError(ERROR.E1102, [request.target]);
         } else if (request.before) {
-          if (!result) { throw new DadgetError(ERROR.E1103); }
+          if (!result) {
+            if (request.before.csn < this.protectedCsn) { return; }
+            throw new DadgetError(ERROR.E1103);
+          }
           if (result.type === TransactionType.DELETE) { throw new DadgetError(ERROR.E1104); }
-          if (result.csn > csn) { throw new DadgetError(ERROR.E1105, [result.csn, csn]); }
+          if (result.csn > request.before.csn) { throw new DadgetError(ERROR.E1105, [result.csn, request.before.csn]); }
           return;
         } else {
           throw new DadgetError(ERROR.E1106);
@@ -63,7 +76,6 @@ export class JournalDb {
 
   insert(transaction: TransactionObject): Promise<void> {
     console.log("insert:", JSON.stringify(transaction));
-    // mongodbの制限によりoperatorを文字列化
     const saveVal: any = { ...transaction };
     if (transaction.operator) {
       saveVal.operator = EJSON.stringify(transaction.operator);
@@ -115,9 +127,27 @@ export class JournalDb {
   }
 
   updateAndDeleteAfter(transaction: TransactionObject): Promise<void> {
-    console.log("update:", JSON.stringify(transaction));
+    console.log("updateAndDeleteAfter:", JSON.stringify(transaction));
     return this.deleteAfter(transaction.csn)
       .then(() => this.db.updateOne({ csn: transaction.csn }, transaction))
       .catch((err) => Promise.reject(new DadgetError(ERROR.E1111, [err.toString()])));
+  }
+
+  getBeforeCheckPointTime(time: Date): Promise<TransactionObject> {
+    return this.db.findOneBySort({ datetime: { $lt: time } }, { csn: -1 })
+      .then((result) => {
+        console.log("getBeforeCheckPointTime", JSON.stringify(result));
+        return result;
+      })
+      .catch((err) => Promise.reject(new DadgetError(ERROR.E1114, [err.toString()])));
+  }
+
+  getOneAfterCsn(csn: number): Promise<TransactionObject> {
+    return this.db.findOneBySort({ csn: { $gt: csn } }, { csn: 1 })
+      .then((result) => {
+        console.log("getOneAfterCsn", JSON.stringify(result));
+        return result;
+      })
+      .catch((err) => Promise.reject(new DadgetError(ERROR.E1115, [err.toString()])));
   }
 }

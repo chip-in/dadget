@@ -15,6 +15,8 @@ import { ProxyHelper } from "../util/ProxyHelper";
 
 const KEEP_TIME_AFTER_CONTEXT_MANAGER_MASTER_ACQUIRED = 3000; // 3000ms
 const KEEP_TIME_AFTER_SENDING_ROLLBACK = 1000; // 1000ms
+const CHECK_POINT_CHECK_PERIOD = 10 * 60 * 1000;
+const CHECK_POINT_DELETE_PERIOD = 72 * 60 * 60 * 1000;
 
 /**
  * コンテキストマネージャコンフィグレーションパラメータ
@@ -35,15 +37,22 @@ class TransactionJournalSubscriber extends Subscriber {
     protected csnDb: CsnDb) {
 
     super();
-    context.logger.debug("TransactionJournalSubscriber is created");
+    this.logger.category = "TransJournalSubscriber";
+    this.logger.debug("TransactionJournalSubscriber is created");
   }
 
   onReceive(msg: string) {
     console.log("TransactionJournalSubscriber onReceive:", msg.toString());
     const transaction: TransactionObject = EJSON.parse(msg);
+    this.logger.info("received:", transaction.type, transaction.csn);
     this.context.getLock().acquire("transaction", () => {
+      if (transaction.type === TransactionType.CHECKPOINT) {
+        this.logger.info("CHECKPOINT protectedCsn: " + transaction.protectedCsn);
+        // TODO 実装
+        return;
+      }
       if (transaction.type === TransactionType.ROLLBACK) {
-        this.context.logger.warn("[TransactionJournalSubscriber] onReceive: ROLLBACK, " + transaction.csn);
+        this.logger.warn("ROLLBACK:", transaction.csn);
         return this.csnDb.update(transaction.csn)
           .then(() => {
             if (!transaction.digest) {
@@ -60,11 +69,12 @@ class TransactionJournalSubscriber extends Subscriber {
               });
           });
       }
-      // Assume this is a slave.
+      // Assume this node is a slave.
       return this.csnDb.getCurrentCsn()
         .then((csn) => {
           if (csn < transaction.csn) {
-            this.context.logger.info("[TransactionJournalSubscriber] onReceive: forward csn, " + transaction.csn);
+            this.logger.info("forward csn:", transaction.csn);
+            // TODO 不足分取得
             return this.csnDb.update(transaction.csn);
           }
         })
@@ -73,18 +83,19 @@ class TransactionJournalSubscriber extends Subscriber {
         })
         .then((savedTransaction) => {
           if (!savedTransaction) {
-            this.context.logger.info("[TransactionJournalSubscriber] onReceive: insert transaction, " + transaction.csn);
+            this.logger.info("insert transaction:", transaction.csn);
             return this.journalDb.insert(transaction);
           } else {
             if (savedTransaction.digest !== transaction.digest) {
               // ダイジェストが異なる場合は更新して、それ以降でtimeがこのトランザクション以前のジャーナルを削除
-              this.context.logger.warn("[TransactionJournalSubscriber] onReceive: updateAndDeleteAfter, " + transaction.csn);
+              // TODO チェックポイントまで確認
+              this.logger.warn("updateAndDeleteAfter:", transaction.csn);
               return this.journalDb.updateAndDeleteAfter(transaction);
             }
           }
         })
         .catch((err) => {
-          this.context.logger.error(err.toString());
+          this.logger.error(err.toString());
         });
     });
   }
@@ -92,6 +103,7 @@ class TransactionJournalSubscriber extends Subscriber {
 
 class ContextManagementServer extends Proxy {
   private lastBeforeObj: { _id?: string, csn?: number };
+  private lastCheckPointTime: number = 0;
 
   constructor(
     protected context: ContextManager,
@@ -99,7 +111,8 @@ class ContextManagementServer extends Proxy {
     protected csnDb: CsnDb) {
 
     super();
-    context.logger.debug("ContextManagementServer is created");
+    this.logger.category = "ContextManagementServer";
+    this.logger.debug("ContextManagementServer is created");
   }
 
   onReceive(req: http.IncomingMessage, res: http.ServerResponse): Promise<http.ServerResponse> {
@@ -107,47 +120,52 @@ class ContextManagementServer extends Proxy {
     if (!req.method) { throw new Error("method is required."); }
     const url = URL.parse(req.url);
     if (url.pathname == null) { throw new Error("pathname is required."); }
-    this.context.logger.debug(url.pathname);
     const method = req.method.toUpperCase();
-    this.context.logger.debug(method);
+    this.logger.debug(method, url.pathname);
     if (method === "OPTIONS") {
       return ProxyHelper.procOption(req, res);
     } else if (url.pathname.endsWith("/exec") && method === "POST") {
       return ProxyHelper.procPost(req, res, (data) => {
-        this.context.logger.debug("/exec");
+        this.logger.debug("/exec");
         const request = EJSON.parse(data);
         return this.exec(request.csn, request.request);
       });
+    } else if (url.pathname.endsWith("/journal") && method === "POST") {
+      return ProxyHelper.procPost(req, res, (data) => {
+        this.logger.debug("/journal");
+        const request = EJSON.parse(data);
+        return this.getJournal(request.csn);
+      });
     } else {
-      this.context.logger.debug("server command not found!:" + url.pathname);
+      this.logger.warn("server command not found!:", method, url.pathname);
       return ProxyHelper.procError(req, res);
     }
   }
 
-  exec(csn: number, request: TransactionRequest): Promise<{}> {
-    this.context.logger.debug(`exec ${csn}`);
+  exec(postulatedCsn: number, request: TransactionRequest): Promise<object> {
+    this.logger.info("exec csn:", postulatedCsn);
     let transaction: TransactionObject;
     let newCsn: number;
     let updateObject: { _id?: string, csn?: number };
 
     let err: string | null = null;
     if (!request.target) {
-      err = "target required";
+      err = "target required in a transaction";
     }
     if (request.type === TransactionType.INSERT) {
-      if (request.before) { err = "before not required"; }
-      if (request.operator) { err = "operator not required"; }
-      if (!request.new) { err = "new required"; }
+      if (request.before) { err = "before not required on INSERT"; }
+      if (request.operator) { err = "operator not required on INSERT"; }
+      if (!request.new) { err = "new required on INSERT"; }
     } else if (request.type === TransactionType.UPDATE) {
-      if (!request.before) { err = "before required"; }
-      if (!request.operator) { err = "operator required"; }
-      if (request.new) { err = "new not required"; }
+      if (!request.before) { err = "before required on UPDATE"; }
+      if (!request.operator) { err = "operator required on UPDATE"; }
+      if (request.new) { err = "new not required on UPDATE"; }
     } else if (request.type === TransactionType.DELETE) {
-      if (!request.before) { err = "before required"; }
-      if (request.operator) { err = "operator not required"; }
-      if (request.new) { err = "new not required"; }
+      if (!request.before) { err = "before required on DELETE"; }
+      if (request.operator) { err = "operator not required on DELETE"; }
+      if (request.new) { err = "new not required on DELETE"; }
     } else {
-      err = "type not found";
+      err = "type not found in a transaction";
     }
     if (err) {
       return Promise.resolve({
@@ -156,9 +174,6 @@ class ContextManagementServer extends Proxy {
       });
     }
 
-    // TODO 72時間以上前の Journal 削除(前回実行時より1時間経過している場合)
-
-    // コンテキスト通番をインクリメントしてトランザクションオブジェクトを作成
     return new Promise((resolve, reject) => {
       this.context.getLock().acquire("master", () => {
         return this.context.getLock().acquire("transaction", () => {
@@ -167,34 +182,64 @@ class ContextManagementServer extends Proxy {
             && (!request.before._id || this.lastBeforeObj._id === request.before._id)) {
             const objDiff = diff(this.lastBeforeObj, request.before);
             if (objDiff) {
-              this.context.logger.error("a mismatch of request.before", JSON.stringify(objDiff));
-              // throw new DadgetError(ERROR.E2005, [JSON.stringify(request)])
+              this.logger.error("a mismatch of request.before", JSON.stringify(objDiff));
+              throw new DadgetError(ERROR.E2005, [JSON.stringify(request)]);
             } else {
-              this.context.logger.debug("lastBeforeObj check passed");
+              this.logger.debug("lastBeforeObj check passed");
             }
           }
-          // ジャーナルと照合して矛盾がないかチェック
-          return this.journalDb.checkConsistent(csn, _request)
-            .then(() => this.context.checkUniqueConstraint(csn, _request))
+          return this.journalDb.checkConsistent(postulatedCsn, _request)
+            .then(() => this.csnDb.getCurrentCsn())
+            .then((currentCsn) => this.context.checkUniqueConstraint(currentCsn, _request))
             .then((_) => {
               updateObject = _;
               return Promise.all([this.csnDb.increment(), this.journalDb.getLastDigest()])
                 .then((values) => {
                   newCsn = values[0];
+                  this.logger.info("exec newCsn:", newCsn);
                   const lastDigest = values[1];
                   transaction = Object.assign({
                     csn: newCsn
                     , beforeDigest: lastDigest,
                   }, _request);
                   transaction.digest = TransactionObject.calcDigest(transaction);
-                  // トランザクションオブジェクトをジャーナルに追加
                   return this.journalDb.insert(transaction);
                 });
             }).then(() => {
-              // トランザクションオブジェクトを配信
               return this.context.getNode().publish(
                 CORE_NODE.PATH_TRANSACTION.replace(/:database\b/g, this.context.getDatabase())
                 , EJSON.stringify(transaction));
+            }).then(() => {
+              if (Date.now() - this.lastCheckPointTime > CHECK_POINT_CHECK_PERIOD) {
+                this.lastCheckPointTime = Date.now();
+                setTimeout(() => {
+                  const time = new Date();
+                  time.setMilliseconds(-CHECK_POINT_DELETE_PERIOD);
+                  this.journalDb.getBeforeCheckPointTime(time)
+                    .then((journal) => {
+                      if (!journal) { return; }
+                      return this.journalDb.getOneAfterCsn(journal.csn)
+                        .then((protectedCsnJournal) => {
+                          if (protectedCsnJournal) {
+                            return protectedCsnJournal.csn;
+                          } else {
+                            return this.csnDb.getCurrentCsn();
+                          }
+                        })
+                        .then((csn) => {
+                          const checkPointTransaction = new TransactionObject();
+                          checkPointTransaction.type = TransactionType.CHECKPOINT;
+                          checkPointTransaction.csn = newCsn;
+                          checkPointTransaction.protectedCsn = csn;
+                          checkPointTransaction.digest = transaction.digest;
+                          checkPointTransaction.beforeDigest = transaction.beforeDigest;
+                          return this.context.getNode().publish(
+                            CORE_NODE.PATH_TRANSACTION.replace(/:database\b/g, this.context.getDatabase())
+                            , EJSON.stringify(checkPointTransaction));
+                        });
+                    });
+                }, 0);
+              }
             });
         }).then(() => {
           if (!updateObject._id) { updateObject._id = transaction.target; }
@@ -206,7 +251,6 @@ class ContextManagementServer extends Proxy {
             updateObject,
           });
         }, (reason) => {
-          // トランザクションエラー
           let cause = reason instanceof DadgetError ? reason : new DadgetError(ERROR.E2003, [reason]);
           if (cause.code === ERROR.E1105.code) { cause = new DadgetError(ERROR.E2004, [cause]); }
           cause.convertInsertsToString();
@@ -217,6 +261,23 @@ class ContextManagementServer extends Proxy {
         });
       });
     });
+  }
+
+  getJournal(csn: number): Promise<object> {
+    return this.journalDb.findByCsn(csn)
+      .then((journal) => {
+        if (journal) {
+          delete (journal as any)._id;
+          return {
+            status: "OK",
+            journal,
+          };
+        } else {
+          return {
+            status: "NG",
+          };
+        }
+      });
   }
 }
 

@@ -16,12 +16,13 @@ import { ERROR } from "../Errors";
 import { DadgetError } from "../util/DadgetError";
 import { LogicalOperator } from "../util/LogicalOperator";
 import { ProxyHelper } from "../util/ProxyHelper";
+import { Util } from "../util/Util";
 import { CsnMode, default as Dadget, QueryResult } from "./Dadget";
 import { DatabaseRegistry, SubsetDef } from "./DatabaseRegistry";
+import { UpdateManager } from "./UpdateManager";
 
 class UpdateProcessor extends Subscriber {
 
-  private updateQueue: { [csn: number]: TransactionObject } = {};
   private lock: ReadWriteLock;
 
   constructor(
@@ -30,150 +31,267 @@ class UpdateProcessor extends Subscriber {
     protected subsetDefinition: SubsetDef) {
 
     super();
+    this.logger.category = "UpdateProcessor";
     this.lock = new ReadWriteLock();
   }
 
   onReceive(msg: string) {
     // TODO チェックポイント
-    this.storage.logger.debug("UpdateProcessor onReceive: " + msg.toString());
+    console.log("UpdateProcessor received: " + msg.toString());
     const transaction = EJSON.parse(msg) as TransactionObject;
-    this.lock.writeLock((release1) => {
-      this.storage.logger.debug("get writeLock1");
-      this.storage.getLock().writeLock((release2) => {
-        this.storage.logger.debug("get writeLock2");
+    this.logger.info("received:", transaction.type, transaction.csn);
+    console.log("UpdateProcessor waiting writeLock1");
+    this.lock.writeLock((_release1) => {
+      console.log("UpdateProcessor got writeLock1");
+      const release1 = () => {
+        console.log("UpdateProcessor released writeLock1");
+        _release1();
+      };
+      console.log("UpdateProcessor waiting writeLock2");
+      this.storage.getLock().writeLock((_release2) => {
+        console.log("UpdateProcessor got writeLock2");
+        const release2 = () => {
+          console.log("UpdateProcessor released writeLock2");
+          _release2();
+        };
         this.storage.getCsnDb().getCurrentCsn()
           .then((csn) => {
             if (!this.storage.getReady()) {
-              this.storage.logger.debug("release writeLock2");
-              release2();
               if (csn === transaction.csn) {
-                this.storage.setReady();
-                this.storage.logger.debug("release writeLock1");
-                release1();
-              } else {
-                this.resetData(transaction.csn)
-                  .then(() => {
-                    this.storage.logger.debug("release writeLock1");
-                    release1();
-                  })
-                  .catch((e) => {
-                    this.storage.logger.debug("release writeLock1");
-                    release1();
-                  });
-              }
-            } else if (transaction.type === TransactionType.ROLLBACK) {
-              return this.storage.getJournalDb().findByCsnRange(transaction.csn + 1, Number.MAX_VALUE)
-                .then((transactions) => {
-                  transactions.sort((a, b) => b.csn - a.csn);
-                  console.log("ROLLBACK transactions:" + JSON.stringify(transactions));
-                  let promise = Promise.resolve();
-                  transactions.forEach((trans) => {
-                    if (trans.type === TransactionType.INSERT) {
-                      promise = promise.then(() => this.storage.getSubsetDb().deleteById(trans.target));
-                    } else if (trans.type === TransactionType.UPDATE && trans.before) {
-                      promise = promise.then(() => this.storage.getSubsetDb().update(trans.target, trans.before as object));
-                    } else if (trans.type === TransactionType.DELETE && trans.before) {
-                      promise = promise.then(() => this.storage.getSubsetDb().insert(trans.before as object));
+                return this.storage.getJournalDb().findByCsn(csn)
+                  .then((journal) => {
+                    if (journal && journal.digest === transaction.digest) {
+                      this.storage.setReady();
+                      release2();
+                      release1();
+                    } else {
+                      return this.adjustData(csn)
+                        .then(() => { release2(); })
+                        .then(() => { release1(); });
                     }
                   });
-                  return promise;
-                })
-                .then(() => this.storage.getJournalDb().deleteAfter(transaction.csn))
-                .then(() => this.storage.getCsnDb().update(transaction.csn))
-                .then(() => {
-                  this.storage.logger.debug("release writeLock2");
-                  release2();
-                  this.storage.logger.debug("release writeLock1");
-                  release1();
-                });
-            } else if (csn >= transaction.csn) {
-              this.storage.logger.debug("release writeLock2");
-              release2();
-              this.storage.logger.debug("release writeLock1");
-              release1();
-            } else {
-              this.updateQueue[transaction.csn] = transaction;
-              let promise = Promise.resolve();
-              while (this.updateQueue[++csn]) {
-                const _csn = csn;
-                this.storage.logger.debug("subset csn: " + _csn);
-                const transaction = this.updateQueue[_csn];
-                delete this.updateQueue[_csn];
-
-                if (transaction.type === TransactionType.INSERT && transaction.new) {
-                  const obj = Object.assign({ _id: transaction.target, csn: transaction.csn }, transaction.new);
-                  promise = promise.then(() => this.storage.getSubsetDb().insert(obj));
-                } else if (transaction.type === TransactionType.UPDATE && transaction.before) {
-                  const updateObj = TransactionRequest.applyOperator(transaction);
-                  promise = promise.then(() => this.storage.getSubsetDb().update(transaction.target, updateObj));
-                } else if (transaction.type === TransactionType.DELETE && transaction.before) {
-                  promise = promise.then(() => this.storage.getSubsetDb().deleteById(transaction.target));
-                } else if (transaction.type === TransactionType.NONE) {
-                }
-                promise = promise.then(() => this.storage.getJournalDb().insert(transaction));
-                promise = promise.then(() => this.storage.getCsnDb().update(_csn));
-                promise = promise.then(() => {
-                  for (const query of this.storage.pullQueryWaitingList(_csn)) {
-                    this.storage.logger.debug("do wait query");
-                    query();
-                  }
-                });
+              } else {
+                // リセットは初回のみ。それ以降はジャーナルから更新
+                this.adjustData(transaction.csn)
+                  .then(() => { release2(); })
+                  .then(() => { release1(); });
               }
+            } else if (transaction.type === TransactionType.CHECKPOINT) {
+              this.logger.info("CHECKPOINT protectedCsn: " + transaction.protectedCsn);
+              // TODO 実装
+              release2();
+              release1();
+              return;
+            } else if (csn > transaction.csn && transaction.type === TransactionType.ROLLBACK) {
+              return this.rollbackSubsetDb(transaction.csn)
+                .catch((e) => {
+                  return this.resetData(transaction.csn);
+                })
+                .then(() => { release2(); })
+                .then(() => { release1(); });
+            } else if (csn >= transaction.csn) {
+              release2();
+              release1();
+              return;
+            } else {
+              const doQueuedQuery = (csn: number) => {
+                for (const query of this.storage.pullQueryWaitingList(csn)) {
+                  this.logger.info("do queued query: " + csn);
+                  query();
+                }
+              };
+              let promise = Promise.resolve();
+              for (let i = csn + 1; i < transaction.csn; i++) {
+                // csnが飛んでいた場合はジャーナル取得を行い、そちらから更新
+                const _csn = i;
+                promise = promise.then(() => { this.adjustData(_csn); });
+                promise = promise.then(() => { doQueuedQuery(_csn); });
+              }
+              promise = this.updateSubsetDb(promise, transaction);
+              promise = promise.then(() => { doQueuedQuery(transaction.csn); });
               promise.then(() => {
-                this.storage.logger.debug("release writeLock2");
                 release2();
-                this.storage.logger.debug("release writeLock1");
                 release1();
               }).catch((e) => {
-                this.storage.logger.error("UpdateProcessor Error: ", e.toString());
-                this.storage.logger.debug("release writeLock2");
-                release2();
-                this.storage.logger.debug("release writeLock1");
-                release1();
+                this.logger.error("Error: ", e.toString());
+                throw e;
               });
             }
           })
           .catch((e) => {
-            this.storage.logger.error("UpdateProcessor Error: ", e.toString());
-            this.storage.logger.debug("release writeLock2");
-            release2();
-            this.storage.logger.debug("release writeLock1");
-            release1();
+            this.logger.error("Error: ", e.toString());
+            throw e;
           });
       });
     });
   }
 
+  private updateSubsetDb(promise: Promise<void>, transaction: TransactionObject): Promise<void> {
+    this.logger.info("update subset db csn:", transaction.csn);
+    if (transaction.type === TransactionType.INSERT && transaction.new) {
+      const obj = Object.assign({ _id: transaction.target, csn: transaction.csn }, transaction.new);
+      promise = promise.then(() => this.storage.getSubsetDb().insert(obj));
+    } else if (transaction.type === TransactionType.UPDATE && transaction.before) {
+      const updateObj = TransactionRequest.applyOperator(transaction);
+      promise = promise.then(() => this.storage.getSubsetDb().update(transaction.target, updateObj));
+    } else if (transaction.type === TransactionType.DELETE && transaction.before) {
+      promise = promise.then(() => this.storage.getSubsetDb().deleteById(transaction.target));
+    } else if (transaction.type === TransactionType.NONE) {
+    }
+    promise = promise.then(() => this.storage.getJournalDb().insert(transaction));
+    promise = promise.then(() => this.storage.getCsnDb().update(transaction.csn));
+    return promise;
+  }
+
+  private rollbackSubsetDb(csn: number): Promise<void> {
+    this.logger.warn("ROLLBACK transactions, csn:", csn);
+    return this.storage.getJournalDb().findByCsnRange(csn + 1, Number.MAX_VALUE)
+      .then((transactions) => {
+        transactions.sort((a, b) => b.csn - a.csn);
+        console.log("ROLLBACK transactions:" + JSON.stringify(transactions));
+        if (transactions.length === 0 || transactions[transactions.length - 1].csn !== csn + 1) {
+          throw new Error("Lack of transactions");
+        }
+        let promise = Promise.resolve();
+        transactions.forEach((trans) => {
+          if (trans.type === TransactionType.INSERT) {
+            promise = promise.then(() => this.storage.getSubsetDb().deleteById(trans.target));
+          } else if (trans.type === TransactionType.UPDATE && trans.before) {
+            promise = promise.then(() => this.storage.getSubsetDb().update(trans.target, trans.before as object));
+          } else if (trans.type === TransactionType.DELETE && trans.before) {
+            promise = promise.then(() => this.storage.getSubsetDb().insert(trans.before as object));
+          }
+          promise = promise.then(() => this.storage.getJournalDb().deleteAfter(trans.csn - 1));
+          promise = promise.then(() => this.storage.getCsnDb().update(trans.csn - 1));
+        });
+        return promise;
+      });
+  }
+
+  private fetchJournal(csn: number): Promise<TransactionObject | null> {
+    return this.storage.getNode().fetch(CORE_NODE.PATH_CONTEXT.replace(/:database\b/g, this.database) + "/journal", {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+      },
+      body: EJSON.stringify({ csn }),
+    })
+      .then((fetchResult) => {
+        if (typeof fetchResult.ok !== "undefined" && !fetchResult.ok) { throw Error(fetchResult.statusText); }
+        return fetchResult.json();
+      })
+      .then((_) => {
+        const result = EJSON.deserialize(_);
+        console.log("fetchJournal: ", JSON.stringify(result));
+        if (result.status === "OK") {
+          return result.journal as TransactionObject;
+        } else if (result.status === "NG") {
+          return null;
+        } else if (result.reason) {
+          const reason = result.reason as DadgetError;
+          throw new DadgetError({ code: reason.code, message: reason.message }, reason.inserts, reason.ns);
+        } else {
+          throw JSON.stringify(result);
+        }
+      });
+  }
+
+  adjustData(csn: number): Promise<void> {
+    this.logger.warn("adjustData:" + csn);
+    return Promise.resolve()
+      .then(() => {
+        if (this.storage.getCsnDb().isNew()) {
+          return this.resetData(csn);
+        } else {
+          return this.storage.getCsnDb().getCurrentCsn()
+            .then((currentCsn) => this.storage.getJournalDb().findByCsn(currentCsn))
+            .then((journal) => {
+              if (!journal) { return this.resetData(csn); }
+              return this.fetchJournal(journal.csn)
+                .then((fetchJournal) => {
+                  if (!fetchJournal || fetchJournal.digest !== journal.digest) {
+                    // rollback incorrect journals
+                    const loopData = {
+                      csn: journal.csn,
+                    };
+                    return Util.promiseWhile<{csn: number}>(
+                      loopData,
+                      (loopData) => {
+                        return loopData.csn !== 0;
+                      },
+                      (loopData) => {
+                        const nextCsn = loopData.csn - 1;
+                        return this.rollbackSubsetDb(nextCsn)
+                          .then(() => this.storage.getJournalDb().findByCsn(nextCsn))
+                          .then((journal) => {
+                            if (!journal) { throw new Error("journal not found: " + nextCsn); }
+                            return this.fetchJournal(journal.csn)
+                              .then((fetchJournal) => {
+                                if (fetchJournal && fetchJournal.digest === journal.digest) {
+                                  return { ...loopData, csn: 0 };
+                                } else {
+                                  return { ...loopData, csn: nextCsn };
+                                }
+                              });
+                          });
+                      },
+                    )
+                      .then(() => {
+                        return this.adjustData(csn);
+                      })
+                      .catch((e) => {
+                        return this.resetData(csn);
+                      });
+                  } else {
+                    const loopData = {
+                      csn: journal.csn,
+                      to: csn,
+                    };
+                    return Util.promiseWhile<{ csn: number, to: number }>(
+                      loopData,
+                      (loopData) => {
+                        return loopData.csn < loopData.to;
+                      },
+                      (loopData) => {
+                        const nextCsn = loopData.csn + 1;
+                        return this.fetchJournal(nextCsn)
+                          .then((fetchJournal) => {
+                            if (!fetchJournal) { throw new Error("journal not found: " + nextCsn); }
+                            const subsetTransaction = UpdateManager.convertTransactionForSubset(this.subsetDefinition, fetchJournal);
+                            return this.updateSubsetDb(Promise.resolve(), subsetTransaction);
+                          })
+                          .then(() => ({ ...loopData, csn: nextCsn }));
+                      },
+                    )
+                      .then(() => { this.storage.setReady(); })
+                      .catch((e) => {
+                        this.logger.warn(e.toString());
+                        return this.resetData(csn);
+                      });
+                  }
+                });
+            });
+        }
+      });
+  }
+
   resetData(csn: number): Promise<void> {
-    console.log("resetData:" + csn);
+    this.logger.warn("resetData:", csn);
     const query = this.subsetDefinition.query ? this.subsetDefinition.query : {};
     const promise = Promise.resolve();
     return promise.then(() => Dadget._query(this.storage.getNode(), this.database, query, undefined, undefined, undefined, csn, "latest"))
       .then((result) => {
-        return new Promise<void>((resolve, reject) => {
-          this.storage.getLock().writeLock((release3) => {
-            this.storage.logger.debug("get writeLock3");
-            Promise.resolve()
-              .then(() => this.storage.getJournalDb().deleteAll())
-              .then(() => this.storage.getSubsetDb().deleteAll())
-              .then(() => this.storage.getSubsetDb().insertMany(result.resultSet))
-              .then(() => this.storage.getCsnDb().update(result.csn ? result.csn : csn))
-              .then(() => {
-                this.storage.logger.debug("release writeLock3");
-                release3();
-                this.storage.setReady();
-                resolve();
-              })
-              .catch((e) => {
-                this.storage.logger.debug("release writeLock3");
-                release3();
-                reject(e);
-              });
+        return Promise.resolve()
+          .then(() => this.storage.getJournalDb().deleteAll())
+          .then(() => this.storage.getSubsetDb().deleteAll())
+          .then(() => this.storage.getSubsetDb().insertMany(result.resultSet))
+          .then(() => this.storage.getCsnDb().update(result.csn ? result.csn : csn))
+          .then(() => {
+            this.storage.setReady();
           });
-        });
       })
       .catch((e) => {
-        this.storage.logger.error("UpdateProcessor Error: ", e.toString());
+        this.logger.error("Error:", e.toString());
         throw e;
       });
   }
@@ -285,7 +403,7 @@ export class SubsetStorage extends ServiceEngine implements Proxy {
       return Promise.reject(new DadgetError(ERROR.E2401, ["Subset name is missing."]));
     }
     this.subsetName = this.option.subset;
-    this.logger.debug("subsetName: ", this.subsetName);
+    this.logger.info("subsetName:", this.subsetName);
 
     // サブセットの定義を取得する
     const seList = node.searchServiceEngine("DatabaseRegistry", { database: this.database });
@@ -317,7 +435,7 @@ export class SubsetStorage extends ServiceEngine implements Proxy {
 
     // Rest サービスを登録する。
     const mountingMode = this.option.exported ? "loadBalancing" : "localOnly";
-    this.logger.debug("mountingMode: ", mountingMode);
+    this.logger.info("mountingMode:", mountingMode);
     const listener = new UpdateProcessor(this, this.database, this.subsetDefinition);
     let promise = this.subsetDb.start();
     promise = promise.then(() => this.journalDb.start());
@@ -354,9 +472,8 @@ export class SubsetStorage extends ServiceEngine implements Proxy {
     if (!req.method) { throw new Error("method is required."); }
     const url = URL.parse(req.url);
     if (url.pathname == null) { throw new Error("pathname is required."); }
-    this.logger.debug(url.pathname);
     const method = req.method.toUpperCase();
-    this.logger.debug(method);
+    this.logger.debug(method, url.pathname);
     if (method === "OPTIONS") {
       return ProxyHelper.procOption(req, res);
     } else if (url.pathname.endsWith("/query") && method === "POST") {
@@ -370,7 +487,7 @@ export class SubsetStorage extends ServiceEngine implements Proxy {
           });
       });
     } else {
-      this.logger.debug("server command not found!:" + url.pathname);
+      this.logger.warn("server command not found!:", url.pathname);
       return ProxyHelper.procError(req, res);
     }
   }
@@ -406,13 +523,13 @@ export class SubsetStorage extends ServiceEngine implements Proxy {
               return { csn: currentCsn, resultSet: result, restQuery };
             });
         } else if (csn < currentCsn) {
-          this.logger.debug("rollback transactions", String(csn), String(currentCsn));
+          this.logger.info("rollback transactions", csn, currentCsn);
           // rollback transactions
           return this.getJournalDb().findByCsnRange(csn + 1, currentCsn)
             .then((transactions) => {
               if (transactions.length !== currentCsn - csn) {
                 release();
-                this.logger.debug("not enough rollback transactions");
+                this.logger.info("not enough rollback transactions");
                 return { csn, resultSet: [], restQuery: query };
               }
               const possibleLimit = typeof limit === "undefined" ? limit : limit + transactions.length;
@@ -424,7 +541,7 @@ export class SubsetStorage extends ServiceEngine implements Proxy {
                 });
             });
         } else {
-          this.logger.debug("wait for transactions", String(csn), String(currentCsn));
+          this.logger.info("wait for transactions", csn, currentCsn);
           // wait for transactions
           return new Promise<QueryResult>((resolve, reject) => {
             if (!this.queryWaitingList[csn]) { this.queryWaitingList[csn] = []; }
@@ -438,7 +555,7 @@ export class SubsetStorage extends ServiceEngine implements Proxy {
           });
         }
       }).catch((e) => {
-        this.logger.debug("SubsetStorage query Error: " + e.toString());
+        this.logger.warn("SubsetStorage query error: " + e.toString());
         release();
         return Promise.reject(e);
       });

@@ -6,10 +6,15 @@ const CSN_ID = "csn";
 const SYSTEM_COLLECTION = "__system__";
 
 export class CsnDb {
+  private _isNew = false;
 
   constructor(private db: IDb) {
     db.setCollection(SYSTEM_COLLECTION);
     console.log("CsnDB is created");
+  }
+
+  isNew(): boolean {
+    return this._isNew;
   }
 
   start(): Promise<void> {
@@ -19,6 +24,7 @@ export class CsnDb {
       })
       .then((result) => {
         if (result) { return; }
+        this._isNew = true;
         return this.db.insertOne({ _id: CSN_ID, seq: 0 }).then(() => { });
       })
       .catch((err) => Promise.reject(new DadgetError(ERROR.E1001, [err.toString()])));

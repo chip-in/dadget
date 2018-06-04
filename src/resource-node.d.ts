@@ -2,6 +2,7 @@ declare module "@chip-in/resource-node" {
     import * as http from "http";
 
     class Logger {
+        category: string;
         debug(msg: string, ...substN: Array<string | number>): void;
         info(msg: string, ...substN: Array<string | number>): void;
         warn(msg: string, ...substN: Array<string | number>): void;

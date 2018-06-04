@@ -68,4 +68,13 @@ export class SubsetDb {
       })
       .catch((err) => Promise.reject(new DadgetError(ERROR.E1205, [err.toString()])));
   }
+
+  count(query: object): Promise<number> {
+    return this.db.count(query)
+      .then((count) => {
+        console.log("count:", count);
+        return count;
+      })
+      .catch((err) => Promise.reject(new DadgetError(ERROR.E1208, [err.toString()])));
+  }
 }

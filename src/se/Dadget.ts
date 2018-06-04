@@ -7,6 +7,7 @@ import { TransactionObject, TransactionRequest, TransactionType } from "../db/Tr
 import { ERROR } from "../Errors";
 import { DadgetError } from "../util/DadgetError";
 import * as EJSON from "../util/Ejson";
+import { Util } from "../util/Util";
 import { ContextManager } from "./ContextManager";
 import { DatabaseRegistry } from "./DatabaseRegistry";
 import { QueryHandler } from "./QueryHandler";
@@ -154,6 +155,7 @@ export default class Dadget extends ServiceEngine {
       })
       .then((result) => {
         const itemMap: { [id: string]: any } = {};
+        // TODO 理論上hasDupulicateが存在しなければcountは効率化できる
         let hasDupulicate = false;
         for (const item of result.resultSet as Array<{ _id: string }>) {
           if (itemMap[item._id]) {
@@ -218,7 +220,7 @@ export default class Dadget extends ServiceEngine {
       });
     };
     return Dadget._query(this.node, this.database, query, sort, limit, offset, csn, csnMode)
-      .then((result) => whileQueryResult(result, (result) => !!(result.restQuery && count > 0), retryAction))
+      .then((result) => Util.promiseWhile<QueryResult>(result, (result) => !!(result.restQuery && count > 0), retryAction))
       .then((result) => {
         if (result.restQuery) { throw new Error("The queryHandlers has been empty before completing queries."); }
         this.currentCsn = result.csn;
@@ -288,7 +290,7 @@ export default class Dadget extends ServiceEngine {
       })
       .then((_) => {
         const result = EJSON.deserialize(_);
-        this.logger.debug("exec:", JSON.stringify(result));
+        console.log("Dadget exec result: " + JSON.stringify(result));
         if (result.status === "OK") {
           this.latestCsn = result.csn;
           return result.updateObject;
@@ -345,11 +347,14 @@ export default class Dadget extends ServiceEngine {
 
         constructor() {
           super();
+          this.logger.category = "NotifyListener";
           this.logger.debug("NotifyListener is created");
         }
 
         onReceive(transctionJSON: string) {
           const transaction = EJSON.parse(transctionJSON) as TransactionObject;
+          if (transaction.type === TransactionType.CHECKPOINT) { return; }
+          this.logger.info("received:", transaction.type, transaction.csn);
           if (transaction.type === TransactionType.ROLLBACK) {
             parent.notifyCsn = transaction.csn;
             parent.notifyRollback(transaction.csn);
@@ -404,16 +409,8 @@ export default class Dadget extends ServiceEngine {
   }
 
   addUpdateListenerForSubset(subset: string, listener: (csn: number) => void, minInterval?: number) {
+    // TODO 実装
 
   }
 
 }
-
-const whileQueryResult = (data: QueryResult, condition: (data: QueryResult) => boolean, action: (data: QueryResult) => Promise<QueryResult>) => {
-  const whilst = (data: QueryResult): Promise<QueryResult> => {
-    return condition(data) ?
-      action(data).then(whilst) :
-      Promise.resolve(data);
-  };
-  return whilst(data);
-};

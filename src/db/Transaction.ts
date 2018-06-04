@@ -7,6 +7,7 @@ export const enum TransactionType {
   DELETE = "delete",
   NONE = "none",
   ROLLBACK = "rollback",
+  CHECKPOINT = "checkpoint", // TODO 対応
 }
 
 /**
@@ -336,4 +337,9 @@ export class TransactionObject extends TransactionRequest {
    * トランザクションオブジェクトからこの属性を除いたものを object-hash により、{ algorithm: "md5", encoding: "base64" }ハッシュした値
    */
   digest?: string;
+
+  /**
+   * 保護CSN(checkpointの場合のみ)
+   */
+  protectedCsn?: number;
 }
