@@ -7,5 +7,5 @@ declare module "mongo-parse" {
 
   export function parse(mongoQuery: object): Parse;
   export function inclusive(mongoProjection: object): boolean;
-  export function search(documents: any[], query: object, sort?: object, validate?: boolean): any;
+  export function DotNotationPointers(rootObject: any, property: any): any;
 }

@@ -1,5 +1,6 @@
 import * as parser from "mongo-parse";
 import * as hash from "object-hash";
+import { Util } from "../util/Util";
 
 export const enum TransactionType {
   INSERT = "insert",
@@ -204,7 +205,7 @@ export class TransactionRequest {
                   newVal = [...newVal, ...list[key].$each];
                 }
                 if (typeof list[key].$sort !== "undefined") {
-                  newVal = parser.search(newVal, {}, list[key].$sort, false);
+                  newVal = Util.mongoSearch(newVal, {}, list[key].$sort, false);
                 }
                 if (typeof list[key].$slice !== "undefined") {
                   if (!Number.isInteger(list[key].$slice)) { throw new Error("$slice must be Integer"); }

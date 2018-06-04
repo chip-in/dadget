@@ -3,6 +3,7 @@ import * as hash from "object-hash";
 import { v1 as uuidv1 } from "uuid";
 import { ERROR } from "../Errors";
 import { DadgetError } from "../util/DadgetError";
+import { Util } from "../util/Util";
 import { IDb } from "./IDb";
 import { TransactionRequest } from "./Transaction";
 
@@ -289,7 +290,7 @@ export class PersistentDb implements IDb {
         reject("request error: " + request.error);
       };
       transaction.oncomplete = (event) => {
-        let list = indexName ? dataList : parser.search(dataList, query, sort) as object[];
+        let list = indexName ? dataList : Util.mongoSearch(dataList, query, sort) as object[];
         if (offset) {
           if (limit) {
             list = list.slice(offset, offset + limit);

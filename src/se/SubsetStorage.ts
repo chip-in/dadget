@@ -582,7 +582,7 @@ export class SubsetStorage extends ServiceEngine implements Proxy {
     for (const _id of Object.keys(dataMap)) {
       dataList.push(dataMap[_id]);
     }
-    let list = parser.search(dataList, query, sort) as object[];
+    let list = Util.mongoSearch(dataList, query, sort) as object[];
     if (limit) {
       list = list.slice(0, limit);
     }

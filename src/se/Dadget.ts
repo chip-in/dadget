@@ -174,7 +174,7 @@ export default class Dadget extends ServiceEngine {
           list = result.resultSet;
         }
         if (sort) {
-          list = parser.search(list, {}, sort) as object[];
+          list = Util.mongoSearch(list, {}, sort) as object[];
           if (_offset) {
             if (limit) {
               list = list.slice(_offset, _offset + limit);
