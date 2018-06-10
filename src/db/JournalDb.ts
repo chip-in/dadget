@@ -74,13 +74,25 @@ export class JournalDb {
       .catch((err) => Promise.reject(new DadgetError(ERROR.E1107, [err.toString()])));
   }
 
+  static serializeTrans(transaction: TransactionObject): object {
+    const saveTrans: any = { ...transaction };
+    if (transaction.operator) {
+      saveTrans.operator = EJSON.stringify(transaction.operator);
+    }
+    return saveTrans;
+  }
+
+  static deserializeTrans(obj: any): TransactionObject {
+    const transaction = { ...obj } as TransactionObject;
+    if (transaction.operator) {
+      transaction.operator = EJSON.parse(obj.operator);
+    }
+    return transaction;
+  }
+
   insert(transaction: TransactionObject): Promise<void> {
     console.log("insert:", JSON.stringify(transaction));
-    const saveVal: any = { ...transaction };
-    if (transaction.operator) {
-      saveVal.operator = EJSON.stringify(transaction.operator);
-    }
-    return this.db.insertOne(saveVal)
+    return this.db.insertOne(JournalDb.serializeTrans(transaction))
       .catch((err) => Promise.reject(new DadgetError(ERROR.E1108, [err.toString()])));
   }
 
@@ -89,10 +101,10 @@ export class JournalDb {
     return this.db.findOne({ csn })
       .then((result) => {
         if (result) {
-          const transaction = result as TransactionObject;
+          const transaction = JournalDb.deserializeTrans(result);
           console.log(JSON.stringify(transaction));
           console.log("findByCsn digest:", transaction.digest);
-          return transaction as TransactionObject;
+          return transaction;
         } else {
           console.log("findByCsn: transaction none");
           return null;
@@ -104,6 +116,7 @@ export class JournalDb {
   findByCsnRange(from: number, to: number): Promise<TransactionObject[]> {
     console.log("findByCsnRange:", from, to);
     return this.db.findByRange("csn", from, to, -1)
+      .then((list) => list.map(JournalDb.deserializeTrans))
       .catch((err) => Promise.reject(new DadgetError(ERROR.E1110, [err.toString()])));
   }
 
@@ -129,7 +142,7 @@ export class JournalDb {
   updateAndDeleteAfter(transaction: TransactionObject): Promise<void> {
     console.log("updateAndDeleteAfter:", JSON.stringify(transaction));
     return this.deleteAfter(transaction.csn)
-      .then(() => this.db.updateOne({ csn: transaction.csn }, transaction))
+      .then(() => this.db.updateOne({ csn: transaction.csn }, JournalDb.serializeTrans(transaction)))
       .catch((err) => Promise.reject(new DadgetError(ERROR.E1111, [err.toString()])));
   }
 
@@ -137,7 +150,7 @@ export class JournalDb {
     return this.db.findOneBySort({ datetime: { $lt: time } }, { csn: -1 })
       .then((result) => {
         console.log("getBeforeCheckPointTime", JSON.stringify(result));
-        return result;
+        return JournalDb.deserializeTrans(result);
       })
       .catch((err) => Promise.reject(new DadgetError(ERROR.E1114, [err.toString()])));
   }
@@ -146,7 +159,7 @@ export class JournalDb {
     return this.db.findOneBySort({ csn: { $gt: csn } }, { csn: 1 })
       .then((result) => {
         console.log("getOneAfterCsn", JSON.stringify(result));
-        return result;
+        return JournalDb.deserializeTrans(result);
       })
       .catch((err) => Promise.reject(new DadgetError(ERROR.E1115, [err.toString()])));
   }

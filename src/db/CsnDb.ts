@@ -36,6 +36,7 @@ export class CsnDb {
   increment(): Promise<number> {
     return this.db.increment(CSN_ID, "seq")
       .then((result) => {
+        this._isNew = false;
         console.log("increment value:", result);
         return result;
       })
@@ -59,6 +60,7 @@ export class CsnDb {
   update(seq: number): Promise<void> {
     return this.db.updateOneById(CSN_ID, { $set: { seq } })
       .then(() => {
+        this._isNew = false;
         console.log("update value:", seq);
       })
       .catch((reason) => Promise.reject(new DadgetError(ERROR.E1004, [reason.toString()])));

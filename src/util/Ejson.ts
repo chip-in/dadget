@@ -5,6 +5,11 @@ export function parse(str: string): any {
   return deserialize(JSON.parse(str));
 
 }
+
+/**
+ * Deserialize is not reverse of stringify. Deserialize converts from a plain object to a object for Mongo db.
+ * @param val object
+ */
 export function deserialize(val: any): any {
   if (Array.isArray(val)) { return deconvertArray(val); }
   if (val === null) { return null; }

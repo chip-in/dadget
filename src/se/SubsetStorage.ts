@@ -39,7 +39,11 @@ class UpdateProcessor extends Subscriber {
     // TODO チェックポイント
     console.log("UpdateProcessor received: " + msg.toString());
     const transaction = EJSON.parse(msg) as TransactionObject;
-    this.logger.info("received:", transaction.type, transaction.csn);
+    this.procTransaction(transaction);
+  }
+
+  procTransaction(transaction: TransactionObject) {
+    this.logger.info("procTransaction:", transaction.type, transaction.csn);
     console.log("UpdateProcessor waiting writeLock1");
     this.lock.writeLock((_release1) => {
       console.log("UpdateProcessor got writeLock1");
@@ -104,11 +108,11 @@ class UpdateProcessor extends Subscriber {
               for (let i = csn + 1; i < transaction.csn; i++) {
                 // csnが飛んでいた場合はジャーナル取得を行い、そちらから更新
                 const _csn = i;
-                promise = promise.then(() => { this.adjustData(_csn); });
-                promise = promise.then(() => { doQueuedQuery(_csn); });
+                promise = promise.then(() => this.adjustData(_csn));
+                promise = promise.then(() => doQueuedQuery(_csn));
               }
               promise = this.updateSubsetDb(promise, transaction);
-              promise = promise.then(() => { doQueuedQuery(transaction.csn); });
+              promise = promise.then(() => doQueuedQuery(transaction.csn));
               promise.then(() => {
                 release2();
                 release1();
@@ -168,7 +172,7 @@ class UpdateProcessor extends Subscriber {
       });
   }
 
-  private fetchJournal(csn: number): Promise<TransactionObject | null> {
+  fetchJournal(csn: number): Promise<TransactionObject | null> {
     return this.storage.getNode().fetch(CORE_NODE.PATH_CONTEXT.replace(/:database\b/g, this.database) + "/journal", {
       method: "POST",
       headers: {
@@ -214,7 +218,7 @@ class UpdateProcessor extends Subscriber {
                     const loopData = {
                       csn: journal.csn,
                     };
-                    return Util.promiseWhile<{csn: number}>(
+                    return Util.promiseWhile<{ csn: number }>(
                       loopData,
                       (loopData) => {
                         return loopData.csn !== 0;
@@ -345,6 +349,7 @@ export class SubsetStorage extends ServiceEngine implements Proxy {
   private queryWaitingList: { [csn: number]: Array<() => void> } = {};
   private subscriberKey: string | null;
   private readyFlag: boolean = false;
+  private updateProcessor: UpdateProcessor;
 
   constructor(option: SubsetStorageConfigDef) {
     super(option);
@@ -436,7 +441,7 @@ export class SubsetStorage extends ServiceEngine implements Proxy {
     // Rest サービスを登録する。
     const mountingMode = this.option.exported ? "loadBalancing" : "localOnly";
     this.logger.info("mountingMode:", mountingMode);
-    const listener = new UpdateProcessor(this, this.database, this.subsetDefinition);
+    this.updateProcessor = new UpdateProcessor(this, this.database, this.subsetDefinition);
     let promise = this.subsetDb.start();
     promise = promise.then(() => this.journalDb.start());
     promise = promise.then(() => this.csnDb.start());
@@ -450,7 +455,7 @@ export class SubsetStorage extends ServiceEngine implements Proxy {
     promise = promise.then(() =>
       node.subscribe(CORE_NODE.PATH_SUBSET_TRANSACTION
         .replace(/:database\b/g, this.database)
-        .replace(/:subset\b/g, this.subsetName), listener).then((key) => { this.subscriberKey = key; }),
+        .replace(/:subset\b/g, this.subsetName), this.updateProcessor).then((key) => { this.subscriberKey = key; }),
     );
 
     this.logger.debug("SubsetStorage is started");
@@ -552,6 +557,13 @@ export class SubsetStorage extends ServiceEngine implements Proxy {
                 });
             });
             release();
+
+            let promise = Promise.resolve();
+            for (let i = currentCsn + 1; i <= csn; i++) {
+              const _csn = i;
+              promise = promise.then(() => this.updateProcessor.fetchJournal(_csn))
+                .then((journal) => { if (journal) { this.updateProcessor.procTransaction(journal); } });
+            }
           });
         }
       }).catch((e) => {
