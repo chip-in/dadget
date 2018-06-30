@@ -10,7 +10,6 @@ describe('EJSON', function () {
       datetime: new Date(),
       datetime2: [1, new Date()],
       n: null,
-      u: undefined
     }
     console.log(Ejson.stringify(a))
     chai.assert.deepEqual(Ejson.stringify(a), EJSON.stringify(a))
@@ -23,10 +22,21 @@ describe('EJSON', function () {
       datetime: new Date(),
       datetime2: [1, new Date()],
       n: null,
-      u: undefined
     }
     let s = EJSON.stringify(a)
     console.log(s)
     chai.assert.deepEqual(Ejson.parse(s), EJSON.parse(s))
+  });
+
+  it('undefined', function () {
+    let a = {
+      u: undefined
+    }
+    let b = {
+      u: null
+    }
+    let s = EJSON.stringify(a)
+    console.log(s)
+    chai.assert.deepEqual(Ejson.parse(s), b)
   });
 });
