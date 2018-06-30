@@ -28,7 +28,7 @@ export const ERROR = {
   /**
    * checkConsistent error: already exists
    */
-  E1102: { code: 1102, message: "checkConsistent error: already exists" },
+  E1102: { code: 1102, message: "checkConsistent error: already exists. target=%1" },
 
   /**
    * checkConsistent error: Not found
@@ -43,7 +43,7 @@ export const ERROR = {
   /**
    * checkConsistent error: The csn is old. Update the data.
    */
-  E1105: { code: 1105, message: "checkConsistent error: The csn is old. Update the data." },
+  E1105: { code: 1105, message: "checkConsistent error: The csn is old. Update the data. object.csn=%1, before.csn=%2" },
 
   /**
    * checkConsistent error: "before" data is required
@@ -81,6 +81,21 @@ export const ERROR = {
   E1112: { code: 1112, message: "JournalDB failed to delete journals. cause=%1" },
 
   /**
+   * checkConsistent error: The csn is old. Update the data.
+   */
+  E1113: { code: 1113, message: "checkConsistent error: The csn is old. Update the data. postulateCsn=%1, protectedCsn=%2" },
+
+  /**
+   * JournalDB failed to get a check point journal.
+   */
+  E1114: { code: 1114, message: "JournalDB failed to get a check point journal. cause=%1" },
+
+  /**
+   * JournalDB failed to get a check point journal.
+   */
+  E1115: { code: 1115, message: "JournalDB failed to get a check point journal. cause=%1" },
+
+  /**
    * SubsetDb failed to start.
    */
   E1201: { code: 1201, message: "SubsetDb failed to start. cause=%1" },
@@ -114,6 +129,11 @@ export const ERROR = {
    * SubsetDb failed to deleteAll subset data.
    */
   E1207: { code: 1207, message: "SubsetDb failed to deleteAll subset data. cause=%1" },
+
+  /**
+   * SubsetDb failed to count subset data.
+   */
+  E1208: { code: 1208, message: "SubsetDb failed to count subset data. cause=%1" },
 
   /**
    * ContextManager Config Error

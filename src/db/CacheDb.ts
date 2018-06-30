@@ -1,5 +1,6 @@
 import * as parser from "mongo-parse";
 
+import { Util } from "../util/Util";
 import { IDb } from "./IDb";
 import { TransactionRequest } from "./Transaction";
 
@@ -35,7 +36,7 @@ export class CacheDb implements IDb {
     for (const _id of Object.keys(this.data)) {
       dataList.push(this.data[_id]);
     }
-    const list = parser.search(dataList, query);
+    const list = Util.mongoSearch(dataList, query);
     if (list && list instanceof Array && list.length > 0) {
       console.log("CacheDb findOne:" + JSON.stringify(list[0]));
       return Promise.resolve(list[0]);
@@ -52,7 +53,7 @@ export class CacheDb implements IDb {
     for (const _id of Object.keys(this.data)) {
       dataList.push(this.data[_id]);
     }
-    const list = parser.search(dataList, query, sort);
+    const list = Util.mongoSearch(dataList, query, sort);
     if (list && list instanceof Array && list.length > 0) {
       console.log("CacheDb findOneBySort:" + JSON.stringify(list[0]));
       return Promise.resolve(list[0]);
@@ -65,7 +66,7 @@ export class CacheDb implements IDb {
     for (const _id of Object.keys(this.data)) {
       dataList.push(this.data[_id]);
     }
-    let list = parser.search(dataList, query, sort) as object[];
+    let list = Util.mongoSearch(dataList, query, sort) as object[];
     if (offset) {
       if (limit) {
         list = list.slice(offset, offset + limit);
@@ -79,6 +80,17 @@ export class CacheDb implements IDb {
     }
     console.log("CacheDb find:" + JSON.stringify(list));
     return Promise.resolve(list);
+  }
+
+  count(query: object): Promise<number> {
+    const dataList = [];
+    for (const _id of Object.keys(this.data)) {
+      dataList.push(this.data[_id]);
+    }
+    const list = Util.mongoSearch(dataList, query) as object[];
+    const count = list.length;
+    console.log("CacheDb count:" + count);
+    return Promise.resolve(count);
   }
 
   insertOne(doc: { _id: string }): Promise<void> {

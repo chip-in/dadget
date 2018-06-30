@@ -1,5 +1,6 @@
 import * as parser from "mongo-parse";
 import * as hash from "object-hash";
+import { Util } from "../util/Util";
 
 export const enum TransactionType {
   INSERT = "insert",
@@ -7,6 +8,7 @@ export const enum TransactionType {
   DELETE = "delete",
   NONE = "none",
   ROLLBACK = "rollback",
+  CHECKPOINT = "checkpoint", // TODO 対応
 }
 
 /**
@@ -203,7 +205,7 @@ export class TransactionRequest {
                   newVal = [...newVal, ...list[key].$each];
                 }
                 if (typeof list[key].$sort !== "undefined") {
-                  newVal = parser.search(newVal, {}, list[key].$sort, false);
+                  newVal = Util.mongoSearch(newVal, {}, list[key].$sort, false);
                 }
                 if (typeof list[key].$slice !== "undefined") {
                   if (!Number.isInteger(list[key].$slice)) { throw new Error("$slice must be Integer"); }
@@ -336,4 +338,9 @@ export class TransactionObject extends TransactionRequest {
    * トランザクションオブジェクトからこの属性を除いたものを object-hash により、{ algorithm: "md5", encoding: "base64" }ハッシュした値
    */
   digest?: string;
+
+  /**
+   * 保護CSN(checkpointの場合のみ)
+   */
+  protectedCsn?: number;
 }

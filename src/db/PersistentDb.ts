@@ -65,6 +65,10 @@ export class PersistentDb implements IDb {
     return cursor.toArray();
   }
 
+  count(query: object): Promise<number> {
+    return this.db.collection(this.collection).count(PersistentDb.convertQuery(query));
+  }
+
   insertOne(doc: object): Promise<void> {
     return this.db.collection(this.collection).insertOne(doc).then(() => { });
   }

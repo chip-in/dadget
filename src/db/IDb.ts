@@ -15,6 +15,8 @@ export interface IDb {
 
   find(query: object, sort?: object, limit?: number, offset?: number): Promise<any[]>;
 
+  count(query: object): Promise<number>;
+
   insertOne(doc: object): Promise<void>;
 
   insertMany(docs: object[]): Promise<void>;
