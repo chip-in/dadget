@@ -435,6 +435,7 @@ export class PersistentDb implements IDb {
   replaceOneById(id: string, doc: object): Promise<void> {
     return new Promise((resolve, reject) => {
       const transaction = this.db.transaction(OBJECT_STORE_NAME, "readwrite");
+      (doc as any)._id = id;
       transaction.objectStore(OBJECT_STORE_NAME).put(doc);
       transaction.oncomplete = (event) => {
         resolve();

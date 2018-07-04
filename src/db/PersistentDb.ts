@@ -118,9 +118,13 @@ export class PersistentDb implements IDb {
   }
 
   deleteAll(): Promise<void> {
-    return this.db.collection(this.collection).deleteMany({})
-      .then((result) => {
-        if (!result.result.ok) { throw new Error("failed to delete: " + JSON.stringify(result)); }
+    const newName = this.collection + "-" + new Date().toISOString();
+    return this.db.collection(this.collection).count({})
+      .then((count) => {
+        if (count > 0) {
+          return this.db.renameCollection(this.collection, newName)
+            .then(() => { });
+        }
       });
   }
 

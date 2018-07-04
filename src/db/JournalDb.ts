@@ -74,6 +74,19 @@ export class JournalDb {
       .catch((err) => Promise.reject(new DadgetError(ERROR.E1107, [err.toString()])));
   }
 
+  getLastJournal(): Promise<TransactionObject> {
+    return this.db.findOneBySort({}, { csn: -1 })
+      .then((result) => {
+        console.log("getLastJournal", JSON.stringify(result));
+        if (result) {
+          return result;
+        } else {
+          throw new DadgetError(ERROR.E1116, ["last journal not found"]);
+        }
+      })
+      .catch((err) => Promise.reject(new DadgetError(ERROR.E1116, [err.toString()])));
+  }
+
   static serializeTrans(transaction: TransactionObject): object {
     const saveTrans: any = { ...transaction };
     if (transaction.operator) {
@@ -139,11 +152,10 @@ export class JournalDb {
       .catch((err) => Promise.reject(new DadgetError(ERROR.E1112, [err.toString()])));
   }
 
-  updateAndDeleteAfter(transaction: TransactionObject): Promise<void> {
-    console.log("updateAndDeleteAfter:", JSON.stringify(transaction));
-    return this.deleteAfter(transaction.csn)
-      .then(() => this.db.updateOne({ csn: transaction.csn }, JournalDb.serializeTrans(transaction)))
-      .catch((err) => Promise.reject(new DadgetError(ERROR.E1111, [err.toString()])));
+  replace(oldTransaction: TransactionObject, newTransaction: TransactionObject): Promise<void> {
+    console.log("replace:", (oldTransaction as any)._id, JSON.stringify(newTransaction));
+    return this.db.replaceOneById((oldTransaction as any)._id, newTransaction)
+      .catch((err) => Promise.reject(new DadgetError(ERROR.E1117, [err.toString()])));
   }
 
   getBeforeCheckPointTime(time: Date): Promise<TransactionObject> {

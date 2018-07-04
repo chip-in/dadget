@@ -68,6 +68,7 @@ class UpdateProcessor extends Subscriber {
                       this.storage.setReady();
                       release2();
                       release1();
+                      return;
                     } else {
                       return this.adjustData(csn)
                         .then(() => { release2(); })
@@ -76,7 +77,7 @@ class UpdateProcessor extends Subscriber {
                   });
               } else {
                 // リセットは初回のみ。それ以降はジャーナルから更新
-                this.adjustData(transaction.csn)
+                return this.adjustData(transaction.csn)
                   .then(() => { release2(); })
                   .then(() => { release1(); });
               }
@@ -87,9 +88,14 @@ class UpdateProcessor extends Subscriber {
               release1();
               return;
             } else if (csn > transaction.csn && transaction.type === TransactionType.ROLLBACK) {
-              return this.rollbackSubsetDb(transaction.csn)
-                .catch((e) => {
-                  return this.resetData(transaction.csn);
+              return this.fetchJournal(transaction.csn)
+                .then((fetchJournal) => {
+                  if (!fetchJournal) { throw new Error("can not rollback because journal isn't found: " + transaction.csn); }
+                  return this.rollbackSubsetDb(transaction.csn)
+                    .catch((e) => {
+                      this.logger.warn(e.toString());
+                      return this.resetData(transaction.csn);
+                    });
                 })
                 .then(() => { release2(); })
                 .then(() => { release1(); });
@@ -99,10 +105,12 @@ class UpdateProcessor extends Subscriber {
               return;
             } else {
               const doQueuedQuery = (csn: number) => {
+                let promise = Promise.resolve();
                 for (const query of this.storage.pullQueryWaitingList(csn)) {
                   this.logger.info("do queued query: " + csn);
-                  query();
+                  promise = promise.then(() => query());
                 }
+                return promise;
               };
               let promise = Promise.resolve();
               for (let i = csn + 1; i < transaction.csn; i++) {
@@ -113,24 +121,30 @@ class UpdateProcessor extends Subscriber {
               }
               promise = this.updateSubsetDb(promise, transaction);
               promise = promise.then(() => doQueuedQuery(transaction.csn));
-              promise.then(() => {
+              return promise.then(() => {
                 release2();
                 release1();
-              }).catch((e) => {
-                this.logger.error("Error: ", e.toString());
-                throw e;
               });
             }
           })
           .catch((e) => {
-            this.logger.error("Error: ", e.toString());
-            throw e;
+            this.logger.error(e.toString());
+            release2();
+            release1();
           });
       });
     });
   }
 
   private updateSubsetDb(promise: Promise<void>, transaction: TransactionObject): Promise<void> {
+    if (transaction.csn > 1) {
+      promise = promise.then(() => this.storage.getJournalDb().findByCsn(transaction.csn - 1))
+        .then((journal) => {
+          if (!journal) { throw new Error("journal not found: " + (transaction.csn - 1)); }
+          if (journal.digest !== transaction.beforeDigest) { throw new Error("beforeDigest mismatch:" + transaction.csn); }
+        });
+    }
+
     this.logger.info("update subset db csn:", transaction.csn);
     if (transaction.type === TransactionType.INSERT && transaction.new) {
       const obj = Object.assign({ _id: transaction.target, csn: transaction.csn }, transaction.new);
@@ -149,15 +163,16 @@ class UpdateProcessor extends Subscriber {
 
   private rollbackSubsetDb(csn: number): Promise<void> {
     this.logger.warn("ROLLBACK transactions, csn:", csn);
-    return this.storage.getJournalDb().findByCsnRange(csn + 1, Number.MAX_VALUE)
+    return this.storage.getJournalDb().findByCsnRange(csn, Number.MAX_VALUE)
       .then((transactions) => {
         transactions.sort((a, b) => b.csn - a.csn);
         console.log("ROLLBACK transactions:" + JSON.stringify(transactions));
-        if (transactions.length === 0 || transactions[transactions.length - 1].csn !== csn + 1) {
+        if (transactions.length === 0 || transactions[transactions.length - 1].csn !== csn) {
           throw new Error("Lack of transactions");
         }
         let promise = Promise.resolve();
         transactions.forEach((trans) => {
+          if (trans.csn === csn) { return; }
           if (trans.type === TransactionType.INSERT) {
             promise = promise.then(() => this.storage.getSubsetDb().deleteById(trans.target));
           } else if (trans.type === TransactionType.UPDATE && trans.before) {
@@ -173,31 +188,7 @@ class UpdateProcessor extends Subscriber {
   }
 
   fetchJournal(csn: number): Promise<TransactionObject | null> {
-    return this.storage.getNode().fetch(CORE_NODE.PATH_CONTEXT.replace(/:database\b/g, this.database) + "/journal", {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-      },
-      body: EJSON.stringify({ csn }),
-    })
-      .then((fetchResult) => {
-        if (typeof fetchResult.ok !== "undefined" && !fetchResult.ok) { throw Error(fetchResult.statusText); }
-        return fetchResult.json();
-      })
-      .then((_) => {
-        const result = EJSON.deserialize(_);
-        console.log("fetchJournal: ", JSON.stringify(result));
-        if (result.status === "OK") {
-          return result.journal as TransactionObject;
-        } else if (result.status === "NG") {
-          return null;
-        } else if (result.reason) {
-          const reason = result.reason as DadgetError;
-          throw new DadgetError({ code: reason.code, message: reason.message }, reason.inserts, reason.ns);
-        } else {
-          throw JSON.stringify(result);
-        }
-      });
+    return Util.fetchJournal(csn, this.database, this.storage.getNode());
   }
 
   adjustData(csn: number): Promise<void> {
@@ -207,10 +198,8 @@ class UpdateProcessor extends Subscriber {
         if (this.storage.getCsnDb().isNew()) {
           return this.resetData(csn);
         } else {
-          return this.storage.getCsnDb().getCurrentCsn()
-            .then((currentCsn) => this.storage.getJournalDb().findByCsn(currentCsn))
+          return this.storage.getJournalDb().getLastJournal()
             .then((journal) => {
-              if (!journal) { return this.resetData(csn); }
               return this.fetchJournal(journal.csn)
                 .then((fetchJournal) => {
                   if (!fetchJournal || fetchJournal.digest !== journal.digest) {
@@ -242,9 +231,6 @@ class UpdateProcessor extends Subscriber {
                     )
                       .then(() => {
                         return this.adjustData(csn);
-                      })
-                      .catch((e) => {
-                        return this.resetData(csn);
                       });
                   } else {
                     const loopData = {
@@ -267,32 +253,54 @@ class UpdateProcessor extends Subscriber {
                           .then(() => ({ ...loopData, csn: nextCsn }));
                       },
                     )
-                      .then(() => { this.storage.setReady(); })
-                      .catch((e) => {
-                        this.logger.warn(e.toString());
-                        return this.resetData(csn);
-                      });
+                      .then(() => { this.storage.setReady(); });
                   }
                 });
+            })
+            .catch((e) => {
+              this.logger.warn(e.toString());
+              return this.resetData(csn);
             });
         }
       });
   }
 
   resetData(csn: number): Promise<void> {
+    if (csn === 0) { return this.resetData0(); }
     this.logger.warn("resetData:", csn);
     const query = this.subsetDefinition.query ? this.subsetDefinition.query : {};
-    const promise = Promise.resolve();
-    return promise.then(() => Dadget._query(this.storage.getNode(), this.database, query, undefined, undefined, undefined, csn, "latest"))
-      .then((result) => {
-        return Promise.resolve()
-          .then(() => this.storage.getJournalDb().deleteAll())
-          .then(() => this.storage.getSubsetDb().deleteAll())
-          .then(() => this.storage.getSubsetDb().insertMany(result.resultSet))
-          .then(() => this.storage.getCsnDb().update(result.csn ? result.csn : csn))
-          .then(() => {
-            this.storage.setReady();
+    return this.fetchJournal(csn)
+      .then((fetchJournal) => {
+        if (!fetchJournal) { throw new Error("journal not found: " + csn); }
+        const subsetTransaction = UpdateManager.convertTransactionForSubset(this.subsetDefinition, fetchJournal);
+        return Dadget._query(this.storage.getNode(), this.database, query, undefined, undefined, undefined, csn, "strict")
+          .then((result) => {
+            if (result.restQuery) { throw new Error("The queryHandlers has been empty before completing queries."); }
+            return Promise.resolve()
+              .then(() => this.storage.getJournalDb().deleteAll())
+              .then(() => this.storage.getJournalDb().insert(subsetTransaction))
+              .then(() => this.storage.getSubsetDb().deleteAll())
+              .then(() => this.storage.getSubsetDb().insertMany(result.resultSet))
+              .then(() => this.storage.getCsnDb().update(result.csn))
+              .then(() => {
+                this.storage.setReady();
+              });
           });
+      })
+      .catch((e) => {
+        this.logger.error("Error:", e.toString());
+        throw e;
+      });
+  }
+
+  resetData0(): Promise<void> {
+    this.logger.warn("resetData0");
+    return Promise.resolve()
+      .then(() => this.storage.getJournalDb().deleteAll())
+      .then(() => this.storage.getSubsetDb().deleteAll())
+      .then(() => this.storage.getCsnDb().update(0))
+      .then(() => {
+        this.storage.setReady();
       })
       .catch((e) => {
         this.logger.error("Error:", e.toString());
@@ -346,7 +354,7 @@ export class SubsetStorage extends ServiceEngine implements Proxy {
   private csnDb: CsnDb;
   private mountHandle: string;
   private lock: ReadWriteLock;
-  private queryWaitingList: { [csn: number]: Array<() => void> } = {};
+  private queryWaitingList: { [csn: number]: Array<() => Promise<any>> } = {};
   private subscriberKey: string | null;
   private readyFlag: boolean = false;
   private updateProcessor: UpdateProcessor;
@@ -387,7 +395,7 @@ export class SubsetStorage extends ServiceEngine implements Proxy {
     this.readyFlag = true;
   }
 
-  pullQueryWaitingList(csn: number): Array<() => void> {
+  pullQueryWaitingList(csn: number): Array<() => Promise<any>> {
     const list = this.queryWaitingList[csn];
     if (list) {
       delete this.queryWaitingList[csn];

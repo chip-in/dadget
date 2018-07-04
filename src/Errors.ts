@@ -71,11 +71,6 @@ export const ERROR = {
   E1110: { code: 1110, message: "JournalDB failed to do find by csn. cause=%1" },
 
   /**
-   * JournalDB failed to rebase journals.
-   */
-  E1111: { code: 1111, message: "JournalDB failed to rebase journals. cause=%1" },
-
-  /**
    * JournalDB failed to delete journals.
    */
   E1112: { code: 1112, message: "JournalDB failed to delete journals. cause=%1" },
@@ -94,6 +89,16 @@ export const ERROR = {
    * JournalDB failed to get a check point journal.
    */
   E1115: { code: 1115, message: "JournalDB failed to get a check point journal. cause=%1" },
+
+  /**
+   * JournalDB failed to get a last journal.
+   */
+  E1116: { code: 1116, message: "JournalDB failed to get a last journal. cause=%1" },
+
+  /**
+   * JournalDB failed to replace a journal.
+   */
+  E1117: { code: 1117, message: "JournalDB failed to replace a journal. cause=%1" },
 
   /**
    * SubsetDb failed to start.
