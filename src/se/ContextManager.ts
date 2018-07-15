@@ -4,9 +4,9 @@ import { diff } from "deep-diff";
 import * as http from "http";
 import * as URL from "url";
 import { CORE_NODE } from "../Config";
-import { CsnDb } from "../db/CsnDb";
+import { PersistentDb } from "../db/container/PersistentDb";
 import { JournalDb } from "../db/JournalDb";
-import { PersistentDb } from "../db/PersistentDb";
+import { SystemDb } from "../db/SystemDb";
 import { TransactionObject, TransactionRequest, TransactionType } from "../db/Transaction";
 import { ERROR } from "../Errors";
 import { DadgetError } from "../util/DadgetError";
@@ -54,7 +54,7 @@ class TransactionJournalSubscriber extends Subscriber {
             return this.context.getJournalDb().deleteAfter(transaction.csn)
               .then(() => {
                 if (tr && tr.digest === transaction.digest) {
-                  return this.context.getCsnDb().update(transaction.csn);
+                  return this.context.getSystemDb().updateCsn(transaction.csn);
                 } else {
                   return this.adjustData(transaction.csn);
                 }
@@ -65,7 +65,7 @@ class TransactionJournalSubscriber extends Subscriber {
           });
       } else {
         // Assume this node is a slave.
-        return this.context.getCsnDb().getCurrentCsn()
+        return this.context.getSystemDb().getCsn()
           .then((csn) => {
             if (csn < transaction.csn - 1) {
               this.logger.info("forward csn:", transaction.csn - 1);
@@ -81,7 +81,7 @@ class TransactionJournalSubscriber extends Subscriber {
               if (preTransaction && preTransaction.digest === transaction.beforeDigest) {
                 this.logger.info("insert transaction:", transaction.csn);
                 return this.context.getJournalDb().insert(transaction)
-                  .then(() => this.context.getCsnDb().update(transaction.csn));
+                  .then(() => this.context.getSystemDb().updateCsn(transaction.csn));
               } else {
                 this.logger.warn("beforeDigest mismatch:", transaction.csn);
                 return this.adjustData(transaction.csn);
@@ -121,7 +121,7 @@ class TransactionJournalSubscriber extends Subscriber {
                 if (!fetchJournal) { return { ...loopData, csn: 0 }; }
                 let promise = Promise.resolve();
                 if (!csnUpdated) {
-                  promise = promise.then(() => this.context.getCsnDb().update(csn));
+                  promise = promise.then(() => this.context.getSystemDb().updateCsn(csn));
                   csnUpdated = true;
                 }
                 return promise.then(() => {
@@ -230,11 +230,11 @@ class ContextManagementServer extends Proxy {
             }
           }
           return this.context.getJournalDb().checkConsistent(postulatedCsn, _request)
-            .then(() => this.context.getCsnDb().getCurrentCsn())
+            .then(() => this.context.getSystemDb().getCsn())
             .then((currentCsn) => this.context.checkUniqueConstraint(currentCsn, _request))
             .then((_) => {
               updateObject = _;
-              return Promise.all([this.context.getCsnDb().increment(), this.context.getJournalDb().getLastDigest()])
+              return Promise.all([this.context.getSystemDb().incrementCsn(), this.context.getJournalDb().getLastDigest()])
                 .then((values) => {
                   newCsn = values[0];
                   this.logger.info("exec newCsn:", newCsn);
@@ -264,7 +264,7 @@ class ContextManagementServer extends Proxy {
                           if (protectedCsnJournal) {
                             return protectedCsnJournal.csn;
                           } else {
-                            return this.context.getCsnDb().getCurrentCsn();
+                            return this.context.getSystemDb().getCsn();
                           }
                         })
                         .then((csn) => {
@@ -334,7 +334,7 @@ export class ContextManager extends ServiceEngine {
   private node: ResourceNode;
   private database: string;
   private journalDb: JournalDb;
-  private csnDb: CsnDb;
+  private systemDb: SystemDb;
   private subscriber: TransactionJournalSubscriber;
   private server: ContextManagementServer;
   private mountHandle?: string;
@@ -360,8 +360,8 @@ export class ContextManager extends ServiceEngine {
     return this.journalDb;
   }
 
-  getCsnDb(): CsnDb {
-    return this.csnDb;
+  getSystemDb(): SystemDb {
+    return this.systemDb;
   }
 
   getLock(): AsyncLock {
@@ -377,14 +377,17 @@ export class ContextManager extends ServiceEngine {
     this.logger.debug("ContextManager is starting");
 
     if (!this.option.database) {
-      return Promise.reject(new DadgetError(ERROR.E2001, ["Database name is missing."]));
+      throw new DadgetError(ERROR.E2001, ["Database name is missing."]);
+    }
+    if (this.option.database.match(/--/)) {
+      throw new DadgetError(ERROR.E2001, ["Database name can not contain '--'."]);
     }
     this.database = this.option.database;
 
     // ストレージを準備
     this.journalDb = new JournalDb(new PersistentDb(this.database));
-    this.csnDb = new CsnDb(new PersistentDb(this.database));
-    let promise = Promise.all([this.journalDb.start(), this.csnDb.start()]).then((_) => { });
+    this.systemDb = new SystemDb(new PersistentDb(this.database));
+    let promise = Promise.all([this.journalDb.start(), this.systemDb.start()]).then((_) => { });
 
     // スレーブ動作で同期するのためのサブスクライバを登録
     this.subscriber = new TransactionJournalSubscriber(this);
@@ -441,7 +444,7 @@ export class ContextManager extends ServiceEngine {
         setTimeout(resolve, KEEP_TIME_AFTER_CONTEXT_MANAGER_MASTER_ACQUIRED_MS);
       })
         .then(() => {
-          return this.csnDb.getCurrentCsn()
+          return this.systemDb.getCsn()
             .then((csn) => {
               return this.journalDb.findByCsn(csn)
                 .then((tr) => {

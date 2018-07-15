@@ -1,12 +1,11 @@
 import * as EJSON from "../util/Ejson";
 
-import { Logger } from "@chip-in/resource-node";
 import { TransactionObject, TransactionRequest, TransactionType } from "../db/Transaction";
 import { ERROR } from "../Errors";
 import { DadgetError } from "../util/DadgetError";
-import { IDb } from "./IDb";
+import { IDb } from "./container/IDb";
 
-const JOURNAL_COLLECTION = "__journal__";
+const JOURNAL_COLLECTION = "journal";
 
 export class JournalDb {
   private protectedCsn: number = 0;

@@ -99,7 +99,10 @@ export default class Dadget extends ServiceEngine {
     this.node = node;
     this.logger.debug("Dadget is starting");
     if (!this.option.database) {
-      return Promise.reject(new DadgetError(ERROR.E2101, ["Database name is missing."]));
+      throw new DadgetError(ERROR.E2101, ["Database name is missing."]);
+    }
+    if (this.option.database.match(/--/)) {
+      throw new DadgetError(ERROR.E2101, ["Database name can not contain '--'."]);
     }
     this.database = this.option.database;
     this.logger.debug("Dadget is started");

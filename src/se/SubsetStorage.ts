@@ -1,16 +1,15 @@
 import * as http from "http";
-import * as parser from "mongo-parse";
 import * as ReadWriteLock from "rwlock";
 import * as URL from "url";
 import * as EJSON from "../util/Ejson";
 
 import { Proxy, ResourceNode, ServiceEngine, Subscriber } from "@chip-in/resource-node";
 import { CORE_NODE } from "../Config";
-import { CacheDb } from "../db/CacheDb";
-import { CsnDb } from "../db/CsnDb";
+import { CacheDb } from "../db/container/CacheDb";
+import { PersistentDb } from "../db/container/PersistentDb";
 import { JournalDb } from "../db/JournalDb";
-import { PersistentDb } from "../db/PersistentDb";
 import { SubsetDb } from "../db/SubsetDb";
+import { SystemDb } from "../db/SystemDb";
 import { TransactionObject, TransactionRequest, TransactionType } from "../db/Transaction";
 import { ERROR } from "../Errors";
 import { DadgetError } from "../util/DadgetError";
@@ -58,7 +57,7 @@ class UpdateProcessor extends Subscriber {
           console.log("UpdateProcessor released writeLock2");
           _release2();
         };
-        this.storage.getCsnDb().getCurrentCsn()
+        this.storage.getSystemDb().getCsn()
           .then((csn) => {
             if (!this.storage.getReady()) {
               if (csn === transaction.csn) {
@@ -157,7 +156,7 @@ class UpdateProcessor extends Subscriber {
     } else if (transaction.type === TransactionType.NONE) {
     }
     promise = promise.then(() => this.storage.getJournalDb().insert(transaction));
-    promise = promise.then(() => this.storage.getCsnDb().update(transaction.csn));
+    promise = promise.then(() => this.storage.getSystemDb().updateCsn(transaction.csn));
     return promise;
   }
 
@@ -181,7 +180,7 @@ class UpdateProcessor extends Subscriber {
             promise = promise.then(() => this.storage.getSubsetDb().insert(trans.before as object));
           }
           promise = promise.then(() => this.storage.getJournalDb().deleteAfter(trans.csn - 1));
-          promise = promise.then(() => this.storage.getCsnDb().update(trans.csn - 1));
+          promise = promise.then(() => this.storage.getSystemDb().updateCsn(trans.csn - 1));
         });
         return promise;
       });
@@ -195,7 +194,7 @@ class UpdateProcessor extends Subscriber {
     this.logger.warn("adjustData:" + csn);
     return Promise.resolve()
       .then(() => {
-        if (this.storage.getCsnDb().isNew()) {
+        if (this.storage.getSystemDb().isNew()) {
           return this.resetData(csn);
         } else {
           return this.storage.getJournalDb().getLastJournal()
@@ -281,7 +280,7 @@ class UpdateProcessor extends Subscriber {
               .then(() => this.storage.getJournalDb().insert(subsetTransaction))
               .then(() => this.storage.getSubsetDb().deleteAll())
               .then(() => this.storage.getSubsetDb().insertMany(result.resultSet))
-              .then(() => this.storage.getCsnDb().update(result.csn))
+              .then(() => this.storage.getSystemDb().updateCsn(result.csn))
               .then(() => {
                 this.storage.setReady();
               });
@@ -298,7 +297,7 @@ class UpdateProcessor extends Subscriber {
     return Promise.resolve()
       .then(() => this.storage.getJournalDb().deleteAll())
       .then(() => this.storage.getSubsetDb().deleteAll())
-      .then(() => this.storage.getCsnDb().update(0))
+      .then(() => this.storage.getSystemDb().updateCsn(0))
       .then(() => {
         this.storage.setReady();
       })
@@ -351,7 +350,7 @@ export class SubsetStorage extends ServiceEngine implements Proxy {
   private type: string;
   private subsetDb: SubsetDb;
   private journalDb: JournalDb;
-  private csnDb: CsnDb;
+  private systemDb: SystemDb;
   private mountHandle: string;
   private lock: ReadWriteLock;
   private queryWaitingList: { [csn: number]: Array<() => Promise<any>> } = {};
@@ -378,8 +377,8 @@ export class SubsetStorage extends ServiceEngine implements Proxy {
     return this.journalDb;
   }
 
-  getCsnDb(): CsnDb {
-    return this.csnDb;
+  getSystemDb(): SystemDb {
+    return this.systemDb;
   }
 
   getLock(): ReadWriteLock {
@@ -409,11 +408,18 @@ export class SubsetStorage extends ServiceEngine implements Proxy {
     this.logger.debug("SubsetStorage is starting");
 
     if (!this.option.database) {
-      return Promise.reject(new DadgetError(ERROR.E2401, ["Database name is missing."]));
+      throw new DadgetError(ERROR.E2401, ["Database name is missing."]);
+    }
+    if (this.option.database.match(/--/)) {
+      throw new DadgetError(ERROR.E2401, ["Database name can not contain '--'."]);
     }
     this.database = this.option.database;
+
     if (!this.option.subset) {
-      return Promise.reject(new DadgetError(ERROR.E2401, ["Subset name is missing."]));
+      throw new DadgetError(ERROR.E2401, ["Subset name is missing."]);
+    }
+    if (this.option.subset.match(/--/)) {
+      throw new DadgetError(ERROR.E2401, ["Subset name can not contain '--'."]);
     }
     this.subsetName = this.option.subset;
     this.logger.info("subsetName:", this.subsetName);
@@ -421,7 +427,7 @@ export class SubsetStorage extends ServiceEngine implements Proxy {
     // サブセットの定義を取得する
     const seList = node.searchServiceEngine("DatabaseRegistry", { database: this.database });
     if (seList.length !== 1) {
-      return Promise.reject(new DadgetError(ERROR.E2401, ["DatabaseRegistry is missing, or there are multiple ones."]));
+      throw new DadgetError(ERROR.E2401, ["DatabaseRegistry is missing, or there are multiple ones."]);
     }
     const registry = seList[0] as DatabaseRegistry;
     const metaData = registry.getMetadata();
@@ -431,7 +437,7 @@ export class SubsetStorage extends ServiceEngine implements Proxy {
 
     this.type = this.option.type.toLowerCase();
     if (this.type !== "persistent" && this.type !== "cache") {
-      return Promise.reject(new DadgetError(ERROR.E2401, [`SubsetStorage type ${this.type} is not supported.`]));
+      throw new DadgetError(ERROR.E2401, [`SubsetStorage type ${this.type} is not supported.`]);
     }
 
     // ストレージを準備
@@ -439,11 +445,11 @@ export class SubsetStorage extends ServiceEngine implements Proxy {
     if (this.type === "cache") {
       this.subsetDb = new SubsetDb(new CacheDb(dbName), this.subsetName, metaData.indexes);
       this.journalDb = new JournalDb(new CacheDb(dbName));
-      this.csnDb = new CsnDb(new CacheDb(dbName));
+      this.systemDb = new SystemDb(new CacheDb(dbName));
     } else if (this.type === "persistent") {
       this.subsetDb = new SubsetDb(new PersistentDb(dbName), this.subsetName, metaData.indexes);
       this.journalDb = new JournalDb(new PersistentDb(dbName));
-      this.csnDb = new CsnDb(new PersistentDb(dbName));
+      this.systemDb = new SystemDb(new PersistentDb(dbName));
     }
 
     // Rest サービスを登録する。
@@ -452,7 +458,7 @@ export class SubsetStorage extends ServiceEngine implements Proxy {
     this.updateProcessor = new UpdateProcessor(this, this.database, this.subsetDefinition);
     let promise = this.subsetDb.start();
     promise = promise.then(() => this.journalDb.start());
-    promise = promise.then(() => this.csnDb.start());
+    promise = promise.then(() => this.systemDb.start());
     promise = promise.then(() =>
       node.mount(CORE_NODE.PATH_SUBSET
         .replace(/:database\b/g, this.database)
@@ -527,7 +533,7 @@ export class SubsetStorage extends ServiceEngine implements Proxy {
     });
     // TODO csn がチェックポイント未満はエラー
     return promise
-      .then(() => this.getCsnDb().getCurrentCsn())
+      .then(() => this.getSystemDb().getCsn())
       .then((currentCsn) => {
         if (csn === 0 || csn === currentCsn || (csn < currentCsn && csnMode === "latest")) {
           return this.getSubsetDb().find(innerQuery, sort, limit)
