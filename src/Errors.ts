@@ -6,19 +6,34 @@ export const ERROR = {
   E1001: { code: 1001, message: "SystemDb failed to start. cause=%1" },
 
   /**
-   * SystemDb failed to increment a value of csn.
+   * SystemDb failed to increment the value of csn.
    */
-  E1002: { code: 1002, message: "SystemDb failed to increment a value of csn. cause=%1" },
+  E1002: { code: 1002, message: "SystemDb failed to increment the value of csn. cause=%1" },
 
   /**
-   * SystemDb failed to get current a value of csn.
+   * SystemDb failed to get current the value of csn.
    */
-  E1003: { code: 1003, message: "SystemDb failed to get current a value of csn. cause=%1" },
+  E1003: { code: 1003, message: "SystemDb failed to get current the value of csn. cause=%1" },
 
   /**
-   * SystemDb failed to update a value of csn.
+   * SystemDb failed to update the value of csn.
    */
-  E1004: { code: 1004, message: "SystemDb failed to update a value of csn. cause=%1" },
+  E1004: { code: 1004, message: "SystemDb failed to update the value of csn. cause=%1" },
+
+  /**
+   * SystemDb failed to check the hash value of the subset query.
+   */
+  E1005: { code: 1005, message: "SystemDb failed to check the hash value of the subset query. cause=%1" },
+
+  /**
+   * SystemDb failed to update the hash value of the subset query.
+   */
+  E1006: { code: 1006, message: "SystemDb failed to update the hash value of the subset query. cause=%1" },
+
+  /**
+   * SystemDb failed to prepare the value of csn.
+   */
+  E1007: { code: 1007, message: "SystemDb failed to prepare the value of csn. cause=%1" },
 
   /**
    * JournalDB failed to start.

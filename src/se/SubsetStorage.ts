@@ -1,4 +1,5 @@
 import * as http from "http";
+import * as hash from "object-hash";
 import * as ReadWriteLock from "rwlock";
 import * as URL from "url";
 import * as EJSON from "../util/Ejson";
@@ -60,7 +61,7 @@ class UpdateProcessor extends Subscriber {
         this.storage.getSystemDb().getCsn()
           .then((csn) => {
             if (!this.storage.getReady()) {
-              if (csn === transaction.csn) {
+              if (csn > 0 && csn === transaction.csn) {
                 return this.storage.getJournalDb().findByCsn(csn)
                   .then((journal) => {
                     if (journal && journal.digest === transaction.digest) {
@@ -69,13 +70,12 @@ class UpdateProcessor extends Subscriber {
                       release1();
                       return;
                     } else {
-                      return this.adjustData(csn)
+                      return this.adjustData(transaction.csn)
                         .then(() => { release2(); })
                         .then(() => { release1(); });
                     }
                   });
               } else {
-                // リセットは初回のみ。それ以降はジャーナルから更新
                 return this.adjustData(transaction.csn)
                   .then(() => { release2(); })
                   .then(() => { release1(); });
@@ -190,7 +190,7 @@ class UpdateProcessor extends Subscriber {
     return Util.fetchJournal(csn, this.database, this.storage.getNode());
   }
 
-  adjustData(csn: number): Promise<void> {
+  private adjustData(csn: number): Promise<void> {
     this.logger.warn("adjustData:" + csn);
     return Promise.resolve()
       .then(() => {
@@ -264,7 +264,7 @@ class UpdateProcessor extends Subscriber {
       });
   }
 
-  resetData(csn: number): Promise<void> {
+  private resetData(csn: number): Promise<void> {
     if (csn === 0) { return this.resetData0(); }
     this.logger.warn("resetData:", csn);
     const query = this.subsetDefinition.query ? this.subsetDefinition.query : {};
@@ -281,6 +281,7 @@ class UpdateProcessor extends Subscriber {
               .then(() => this.storage.getSubsetDb().deleteAll())
               .then(() => this.storage.getSubsetDb().insertMany(result.resultSet))
               .then(() => this.storage.getSystemDb().updateCsn(result.csn))
+              .then(() => this.storage.getSystemDb().updateQueryHash())
               .then(() => {
                 this.storage.setReady();
               });
@@ -292,12 +293,13 @@ class UpdateProcessor extends Subscriber {
       });
   }
 
-  resetData0(): Promise<void> {
+  private resetData0(): Promise<void> {
     this.logger.warn("resetData0");
     return Promise.resolve()
       .then(() => this.storage.getJournalDb().deleteAll())
       .then(() => this.storage.getSubsetDb().deleteAll())
       .then(() => this.storage.getSystemDb().updateCsn(0))
+      .then(() => this.storage.getSystemDb().updateQueryHash())
       .then(() => {
         this.storage.setReady();
       })
@@ -432,8 +434,7 @@ export class SubsetStorage extends ServiceEngine implements Proxy {
     const registry = seList[0] as DatabaseRegistry;
     const metaData = registry.getMetadata();
     this.subsetDefinition = metaData.subsets[this.subsetName];
-
-    // TODO サブセットの定義が変更されていたらリセット
+    const queryHash = hash.MD5(this.subsetDefinition.query || {});
 
     this.type = this.option.type.toLowerCase();
     if (this.type !== "persistent" && this.type !== "cache") {
@@ -459,6 +460,14 @@ export class SubsetStorage extends ServiceEngine implements Proxy {
     let promise = this.subsetDb.start();
     promise = promise.then(() => this.journalDb.start());
     promise = promise.then(() => this.systemDb.start());
+    promise = promise.then(() => {
+      return this.systemDb.checkQueryHash(queryHash)
+        .then((result) => {
+          if (result) {
+            this.logger.warn("Subset Storage requires resetting because the query hash has been changed.");
+          }
+        });
+    });
     promise = promise.then(() =>
       node.mount(CORE_NODE.PATH_SUBSET
         .replace(/:database\b/g, this.database)
