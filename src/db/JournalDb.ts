@@ -37,10 +37,10 @@ export class JournalDb {
   checkConsistent(postulatedCsn: number, request: TransactionRequest): Promise<void> {
     return this.db.findOneBySort({ target: request.target }, { csn: -1 })
       .then((result) => {
-        if (postulatedCsn && postulatedCsn < this.protectedCsn) {
-          throw new DadgetError(ERROR.E1113, [postulatedCsn, this.protectedCsn]);
-        }
-        // TODO TEST ãƒã‚§ãƒƒã‚¯ãƒã‚¤ãƒ³ãƒˆä»¥å‰ã¯è¦‹ã¤ã‹ã‚‰ãªãã¦ã‚‚å•é¡Œãªã„
+    if (postulatedCsn && postulatedCsn < this.protectedCsn) {
+      throw new DadgetError(ERROR.E1113, [postulatedCsn, this.protectedCsn]);
+    }
+        // TODO TEST ƒ`ƒFƒbƒNƒ|ƒCƒ“ƒgˆÈ‘O‚ÍŒ©‚Â‚©‚ç‚È‚­‚Ä‚à–â‘è‚È‚¢
         console.log("checkConsistent", JSON.stringify(result));
         if (request.type === TransactionType.INSERT && request.new) {
           if (!result || result.type === TransactionType.DELETE) { return; }
@@ -153,7 +153,7 @@ export class JournalDb {
 
   replace(oldTransaction: TransactionObject, newTransaction: TransactionObject): Promise<void> {
     console.log("replace:", (oldTransaction as any)._id, JSON.stringify(newTransaction));
-    return this.db.replaceOneById((oldTransaction as any)._id, newTransaction)
+    return this.db.replaceOneById((oldTransaction as any)._id, JournalDb.serializeTrans(newTransaction))
       .catch((err) => Promise.reject(new DadgetError(ERROR.E1117, [err.toString()])));
   }
 
