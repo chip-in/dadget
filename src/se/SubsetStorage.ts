@@ -560,7 +560,7 @@ export class SubsetStorage extends ServiceEngine implements Proxy {
                 this.logger.info("not enough rollback transactions");
                 return { csn, resultSet: [], restQuery: query };
               }
-              const possibleLimit = typeof limit === "undefined" ? limit : limit + transactions.length;
+              const possibleLimit = limit ? limit + transactions.length : undefined;
               return this.getSubsetDb().find(innerQuery, sort, possibleLimit)
                 .then((result) => {
                   release();
