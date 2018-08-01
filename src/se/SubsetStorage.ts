@@ -36,7 +36,6 @@ class UpdateProcessor extends Subscriber {
   }
 
   onReceive(msg: string) {
-    // TODO チェックポイント
     console.log("UpdateProcessor received: " + msg.toString());
     const transaction = EJSON.parse(msg) as TransactionObject;
     this.procTransaction(transaction);
@@ -44,6 +43,18 @@ class UpdateProcessor extends Subscriber {
 
   procTransaction(transaction: TransactionObject) {
     this.logger.info("procTransaction:", transaction.type, transaction.csn);
+
+    if (transaction.protectedCsn) {
+      if (this.storage.getJournalDb().getProtectedCsn() < transaction.protectedCsn) {
+        this.logger.info("CHECKPOINT protectedCsn: " + transaction.protectedCsn);
+        this.storage.getJournalDb().setProtectedCsn(transaction.protectedCsn);
+        this.storage.getJournalDb().deleteBeforeCsn(transaction.protectedCsn)
+          .catch((err) => {
+            this.logger.error(err.toString());
+          });
+      }
+    }
+
     console.log("UpdateProcessor waiting writeLock1");
     this.lock.writeLock((_release1) => {
       console.log("UpdateProcessor got writeLock1");
@@ -80,12 +91,6 @@ class UpdateProcessor extends Subscriber {
                   .then(() => { release2(); })
                   .then(() => { release1(); });
               }
-            } else if (transaction.type === TransactionType.CHECKPOINT) {
-              this.logger.info("CHECKPOINT protectedCsn: " + transaction.protectedCsn);
-              // TODO 実装
-              release2();
-              release1();
-              return;
             } else if (csn > transaction.csn && transaction.type === TransactionType.ROLLBACK) {
               return this.fetchJournal(transaction.csn)
                 .then((fetchJournal) => {
@@ -179,7 +184,7 @@ class UpdateProcessor extends Subscriber {
           } else if (trans.type === TransactionType.DELETE && trans.before) {
             promise = promise.then(() => this.storage.getSubsetDb().insert(trans.before as object));
           }
-          promise = promise.then(() => this.storage.getJournalDb().deleteAfter(trans.csn - 1));
+          promise = promise.then(() => this.storage.getJournalDb().deleteAfterCsn(trans.csn - 1));
           promise = promise.then(() => this.storage.getSystemDb().updateCsn(trans.csn - 1));
         });
         return promise;
@@ -540,7 +545,9 @@ export class SubsetStorage extends ServiceEngine implements Proxy {
         resolve();
       });
     });
-    // TODO csn がチェックポイント未満はエラー
+
+    const protectedCsn = this.getJournalDb().getProtectedCsn();
+
     return promise
       .then(() => this.getSystemDb().getCsn())
       .then((currentCsn) => {
@@ -550,6 +557,8 @@ export class SubsetStorage extends ServiceEngine implements Proxy {
               release();
               return { csn: currentCsn, resultSet: result, restQuery };
             });
+        } else if (csn < protectedCsn) {
+          throw new DadgetError(ERROR.E2402, [csn, protectedCsn]);
         } else if (csn < currentCsn) {
           this.logger.info("rollback transactions", csn, currentCsn);
           // rollback transactions
@@ -564,8 +573,8 @@ export class SubsetStorage extends ServiceEngine implements Proxy {
               return this.getSubsetDb().find(innerQuery, sort, possibleLimit)
                 .then((result) => {
                   release();
-                  result = SubsetStorage.rollbackAndFind(result, transactions, innerQuery, sort, limit);
-                  return { csn, resultSet: result, restQuery };
+                  const resultSet = SubsetStorage.rollbackAndFind(result, transactions, innerQuery, sort, limit);
+                  return { csn, resultSet, restQuery };
                 });
             });
         } else {

@@ -15,6 +15,14 @@ export class JournalDb {
     console.log("JournalDb is created");
   }
 
+  getProtectedCsn() {
+    return this.protectedCsn;
+  }
+
+  setProtectedCsn(protectedCsn: number) {
+    this.protectedCsn = protectedCsn;
+  }
+
   start(): Promise<void> {
     this.db.setIndexes({
       csn_index: {
@@ -35,12 +43,11 @@ export class JournalDb {
   }
 
   checkConsistent(postulatedCsn: number, request: TransactionRequest): Promise<void> {
-    return this.db.findOneBySort({ target: request.target }, { csn: -1 })
-      .then((result) => {
     if (postulatedCsn && postulatedCsn < this.protectedCsn) {
       throw new DadgetError(ERROR.E1113, [postulatedCsn, this.protectedCsn]);
     }
-        // TODO TEST チェックポイント以前は見つからなくても問題ない
+    return this.db.findOneBySort({ target: request.target }, { csn: -1 })
+      .then((result) => {
         console.log("checkConsistent", JSON.stringify(result));
         if (request.type === TransactionType.INSERT && request.new) {
           if (!result || result.type === TransactionType.DELETE) { return; }
@@ -132,9 +139,23 @@ export class JournalDb {
       .catch((err) => Promise.reject(new DadgetError(ERROR.E1110, [err.toString()])));
   }
 
-  deleteAfter(csn: number): Promise<void> {
-    console.log("deleteAfter:", csn);
+  deleteAfterCsn(csn: number): Promise<void> {
+    console.log("deleteAfterCsn:", csn);
     return this.findByCsnRange(csn + 1, Number.MAX_VALUE)
+      .then((transactions) => {
+        let promise = Promise.resolve();
+        for (const transaction of transactions) {
+          promise = promise.then(() => this.db.deleteOneById((transaction as any)._id));
+        }
+        return promise;
+      })
+      .catch((err) => Promise.reject(new DadgetError(ERROR.E1112, [err.toString()])));
+  }
+
+  deleteBeforeCsn(csn: number): Promise<void> {
+    console.log("deleteBeforeCsn:", csn);
+    if (!csn || csn <= 1) { return Promise.resolve(); }
+    return this.findByCsnRange(1, csn - 1)
       .then((transactions) => {
         let promise = Promise.resolve();
         for (const transaction of transactions) {
@@ -157,19 +178,23 @@ export class JournalDb {
       .catch((err) => Promise.reject(new DadgetError(ERROR.E1117, [err.toString()])));
   }
 
-  getBeforeCheckPointTime(time: Date): Promise<TransactionObject> {
+  getBeforeCheckPointTime(time: Date): Promise<TransactionObject | null> {
+    console.log("getBeforeCheckPointTime:", time);
     return this.db.findOneBySort({ datetime: { $lt: time } }, { csn: -1 })
       .then((result) => {
-        console.log("getBeforeCheckPointTime", JSON.stringify(result));
+        if (!result) { return null; }
+        console.log("getBeforeCheckPointTime:", JSON.stringify(result));
         return JournalDb.deserializeTrans(result);
       })
       .catch((err) => Promise.reject(new DadgetError(ERROR.E1114, [err.toString()])));
   }
 
-  getOneAfterCsn(csn: number): Promise<TransactionObject> {
+  getOneAfterCsn(csn: number): Promise<TransactionObject | null> {
+    console.log("getOneAfterCsn:", csn);
     return this.db.findOneBySort({ csn: { $gt: csn } }, { csn: 1 })
       .then((result) => {
-        console.log("getOneAfterCsn", JSON.stringify(result));
+        if (!result) { return null; }
+        console.log("getOneAfterCsn:", JSON.stringify(result));
         return JournalDb.deserializeTrans(result);
       })
       .catch((err) => Promise.reject(new DadgetError(ERROR.E1115, [err.toString()])));

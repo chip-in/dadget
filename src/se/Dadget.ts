@@ -356,7 +356,6 @@ export default class Dadget extends ServiceEngine {
 
         onReceive(transctionJSON: string) {
           const transaction = EJSON.parse(transctionJSON) as TransactionObject;
-          if (transaction.type === TransactionType.CHECKPOINT) { return; }
           this.logger.info("received:", transaction.type, transaction.csn);
           if (transaction.type === TransactionType.ROLLBACK) {
             parent.notifyCsn = transaction.csn;

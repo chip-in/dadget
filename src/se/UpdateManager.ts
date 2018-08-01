@@ -45,9 +45,6 @@ export class UpdateManager extends ServiceEngine {
     if (transaction.type === TransactionType.ROLLBACK) {
       return transaction;
     }
-    if (transaction.type === TransactionType.CHECKPOINT) {
-      return transaction;
-    }
     if (!subsetDefinition.query) { return transaction; }
     const query = parser.parse(subsetDefinition.query);
 

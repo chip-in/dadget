@@ -16,8 +16,8 @@ import { Util } from "../util/Util";
 
 const KEEP_TIME_AFTER_CONTEXT_MANAGER_MASTER_ACQUIRED_MS = 3000; // 3000ms
 const KEEP_TIME_AFTER_SENDING_ROLLBACK_MS = 1000; // 1000ms
-const CHECK_POINT_CHECK_PERIOD_MS = 10 * 60 * 1000;
-const CHECK_POINT_DELETE_PERIOD_MS = 72 * 60 * 60 * 1000;
+const CHECK_POINT_CHECK_PERIOD_MS = 10 * 60 * 1000;  // 10 minutes
+const CHECK_POINT_DELETE_PERIOD_MS = 72 * 60 * 60 * 1000; // 72 hours
 
 /**
  * コンテキストマネージャコンフィグレーションパラメータ
@@ -42,16 +42,27 @@ class TransactionJournalSubscriber extends Subscriber {
     console.log("TransactionJournalSubscriber onReceive:", msg.toString());
     const transaction: TransactionObject = EJSON.parse(msg);
     this.logger.info("received:", transaction.type, transaction.csn);
+
+    if (transaction.protectedCsn) {
+      const protectedCsn = transaction.protectedCsn;
+      if (this.context.getJournalDb().getProtectedCsn() < protectedCsn) {
+        this.logger.info("CHECKPOINT protectedCsn: " + protectedCsn);
+        this.context.getJournalDb().setProtectedCsn(protectedCsn);
+        setTimeout(() => {
+          this.context.getJournalDb().deleteBeforeCsn(protectedCsn)
+            .catch((err) => {
+              this.logger.error(err.toString());
+            });
+        });
+      }
+    }
+
     this.context.getLock().acquire("transaction", () => {
-      if (transaction.type === TransactionType.CHECKPOINT) {
-        this.logger.info("CHECKPOINT protectedCsn: " + transaction.protectedCsn);
-        // TODO 実装
-        return;
-      } else if (transaction.type === TransactionType.ROLLBACK) {
+      if (transaction.type === TransactionType.ROLLBACK) {
         this.logger.warn("ROLLBACK:", transaction.csn);
         return this.context.getJournalDb().findByCsn(transaction.csn)
           .then((tr) => {
-            return this.context.getJournalDb().deleteAfter(transaction.csn)
+            return this.context.getJournalDb().deleteAfterCsn(transaction.csn)
               .then(() => {
                 if (tr && tr.digest === transaction.digest) {
                   return this.context.getSystemDb().updateCsn(transaction.csn);
@@ -185,9 +196,6 @@ class ContextManagementServer extends Proxy {
 
   exec(postulatedCsn: number, request: TransactionRequest): Promise<object> {
     this.logger.info("exec csn:", postulatedCsn);
-    let transaction: TransactionObject;
-    let newCsn: number;
-    let updateObject: { _id?: string, csn?: number };
 
     let err: string | null = null;
     if (!request.target) {
@@ -215,6 +223,9 @@ class ContextManagementServer extends Proxy {
       });
     }
 
+    let transaction: TransactionObject;
+    let newCsn: number;
+    let updateObject: { _id?: string, csn?: number };
     return new Promise((resolve, reject) => {
       this.context.getLock().acquire("master", () => {
         return this.context.getLock().acquire("transaction", () => {
@@ -240,8 +251,9 @@ class ContextManagementServer extends Proxy {
                   this.logger.info("exec newCsn:", newCsn);
                   const lastDigest = values[1];
                   transaction = Object.assign({
-                    csn: newCsn
-                    , beforeDigest: lastDigest,
+                    csn: newCsn,
+                    beforeDigest: lastDigest,
+                    protectedCsn: this.context.getJournalDb().getProtectedCsn(),
                   }, _request);
                   transaction.digest = TransactionObject.calcDigest(transaction);
                   return this.context.getJournalDb().insert(transaction);
@@ -251,36 +263,7 @@ class ContextManagementServer extends Proxy {
                 CORE_NODE.PATH_TRANSACTION.replace(/:database\b/g, this.context.getDatabase())
                 , EJSON.stringify(transaction));
             }).then(() => {
-              if (Date.now() - this.lastCheckPointTime > CHECK_POINT_CHECK_PERIOD_MS) {
-                this.lastCheckPointTime = Date.now();
-                setTimeout(() => {
-                  const time = new Date();
-                  time.setMilliseconds(-CHECK_POINT_DELETE_PERIOD_MS);
-                  this.context.getJournalDb().getBeforeCheckPointTime(time)
-                    .then((journal) => {
-                      if (!journal) { return; }
-                      return this.context.getJournalDb().getOneAfterCsn(journal.csn)
-                        .then((protectedCsnJournal) => {
-                          if (protectedCsnJournal) {
-                            return protectedCsnJournal.csn;
-                          } else {
-                            return this.context.getSystemDb().getCsn();
-                          }
-                        })
-                        .then((csn) => {
-                          const checkPointTransaction = new TransactionObject();
-                          checkPointTransaction.type = TransactionType.CHECKPOINT;
-                          checkPointTransaction.csn = newCsn;
-                          checkPointTransaction.protectedCsn = csn;
-                          checkPointTransaction.digest = transaction.digest;
-                          checkPointTransaction.beforeDigest = transaction.beforeDigest;
-                          return this.context.getNode().publish(
-                            CORE_NODE.PATH_TRANSACTION.replace(/:database\b/g, this.context.getDatabase())
-                            , EJSON.stringify(checkPointTransaction));
-                        });
-                    });
-                }, 0);
-              }
+              return this.checkProtectedCsn();
             });
         }).then(() => {
           if (!updateObject._id) { updateObject._id = transaction.target; }
@@ -295,6 +278,7 @@ class ContextManagementServer extends Proxy {
           let cause = reason instanceof DadgetError ? reason : new DadgetError(ERROR.E2003, [reason]);
           if (cause.code === ERROR.E1105.code) { cause = new DadgetError(ERROR.E2004, [cause]); }
           cause.convertInsertsToString();
+          this.logger.warn(cause.toString());
           resolve({
             status: "NG",
             reason: cause,
@@ -302,6 +286,35 @@ class ContextManagementServer extends Proxy {
         });
       });
     });
+  }
+
+  private checkProtectedCsn(): void {
+    if (Date.now() - this.lastCheckPointTime <= CHECK_POINT_CHECK_PERIOD_MS) { return; }
+    this.lastCheckPointTime = Date.now();
+    setTimeout(() => {
+      const time = new Date();
+      time.setMilliseconds(-CHECK_POINT_DELETE_PERIOD_MS);
+      this.context.getJournalDb().getBeforeCheckPointTime(time)
+        .then((journal) => {
+          const deletableLastCsn = journal ? journal.csn : 0;
+          return this.context.getJournalDb().getOneAfterCsn(deletableLastCsn)
+            .then((protectedCsnJournal) => {
+              if (protectedCsnJournal) {
+                return protectedCsnJournal.csn;
+              } else {
+                return this.context.getSystemDb().getCsn();
+              }
+            });
+        })
+        .then((protectedCsn) => {
+          this.logger.info("CHECKPOINT protectedCsn: " + protectedCsn);
+          this.context.getJournalDb().setProtectedCsn(protectedCsn);
+          this.context.getJournalDb().deleteBeforeCsn(protectedCsn)
+            .catch((err) => {
+              this.logger.error(err.toString());
+            });
+        });
+    }, 0);
   }
 
   getJournal(csn: number): Promise<object> {
