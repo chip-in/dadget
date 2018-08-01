@@ -1,5 +1,5 @@
 var chai = require('chai')
-var { CacheDb } = require('../lib/db/CacheDb')
+var { CacheDb } = require('../lib/db/container/CacheDb')
 
 describe('CacheDb', () => {
   it('increment', () => {

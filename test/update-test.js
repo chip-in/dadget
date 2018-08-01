@@ -1,5 +1,5 @@
 var chai = require('chai')
-var { TransactionRequest } = require('../lib//db/Transaction')
+var { TransactionRequest } = require('../lib/db/Transaction')
 
 describe('update', function () {
   describe('$currentDate', function () {

@@ -1,5 +1,7 @@
 import equal = require("deep-equal");
 
+const showLog = false;
+
 export class LogicalOperator {
   static getInsideOfCache(cond: any, cacheCond: any): object | undefined {
     if (cacheCond === undefined) { return cond; }
@@ -235,7 +237,7 @@ const expandLogicalQuery = (query: Operator): Operator => {
   if (query instanceof TrueOperator || query instanceof FalseOperator) { return query; }
   indent++;
   try {
-    console.log(" ".repeat(indent) + query);
+    if (showLog) { console.log(" ".repeat(indent) + query); }
     if (query instanceof AndOperator) {
       return query.opList.reduce(expandAndOperand, TRUE);
     }
@@ -254,7 +256,7 @@ const expandLogicalQuery = (query: Operator): Operator => {
 const expandAndOperand = (a: Operator, b: Operator): Operator => {
   indent++;
   try {
-    console.log(" ".repeat(indent) + a + " and " + b);
+    if (showLog) { console.log(" ".repeat(indent) + a + " and " + b); }
     b = expandLogicalQuery(b);
     if (a instanceof TrueOperator) { return b; }
     if (b instanceof TrueOperator) { return a; }
@@ -275,7 +277,7 @@ const expandAndOperand = (a: Operator, b: Operator): Operator => {
         c = combineLogicalAnd(new AndOperator([a]), b);
       }
     }
-    console.log(" ".repeat(indent) + c);
+    if (showLog) { console.log(" ".repeat(indent) + c); }
     return c;
   } finally {
     indent--;
@@ -320,7 +322,7 @@ const andInAndIn = (a: any[], b: any[]): any[] => {
 const combineLogicalAnd = (base: AndOperator, addition: Operator): Operator => {
   indent++;
   try {
-    console.log(" ".repeat(indent) + "combineLogicalAnd " + base + " and " + addition);
+    if (showLog) { console.log(" ".repeat(indent) + "combineLogicalAnd " + base + " and " + addition); }
     if (addition instanceof ValueOperator) {
       for (let i = 0; i < base.opList.length; i++) {
         const cond = base.opList[i];
@@ -376,7 +378,7 @@ const combineLogicalAnd = (base: AndOperator, addition: Operator): Operator => {
 const expandOrOperand = (a: Operator, b: Operator): Operator => {
   indent++;
   try {
-    console.log(" ".repeat(indent) + a + " or " + b);
+    if (showLog) { console.log(" ".repeat(indent) + a + " or " + b); }
     b = expandLogicalQuery(b);
     if (a instanceof FalseOperator) { return b; }
     if (b instanceof FalseOperator) { return a; }
@@ -395,7 +397,7 @@ const expandOrOperand = (a: Operator, b: Operator): Operator => {
     } else {
       c = new OrOperator([a, b]);
     }
-    console.log(" ".repeat(indent) + c);
+    if (showLog) { console.log(" ".repeat(indent) + c); }
     return c;
   } finally {
     indent--;
@@ -405,7 +407,7 @@ const expandOrOperand = (a: Operator, b: Operator): Operator => {
 const expandNotOperand = (a: Operator): Operator => {
   indent++;
   try {
-    console.log(" ".repeat(indent) + "not " + a);
+    if (showLog) { console.log(" ".repeat(indent) + "not " + a); }
     if (a instanceof FalseOperator) { return TRUE; }
     if (a instanceof TrueOperator) { return FALSE; }
     if (a instanceof NotValueOperator) { return a.op; }
@@ -427,7 +429,7 @@ const expandNotOperand = (a: Operator): Operator => {
     } else {
       c = new NotOperator(a);
     }
-    console.log(" ".repeat(indent) + c);
+    if (showLog) { console.log(" ".repeat(indent) + c); }
     return c;
   } finally {
     indent--;
