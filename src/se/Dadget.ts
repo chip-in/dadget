@@ -46,7 +46,7 @@ export class QueryResult {
   resultSet: object[];
 
   /**
-   * 問い合わせに対するオブジェクトを全て列挙できなかった場合に、残った集合に対するクエリ（サブセットのクエリハンドラの場合のみで、クエリルータの返却時は undefined）
+   * 問い合わせに対するオブジェクトを全て列挙できなかった場合に、残った集合に対するクエリ（サブセットのクエリハンドラの場合のみで、APIからの返却時は undefined）
    */
   restQuery: object | undefined;
 
@@ -280,7 +280,7 @@ export default class Dadget extends ServiceEngine {
       throw new Error("The TransactionType is not supported.");
     }
     const sendData = { csn, request };
-    return this.node.fetch(CORE_NODE.PATH_CONTEXT.replace(/:database\b/g, this.database) + "/exec", {
+    return this.node.fetch(CORE_NODE.PATH_CONTEXT.replace(/:database\b/g, this.database) + CORE_NODE.PATH_EXEC, {
       method: "POST",
       headers: {
         "Content-Type": "application/json",

@@ -61,7 +61,7 @@ export class Util {
   }
 
   static fetchJournal(csn: number, database: string, node: ResourceNode): Promise<TransactionObject | null> {
-    return node.fetch(CORE_NODE.PATH_CONTEXT.replace(/:database\b/g, database) + "/journal", {
+    return node.fetch(CORE_NODE.PATH_CONTEXT.replace(/:database\b/g, database) + CORE_NODE.PATH_GET_TRANSACTION, {
       method: "POST",
       headers: {
         "Content-Type": "application/json",

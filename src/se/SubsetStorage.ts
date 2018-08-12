@@ -399,6 +399,16 @@ export class SubsetStorage extends ServiceEngine implements Proxy {
   setReady(): void {
     console.log("setReady");
     this.readyFlag = true;
+
+    // Rest サービスを登録する。
+    const mountingMode = this.option.exported ? "loadBalancing" : "localOnly";
+    this.logger.info("mountingMode:", mountingMode);
+    this.node.mount(CORE_NODE.PATH_SUBSET
+      .replace(/:database\b/g, this.database)
+      .replace(/:subset\b/g, this.subsetName), mountingMode, this)
+      .then((value) => {
+        this.mountHandle = value;
+      });
   }
 
   pullQueryWaitingList(csn: number): Array<() => Promise<any>> {
@@ -458,9 +468,6 @@ export class SubsetStorage extends ServiceEngine implements Proxy {
       this.systemDb = new SystemDb(new PersistentDb(dbName));
     }
 
-    // Rest サービスを登録する。
-    const mountingMode = this.option.exported ? "loadBalancing" : "localOnly";
-    this.logger.info("mountingMode:", mountingMode);
     this.updateProcessor = new UpdateProcessor(this, this.database, this.subsetDefinition);
     let promise = this.subsetDb.start();
     promise = promise.then(() => this.journalDb.start());
@@ -472,13 +479,6 @@ export class SubsetStorage extends ServiceEngine implements Proxy {
             this.logger.warn("Subset Storage requires resetting because the query hash has been changed.");
           }
         });
-    });
-    promise = promise.then(() =>
-      node.mount(CORE_NODE.PATH_SUBSET
-        .replace(/:database\b/g, this.database)
-        .replace(/:subset\b/g, this.subsetName), mountingMode, this),
-    ).then((value) => {
-      this.mountHandle = value;
     });
     promise = promise.then(() =>
       node.subscribe(CORE_NODE.PATH_SUBSET_TRANSACTION
@@ -509,7 +509,7 @@ export class SubsetStorage extends ServiceEngine implements Proxy {
     this.logger.debug(method, url.pathname);
     if (method === "OPTIONS") {
       return ProxyHelper.procOption(req, res);
-    } else if (url.pathname.endsWith("/query") && method === "POST") {
+    } else if (url.pathname.endsWith(CORE_NODE.PATH_QUERY) && method === "POST") {
       return ProxyHelper.procPost(req, res, (data) => {
         this.logger.debug("/query");
         const request = EJSON.parse(data);

@@ -89,7 +89,7 @@ export class QueryHandler extends ServiceEngine {
     const request = { csn, query, sort, limit, csnMode };
     return this.node.fetch(CORE_NODE.PATH_SUBSET
       .replace(/:database\b/g, this.database)
-      .replace(/:subset\b/g, this.subsetName) + "/query", {
+      .replace(/:subset\b/g, this.subsetName) + CORE_NODE.PATH_QUERY, {
         method: "POST",
         headers: {
           "Content-Type": "application/json",
@@ -105,6 +105,10 @@ export class QueryHandler extends ServiceEngine {
         if (data.status === "NG") { throw data.reason; }
         if (data.status === "OK") { return data.result; }
         throw new Error("fetch error:" + JSON.stringify(data));
+      })
+      .catch((reason) => {
+        this.logger.warn("query error:" + reason);
+        return { csn, resultSet: [], restQuery: query, csnMode };
       });
   }
 }

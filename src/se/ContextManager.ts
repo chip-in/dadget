@@ -176,17 +176,17 @@ class ContextManagementServer extends Proxy {
     this.logger.debug(method, url.pathname);
     if (method === "OPTIONS") {
       return ProxyHelper.procOption(req, res);
-    } else if (url.pathname.endsWith("/exec") && method === "POST") {
+    } else if (url.pathname.endsWith(CORE_NODE.PATH_EXEC) && method === "POST") {
       return ProxyHelper.procPost(req, res, (data) => {
         this.logger.debug("/exec");
         const request = EJSON.parse(data);
         return this.exec(request.csn, request.request);
       });
-    } else if (url.pathname.endsWith("/journal") && method === "POST") {
+    } else if (url.pathname.endsWith(CORE_NODE.PATH_GET_TRANSACTION) && method === "POST") {
       return ProxyHelper.procPost(req, res, (data) => {
-        this.logger.debug("/journal");
+        this.logger.debug("/getTransactionJournal");
         const request = EJSON.parse(data);
-        return this.getJournal(request.csn);
+        return this.getTransactionJournal(request.csn);
       });
     } else {
       this.logger.warn("server command not found!:", method, url.pathname);
@@ -317,7 +317,7 @@ class ContextManagementServer extends Proxy {
     }, 0);
   }
 
-  getJournal(csn: number): Promise<object> {
+  getTransactionJournal(csn: number): Promise<object> {
     return this.context.getJournalDb().findByCsn(csn)
       .then((journal) => {
         if (journal) {
