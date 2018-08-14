@@ -45,9 +45,6 @@ export class UpdateManager extends ServiceEngine {
     if (transaction.type === TransactionType.ROLLBACK) {
       return transaction;
     }
-    if (transaction.type === TransactionType.CHECKPOINT) {
-      return transaction;
-    }
     if (!subsetDefinition.query) { return transaction; }
     const query = parser.parse(subsetDefinition.query);
 
@@ -105,11 +102,18 @@ export class UpdateManager extends ServiceEngine {
     this.logger.debug("UpdateManager is starting");
 
     if (!this.option.database) {
-      return Promise.reject(new DadgetError(ERROR.E2501, ["Database name is missing."]));
+      throw new DadgetError(ERROR.E2501, ["Database name is missing."]);
+    }
+    if (this.option.database.match(/--/)) {
+      throw new DadgetError(ERROR.E2501, ["Database name can not contain '--'."]);
     }
     this.database = this.option.database;
+
     if (!this.option.subset) {
-      return Promise.reject(new DadgetError(ERROR.E2501, ["Subset name is missing."]));
+      throw new DadgetError(ERROR.E2501, ["Subset name is missing."]);
+    }
+    if (this.option.subset.match(/--/)) {
+      throw new DadgetError(ERROR.E2501, ["Subset name can not contain '--'."]);
     }
     const subset = this.subset = this.option.subset;
 
@@ -139,7 +143,7 @@ export class UpdateManager extends ServiceEngine {
     // サブセットの定義を取得する
     const seList = node.searchServiceEngine("DatabaseRegistry", { database: this.database });
     if (seList.length !== 1) {
-      return Promise.reject(new DadgetError(ERROR.E2501, ["DatabaseRegistry is missing, or there are multiple ones."]));
+      throw new DadgetError(ERROR.E2501, ["DatabaseRegistry is missing, or there are multiple ones."]);
     }
     const registry = seList[0] as DatabaseRegistry;
     this.subsetDefinition = registry.getMetadata().subsets[this.subset];

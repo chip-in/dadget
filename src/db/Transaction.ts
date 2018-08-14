@@ -8,7 +8,6 @@ export const enum TransactionType {
   DELETE = "delete",
   NONE = "none",
   ROLLBACK = "rollback",
-  CHECKPOINT = "checkpoint", // TODO 対応
 }
 
 /**
@@ -340,7 +339,7 @@ export class TransactionObject extends TransactionRequest {
   digest?: string;
 
   /**
-   * 保護CSN(checkpointの場合のみ)
+   * 保護CSN
    */
   protectedCsn?: number;
 }

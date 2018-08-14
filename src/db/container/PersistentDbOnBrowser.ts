@@ -1,11 +1,9 @@
 import * as parser from "mongo-parse";
 import * as hash from "object-hash";
 import { v1 as uuidv1 } from "uuid";
-import { ERROR } from "../Errors";
-import { DadgetError } from "../util/DadgetError";
-import { Util } from "../util/Util";
+import { Util } from "../../util/Util";
+import { TransactionRequest } from "../Transaction";
 import { IDb } from "./IDb";
-import { TransactionRequest } from "./Transaction";
 
 const OBJECT_STORE_NAME = "data";
 const userAgent = window.navigator.userAgent;
@@ -172,10 +170,10 @@ export class PersistentDb implements IDb {
         }
       };
       request.onerror = (event) => {
-        reject("request error: " + request.error);
+        reject("findOne request error: " + request.error);
       };
       transaction.onerror = (event) => {
-        reject("transaction error: " + transaction.error);
+        reject("findOne transaction error: " + transaction.error);
       };
     });
   }
@@ -199,13 +197,13 @@ export class PersistentDb implements IDb {
         }
       };
       request.onerror = (event) => {
-        reject("request error: " + request.error);
+        reject("findByRange request error: " + request.error);
       };
       transaction.oncomplete = (event) => {
         resolve(dataList);
       };
       transaction.onerror = (event) => {
-        reject("transaction error: " + transaction.error);
+        reject("findByRange transaction error: " + transaction.error);
       };
     });
   }
@@ -251,11 +249,11 @@ export class PersistentDb implements IDb {
           }
         };
         request.onerror = (event) => {
-          reject("request error: " + request.error);
+          reject("findOneBySort request error: " + request.error);
         };
       }
       transaction.onerror = (event) => {
-        reject("transaction error: " + transaction.error);
+        reject("findOneBySort transaction error: " + transaction.error);
       };
     });
   }
@@ -287,7 +285,7 @@ export class PersistentDb implements IDb {
         }
       };
       request.onerror = (event) => {
-        reject("request error: " + request.error);
+        reject("find request error: " + request.error);
       };
       transaction.oncomplete = (event) => {
         let list = indexName ? dataList : Util.mongoSearch(dataList, query, sort) as object[];
@@ -306,7 +304,7 @@ export class PersistentDb implements IDb {
         resolve(list);
       };
       transaction.onerror = (event) => {
-        reject("transaction error: " + transaction.error);
+        reject("find transaction error: " + transaction.error);
       };
     });
   }
@@ -324,7 +322,7 @@ export class PersistentDb implements IDb {
         resolve();
       };
       transaction.onerror = (event) => {
-        reject("transaction error: " + transaction.error);
+        reject("insertOne transaction error: " + transaction.error);
       };
     });
   }
@@ -341,7 +339,7 @@ export class PersistentDb implements IDb {
         resolve();
       };
       transaction.onerror = (event) => {
-        reject("transaction error: " + transaction.error);
+        reject("insertMany transaction error: " + transaction.error);
       };
     });
   }
@@ -361,13 +359,13 @@ export class PersistentDb implements IDb {
         transaction.objectStore(OBJECT_STORE_NAME).put(obj);
       };
       request.onerror = (event) => {
-        reject("request error: " + request.error);
+        reject("increment request error: " + request.error);
       };
       transaction.oncomplete = (event) => {
         resolve(val);
       };
       transaction.onerror = (event) => {
-        reject("transaction error: " + transaction.error);
+        reject("increment transaction error: " + transaction.error);
       };
     });
   }
@@ -385,13 +383,13 @@ export class PersistentDb implements IDb {
         transaction.objectStore(OBJECT_STORE_NAME).put(newObj);
       };
       request.onerror = (event) => {
-        reject("request error: " + request.error);
+        reject("updateOneById request error: " + request.error);
       };
       transaction.oncomplete = (event) => {
         resolve();
       };
       transaction.onerror = (event) => {
-        reject("transaction error: " + transaction.error);
+        reject("updateOneById transaction error: " + transaction.error);
       };
     });
   }
@@ -421,13 +419,13 @@ export class PersistentDb implements IDb {
         }
       };
       request.onerror = (event) => {
-        reject("request error: " + request.error);
+        reject("updateOne request error: " + request.error);
       };
       transaction.oncomplete = (event) => {
         resolve();
       };
       transaction.onerror = (event) => {
-        reject("transaction error: " + transaction.error);
+        reject("updateOne transaction error: " + transaction.error);
       };
     });
   }
@@ -435,12 +433,13 @@ export class PersistentDb implements IDb {
   replaceOneById(id: string, doc: object): Promise<void> {
     return new Promise((resolve, reject) => {
       const transaction = this.db.transaction(OBJECT_STORE_NAME, "readwrite");
+      (doc as any)._id = id;
       transaction.objectStore(OBJECT_STORE_NAME).put(doc);
       transaction.oncomplete = (event) => {
         resolve();
       };
       transaction.onerror = (event) => {
-        reject("transaction error: " + transaction.error);
+        reject("replaceOneById transaction error: " + transaction.error);
       };
     });
   }
@@ -453,7 +452,7 @@ export class PersistentDb implements IDb {
         resolve();
       };
       transaction.onerror = (event) => {
-        reject("transaction error: " + transaction.error);
+        reject("deleteOneById transaction error: " + transaction.error);
       };
     });
   }
@@ -466,7 +465,7 @@ export class PersistentDb implements IDb {
         resolve();
       };
       transaction.onerror = (event) => {
-        reject("transaction error: " + transaction.error);
+        reject("deleteAll transaction error: " + transaction.error);
       };
     });
   }

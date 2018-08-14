@@ -4,19 +4,20 @@ import { diff } from "deep-diff";
 import * as http from "http";
 import * as URL from "url";
 import { CORE_NODE } from "../Config";
-import { CsnDb } from "../db/CsnDb";
+import { PersistentDb } from "../db/container/PersistentDb";
 import { JournalDb } from "../db/JournalDb";
-import { PersistentDb } from "../db/PersistentDb";
+import { SystemDb } from "../db/SystemDb";
 import { TransactionObject, TransactionRequest, TransactionType } from "../db/Transaction";
 import { ERROR } from "../Errors";
 import { DadgetError } from "../util/DadgetError";
 import * as EJSON from "../util/Ejson";
 import { ProxyHelper } from "../util/ProxyHelper";
+import { Util } from "../util/Util";
 
-const KEEP_TIME_AFTER_CONTEXT_MANAGER_MASTER_ACQUIRED = 3000; // 3000ms
-const KEEP_TIME_AFTER_SENDING_ROLLBACK = 1000; // 1000ms
-const CHECK_POINT_CHECK_PERIOD = 10 * 60 * 1000;
-const CHECK_POINT_DELETE_PERIOD = 72 * 60 * 60 * 1000;
+const KEEP_TIME_AFTER_CONTEXT_MANAGER_MASTER_ACQUIRED_MS = 3000; // 3000ms
+const KEEP_TIME_AFTER_SENDING_ROLLBACK_MS = 1000; // 1000ms
+const CHECK_POINT_CHECK_PERIOD_MS = 10 * 60 * 1000;  // 10 minutes
+const CHECK_POINT_DELETE_PERIOD_MS = 72 * 60 * 60 * 1000; // 72 hours
 
 /**
  * コンテキストマネージャコンフィグレーションパラメータ
@@ -31,11 +32,7 @@ export class ContextManagerConfigDef {
 
 class TransactionJournalSubscriber extends Subscriber {
 
-  constructor(
-    protected context: ContextManager,
-    protected journalDb: JournalDb,
-    protected csnDb: CsnDb) {
-
+  constructor(protected context: ContextManager) {
     super();
     this.logger.category = "TransJournalSubscriber";
     this.logger.debug("TransactionJournalSubscriber is created");
@@ -45,59 +42,118 @@ class TransactionJournalSubscriber extends Subscriber {
     console.log("TransactionJournalSubscriber onReceive:", msg.toString());
     const transaction: TransactionObject = EJSON.parse(msg);
     this.logger.info("received:", transaction.type, transaction.csn);
-    this.context.getLock().acquire("transaction", () => {
-      if (transaction.type === TransactionType.CHECKPOINT) {
-        this.logger.info("CHECKPOINT protectedCsn: " + transaction.protectedCsn);
-        // TODO 実装
-        return;
+
+    if (transaction.protectedCsn) {
+      const protectedCsn = transaction.protectedCsn;
+      if (this.context.getJournalDb().getProtectedCsn() < protectedCsn) {
+        this.logger.info("CHECKPOINT protectedCsn: " + protectedCsn);
+        this.context.getJournalDb().setProtectedCsn(protectedCsn);
+        setTimeout(() => {
+          this.context.getJournalDb().deleteBeforeCsn(protectedCsn)
+            .catch((err) => {
+              this.logger.error(err.toString());
+            });
+        });
       }
+    }
+
+    this.context.getLock().acquire("transaction", () => {
       if (transaction.type === TransactionType.ROLLBACK) {
         this.logger.warn("ROLLBACK:", transaction.csn);
-        return this.csnDb.update(transaction.csn)
-          .then(() => {
-            if (!transaction.digest) {
-              return this.journalDb.deleteAll();
-            }
-            return this.journalDb.findByCsn(transaction.csn)
-              .then((tr) => {
-                if (!tr || tr.digest !== transaction.digest) {
-                  // TODO ContextManagerのJournalは不足分を確認してチェックポイントまで取得
-                  return this.journalDb.deleteAll();
+        return this.context.getJournalDb().findByCsn(transaction.csn)
+          .then((tr) => {
+            return this.context.getJournalDb().deleteAfterCsn(transaction.csn)
+              .then(() => {
+                if (tr && tr.digest === transaction.digest) {
+                  return this.context.getSystemDb().updateCsn(transaction.csn);
                 } else {
-                  return this.journalDb.deleteAfter(transaction.csn);
+                  return this.adjustData(transaction.csn);
                 }
               });
+          })
+          .catch((err) => {
+            this.logger.error(err.toString());
+          });
+      } else {
+        // Assume this node is a slave.
+        return this.context.getSystemDb().getCsn()
+          .then((csn) => {
+            if (csn < transaction.csn - 1) {
+              this.logger.info("forward csn:", transaction.csn - 1);
+              return this.adjustData(transaction.csn - 1);
+            }
+          })
+          .then(() => {
+            return Promise.all([this.context.getJournalDb().findByCsn(transaction.csn),
+            this.context.getJournalDb().findByCsn(transaction.csn - 1)]);
+          })
+          .then(([savedTransaction, preTransaction]) => {
+            if (!savedTransaction) {
+              if (preTransaction && preTransaction.digest === transaction.beforeDigest) {
+                this.logger.info("insert transaction:", transaction.csn);
+                return this.context.getJournalDb().insert(transaction)
+                  .then(() => this.context.getSystemDb().updateCsn(transaction.csn));
+              } else {
+                this.logger.warn("beforeDigest mismatch:", transaction.csn);
+                return this.adjustData(transaction.csn);
+              }
+            } else {
+              if (savedTransaction.digest !== transaction.digest) {
+                this.logger.warn("digest mismatch:", transaction.csn);
+                return this.adjustData(transaction.csn);
+              }
+            }
+          })
+          .catch((err) => {
+            this.logger.error(err.toString());
           });
       }
-      // Assume this node is a slave.
-      return this.csnDb.getCurrentCsn()
-        .then((csn) => {
-          if (csn < transaction.csn) {
-            this.logger.info("forward csn:", transaction.csn);
-            // TODO 不足分取得
-            return this.csnDb.update(transaction.csn);
-          }
-        })
-        .then(() => {
-          return this.journalDb.findByCsn(transaction.csn);
-        })
-        .then((savedTransaction) => {
-          if (!savedTransaction) {
-            this.logger.info("insert transaction:", transaction.csn);
-            return this.journalDb.insert(transaction);
-          } else {
-            if (savedTransaction.digest !== transaction.digest) {
-              // ダイジェストが異なる場合は更新して、それ以降でtimeがこのトランザクション以前のジャーナルを削除
-              // TODO チェックポイントまで確認
-              this.logger.warn("updateAndDeleteAfter:", transaction.csn);
-              return this.journalDb.updateAndDeleteAfter(transaction);
-            }
-          }
-        })
-        .catch((err) => {
-          this.logger.error(err.toString());
-        });
     });
+  }
+
+  fetchJournal(csn: number): Promise<TransactionObject | null> {
+    return Util.fetchJournal(csn, this.context.getDatabase(), this.context.getNode());
+  }
+
+  adjustData(csn: number): Promise<any> {
+    this.logger.warn("adjustData:" + csn);
+    let csnUpdated = false;
+    const loopData = { csn };
+    return Util.promiseWhile<{ csn: number }>(
+      loopData,
+      (loopData) => {
+        return loopData.csn !== 0;
+      },
+      (loopData) => {
+        return this.context.getJournalDb().findByCsn(loopData.csn)
+          .then((journal) => {
+            return this.fetchJournal(loopData.csn)
+              .then((fetchJournal) => {
+                if (!fetchJournal) { return { ...loopData, csn: 0 }; }
+                let promise = Promise.resolve();
+                if (!csnUpdated) {
+                  promise = promise.then(() => this.context.getSystemDb().updateCsn(csn));
+                  csnUpdated = true;
+                }
+                return promise.then(() => {
+                  if (!journal) {
+                    return this.context.getJournalDb().insert(fetchJournal)
+                      .then(() => ({ ...loopData, csn: loopData.csn - 1 }));
+                  }
+                  if (fetchJournal.digest === journal.digest) {
+                    return { ...loopData, csn: 0 };
+                  } else {
+                    return this.context.getJournalDb().replace(journal, fetchJournal)
+                      .then(() => ({ ...loopData, csn: loopData.csn - 1 }));
+                  }
+                });
+              });
+          });
+      },
+    )
+      .catch((err) => {
+        this.logger.error(err.toString());
+      });
   }
 }
 
@@ -105,11 +161,7 @@ class ContextManagementServer extends Proxy {
   private lastBeforeObj: { _id?: string, csn?: number };
   private lastCheckPointTime: number = 0;
 
-  constructor(
-    protected context: ContextManager,
-    protected journalDb: JournalDb,
-    protected csnDb: CsnDb) {
-
+  constructor(protected context: ContextManager) {
     super();
     this.logger.category = "ContextManagementServer";
     this.logger.debug("ContextManagementServer is created");
@@ -124,17 +176,17 @@ class ContextManagementServer extends Proxy {
     this.logger.debug(method, url.pathname);
     if (method === "OPTIONS") {
       return ProxyHelper.procOption(req, res);
-    } else if (url.pathname.endsWith("/exec") && method === "POST") {
+    } else if (url.pathname.endsWith(CORE_NODE.PATH_EXEC) && method === "POST") {
       return ProxyHelper.procPost(req, res, (data) => {
         this.logger.debug("/exec");
         const request = EJSON.parse(data);
         return this.exec(request.csn, request.request);
       });
-    } else if (url.pathname.endsWith("/journal") && method === "POST") {
+    } else if (url.pathname.endsWith(CORE_NODE.PATH_GET_TRANSACTION) && method === "POST") {
       return ProxyHelper.procPost(req, res, (data) => {
-        this.logger.debug("/journal");
+        this.logger.debug("/getTransactionJournal");
         const request = EJSON.parse(data);
-        return this.getJournal(request.csn);
+        return this.getTransactionJournal(request.csn);
       });
     } else {
       this.logger.warn("server command not found!:", method, url.pathname);
@@ -144,9 +196,6 @@ class ContextManagementServer extends Proxy {
 
   exec(postulatedCsn: number, request: TransactionRequest): Promise<object> {
     this.logger.info("exec csn:", postulatedCsn);
-    let transaction: TransactionObject;
-    let newCsn: number;
-    let updateObject: { _id?: string, csn?: number };
 
     let err: string | null = null;
     if (!request.target) {
@@ -174,6 +223,9 @@ class ContextManagementServer extends Proxy {
       });
     }
 
+    let transaction: TransactionObject;
+    let newCsn: number;
+    let updateObject: { _id?: string, csn?: number };
     return new Promise((resolve, reject) => {
       this.context.getLock().acquire("master", () => {
         return this.context.getLock().acquire("transaction", () => {
@@ -188,58 +240,30 @@ class ContextManagementServer extends Proxy {
               this.logger.debug("lastBeforeObj check passed");
             }
           }
-          return this.journalDb.checkConsistent(postulatedCsn, _request)
-            .then(() => this.csnDb.getCurrentCsn())
+          return this.context.getJournalDb().checkConsistent(postulatedCsn, _request)
+            .then(() => this.context.getSystemDb().getCsn())
             .then((currentCsn) => this.context.checkUniqueConstraint(currentCsn, _request))
             .then((_) => {
               updateObject = _;
-              return Promise.all([this.csnDb.increment(), this.journalDb.getLastDigest()])
+              return Promise.all([this.context.getSystemDb().incrementCsn(), this.context.getJournalDb().getLastDigest()])
                 .then((values) => {
                   newCsn = values[0];
                   this.logger.info("exec newCsn:", newCsn);
                   const lastDigest = values[1];
                   transaction = Object.assign({
-                    csn: newCsn
-                    , beforeDigest: lastDigest,
+                    csn: newCsn,
+                    beforeDigest: lastDigest,
+                    protectedCsn: this.context.getJournalDb().getProtectedCsn(),
                   }, _request);
                   transaction.digest = TransactionObject.calcDigest(transaction);
-                  return this.journalDb.insert(transaction);
+                  return this.context.getJournalDb().insert(transaction);
                 });
             }).then(() => {
               return this.context.getNode().publish(
                 CORE_NODE.PATH_TRANSACTION.replace(/:database\b/g, this.context.getDatabase())
                 , EJSON.stringify(transaction));
             }).then(() => {
-              if (Date.now() - this.lastCheckPointTime > CHECK_POINT_CHECK_PERIOD) {
-                this.lastCheckPointTime = Date.now();
-                setTimeout(() => {
-                  const time = new Date();
-                  time.setMilliseconds(-CHECK_POINT_DELETE_PERIOD);
-                  this.journalDb.getBeforeCheckPointTime(time)
-                    .then((journal) => {
-                      if (!journal) { return; }
-                      return this.journalDb.getOneAfterCsn(journal.csn)
-                        .then((protectedCsnJournal) => {
-                          if (protectedCsnJournal) {
-                            return protectedCsnJournal.csn;
-                          } else {
-                            return this.csnDb.getCurrentCsn();
-                          }
-                        })
-                        .then((csn) => {
-                          const checkPointTransaction = new TransactionObject();
-                          checkPointTransaction.type = TransactionType.CHECKPOINT;
-                          checkPointTransaction.csn = newCsn;
-                          checkPointTransaction.protectedCsn = csn;
-                          checkPointTransaction.digest = transaction.digest;
-                          checkPointTransaction.beforeDigest = transaction.beforeDigest;
-                          return this.context.getNode().publish(
-                            CORE_NODE.PATH_TRANSACTION.replace(/:database\b/g, this.context.getDatabase())
-                            , EJSON.stringify(checkPointTransaction));
-                        });
-                    });
-                }, 0);
-              }
+              return this.checkProtectedCsn();
             });
         }).then(() => {
           if (!updateObject._id) { updateObject._id = transaction.target; }
@@ -254,6 +278,7 @@ class ContextManagementServer extends Proxy {
           let cause = reason instanceof DadgetError ? reason : new DadgetError(ERROR.E2003, [reason]);
           if (cause.code === ERROR.E1105.code) { cause = new DadgetError(ERROR.E2004, [cause]); }
           cause.convertInsertsToString();
+          this.logger.warn(cause.toString());
           resolve({
             status: "NG",
             reason: cause,
@@ -263,8 +288,37 @@ class ContextManagementServer extends Proxy {
     });
   }
 
-  getJournal(csn: number): Promise<object> {
-    return this.journalDb.findByCsn(csn)
+  private checkProtectedCsn(): void {
+    if (Date.now() - this.lastCheckPointTime <= CHECK_POINT_CHECK_PERIOD_MS) { return; }
+    this.lastCheckPointTime = Date.now();
+    setTimeout(() => {
+      const time = new Date();
+      time.setMilliseconds(-CHECK_POINT_DELETE_PERIOD_MS);
+      this.context.getJournalDb().getBeforeCheckPointTime(time)
+        .then((journal) => {
+          const deletableLastCsn = journal ? journal.csn : 0;
+          return this.context.getJournalDb().getOneAfterCsn(deletableLastCsn)
+            .then((protectedCsnJournal) => {
+              if (protectedCsnJournal) {
+                return protectedCsnJournal.csn;
+              } else {
+                return this.context.getSystemDb().getCsn();
+              }
+            });
+        })
+        .then((protectedCsn) => {
+          this.logger.info("CHECKPOINT protectedCsn: " + protectedCsn);
+          this.context.getJournalDb().setProtectedCsn(protectedCsn);
+          this.context.getJournalDb().deleteBeforeCsn(protectedCsn)
+            .catch((err) => {
+              this.logger.error(err.toString());
+            });
+        });
+    }, 0);
+  }
+
+  getTransactionJournal(csn: number): Promise<object> {
+    return this.context.getJournalDb().findByCsn(csn)
       .then((journal) => {
         if (journal) {
           delete (journal as any)._id;
@@ -293,7 +347,7 @@ export class ContextManager extends ServiceEngine {
   private node: ResourceNode;
   private database: string;
   private journalDb: JournalDb;
-  private csnDb: CsnDb;
+  private systemDb: SystemDb;
   private subscriber: TransactionJournalSubscriber;
   private server: ContextManagementServer;
   private mountHandle?: string;
@@ -315,6 +369,14 @@ export class ContextManager extends ServiceEngine {
     return this.database;
   }
 
+  getJournalDb(): JournalDb {
+    return this.journalDb;
+  }
+
+  getSystemDb(): SystemDb {
+    return this.systemDb;
+  }
+
   getLock(): AsyncLock {
     return this.lock;
   }
@@ -328,24 +390,27 @@ export class ContextManager extends ServiceEngine {
     this.logger.debug("ContextManager is starting");
 
     if (!this.option.database) {
-      return Promise.reject(new DadgetError(ERROR.E2001, ["Database name is missing."]));
+      throw new DadgetError(ERROR.E2001, ["Database name is missing."]);
+    }
+    if (this.option.database.match(/--/)) {
+      throw new DadgetError(ERROR.E2001, ["Database name can not contain '--'."]);
     }
     this.database = this.option.database;
 
     // ストレージを準備
     this.journalDb = new JournalDb(new PersistentDb(this.database));
-    this.csnDb = new CsnDb(new PersistentDb(this.database));
-    let promise = Promise.all([this.journalDb.start(), this.csnDb.start()]).then((_) => { });
+    this.systemDb = new SystemDb(new PersistentDb(this.database));
+    let promise = Promise.all([this.journalDb.start(), this.systemDb.start()]).then((_) => { });
 
     // スレーブ動作で同期するのためのサブスクライバを登録
-    this.subscriber = new TransactionJournalSubscriber(this, this.journalDb, this.csnDb);
+    this.subscriber = new TransactionJournalSubscriber(this);
     promise = promise.then(() => {
       return node.subscribe(CORE_NODE.PATH_TRANSACTION.replace(/:database\b/g, this.database), this.subscriber)
         .then((key) => { this.subscriberKey = key; });
     });
     promise = promise.then(() => {
       // コンテキストマネージャのRestサービスを登録
-      this.server = new ContextManagementServer(this, this.journalDb, this.csnDb);
+      this.server = new ContextManagementServer(this);
       this.connect();
     });
 
@@ -389,10 +454,10 @@ export class ContextManager extends ServiceEngine {
     this.mountHandle = mountHandle;
     this.getLock().acquire("master", () => {
       return new Promise<void>((resolve) => {
-        setTimeout(resolve, KEEP_TIME_AFTER_CONTEXT_MANAGER_MASTER_ACQUIRED);
+        setTimeout(resolve, KEEP_TIME_AFTER_CONTEXT_MANAGER_MASTER_ACQUIRED_MS);
       })
         .then(() => {
-          return this.csnDb.getCurrentCsn()
+          return this.systemDb.getCsn()
             .then((csn) => {
               return this.journalDb.findByCsn(csn)
                 .then((tr) => {
@@ -410,9 +475,13 @@ export class ContextManager extends ServiceEngine {
             })
             .then(() => {
               return new Promise<void>((resolve) => {
-                setTimeout(resolve, KEEP_TIME_AFTER_SENDING_ROLLBACK);
+                setTimeout(resolve, KEEP_TIME_AFTER_SENDING_ROLLBACK_MS);
               });
             });
+        })
+        .catch((err) => {
+          this.logger.error(err.toString());
+          throw err;
         });
     });
   }

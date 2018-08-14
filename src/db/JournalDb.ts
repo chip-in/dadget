@@ -1,12 +1,11 @@
 import * as EJSON from "../util/Ejson";
 
-import { Logger } from "@chip-in/resource-node";
 import { TransactionObject, TransactionRequest, TransactionType } from "../db/Transaction";
 import { ERROR } from "../Errors";
 import { DadgetError } from "../util/DadgetError";
-import { IDb } from "./IDb";
+import { IDb } from "./container/IDb";
 
-const JOURNAL_COLLECTION = "__journal__";
+const JOURNAL_COLLECTION = "journal";
 
 export class JournalDb {
   private protectedCsn: number = 0;
@@ -14,6 +13,14 @@ export class JournalDb {
   constructor(private db: IDb) {
     db.setCollection(JOURNAL_COLLECTION);
     console.log("JournalDb is created");
+  }
+
+  getProtectedCsn() {
+    return this.protectedCsn;
+  }
+
+  setProtectedCsn(protectedCsn: number) {
+    this.protectedCsn = protectedCsn;
   }
 
   start(): Promise<void> {
@@ -36,12 +43,11 @@ export class JournalDb {
   }
 
   checkConsistent(postulatedCsn: number, request: TransactionRequest): Promise<void> {
+    if (postulatedCsn && postulatedCsn < this.protectedCsn) {
+      throw new DadgetError(ERROR.E1113, [postulatedCsn, this.protectedCsn]);
+    }
     return this.db.findOneBySort({ target: request.target }, { csn: -1 })
       .then((result) => {
-        if (postulatedCsn && postulatedCsn < this.protectedCsn) {
-          throw new DadgetError(ERROR.E1113, [postulatedCsn, this.protectedCsn]);
-        }
-        // TODO TEST チェックポイント以前は見つからなくても問題ない
         console.log("checkConsistent", JSON.stringify(result));
         if (request.type === TransactionType.INSERT && request.new) {
           if (!result || result.type === TransactionType.DELETE) { return; }
@@ -72,6 +78,19 @@ export class JournalDb {
         }
       })
       .catch((err) => Promise.reject(new DadgetError(ERROR.E1107, [err.toString()])));
+  }
+
+  getLastJournal(): Promise<TransactionObject> {
+    return this.db.findOneBySort({}, { csn: -1 })
+      .then((result) => {
+        console.log("getLastJournal", JSON.stringify(result));
+        if (result) {
+          return result;
+        } else {
+          throw new DadgetError(ERROR.E1116, ["last journal not found"]);
+        }
+      })
+      .catch((err) => Promise.reject(new DadgetError(ERROR.E1116, [err.toString()])));
   }
 
   static serializeTrans(transaction: TransactionObject): object {
@@ -120,9 +139,23 @@ export class JournalDb {
       .catch((err) => Promise.reject(new DadgetError(ERROR.E1110, [err.toString()])));
   }
 
-  deleteAfter(csn: number): Promise<void> {
-    console.log("deleteAfter:", csn);
+  deleteAfterCsn(csn: number): Promise<void> {
+    console.log("deleteAfterCsn:", csn);
     return this.findByCsnRange(csn + 1, Number.MAX_VALUE)
+      .then((transactions) => {
+        let promise = Promise.resolve();
+        for (const transaction of transactions) {
+          promise = promise.then(() => this.db.deleteOneById((transaction as any)._id));
+        }
+        return promise;
+      })
+      .catch((err) => Promise.reject(new DadgetError(ERROR.E1112, [err.toString()])));
+  }
+
+  deleteBeforeCsn(csn: number): Promise<void> {
+    console.log("deleteBeforeCsn:", csn);
+    if (!csn || csn <= 1) { return Promise.resolve(); }
+    return this.findByCsnRange(1, csn - 1)
       .then((transactions) => {
         let promise = Promise.resolve();
         for (const transaction of transactions) {
@@ -139,26 +172,29 @@ export class JournalDb {
       .catch((err) => Promise.reject(new DadgetError(ERROR.E1112, [err.toString()])));
   }
 
-  updateAndDeleteAfter(transaction: TransactionObject): Promise<void> {
-    console.log("updateAndDeleteAfter:", JSON.stringify(transaction));
-    return this.deleteAfter(transaction.csn)
-      .then(() => this.db.updateOne({ csn: transaction.csn }, JournalDb.serializeTrans(transaction)))
-      .catch((err) => Promise.reject(new DadgetError(ERROR.E1111, [err.toString()])));
+  replace(oldTransaction: TransactionObject, newTransaction: TransactionObject): Promise<void> {
+    console.log("replace:", (oldTransaction as any)._id, JSON.stringify(newTransaction));
+    return this.db.replaceOneById((oldTransaction as any)._id, JournalDb.serializeTrans(newTransaction))
+      .catch((err) => Promise.reject(new DadgetError(ERROR.E1117, [err.toString()])));
   }
 
-  getBeforeCheckPointTime(time: Date): Promise<TransactionObject> {
+  getBeforeCheckPointTime(time: Date): Promise<TransactionObject | null> {
+    console.log("getBeforeCheckPointTime:", time);
     return this.db.findOneBySort({ datetime: { $lt: time } }, { csn: -1 })
       .then((result) => {
-        console.log("getBeforeCheckPointTime", JSON.stringify(result));
+        if (!result) { return null; }
+        console.log("getBeforeCheckPointTime:", JSON.stringify(result));
         return JournalDb.deserializeTrans(result);
       })
       .catch((err) => Promise.reject(new DadgetError(ERROR.E1114, [err.toString()])));
   }
 
-  getOneAfterCsn(csn: number): Promise<TransactionObject> {
+  getOneAfterCsn(csn: number): Promise<TransactionObject | null> {
+    console.log("getOneAfterCsn:", csn);
     return this.db.findOneBySort({ csn: { $gt: csn } }, { csn: 1 })
       .then((result) => {
-        console.log("getOneAfterCsn", JSON.stringify(result));
+        if (!result) { return null; }
+        console.log("getOneAfterCsn:", JSON.stringify(result));
         return JournalDb.deserializeTrans(result);
       })
       .catch((err) => Promise.reject(new DadgetError(ERROR.E1115, [err.toString()])));

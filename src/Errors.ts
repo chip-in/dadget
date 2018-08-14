@@ -1,24 +1,39 @@
 export const ERROR = {
 
   /**
-   * CsnDB failed to start.
+   * SystemDb failed to start.
    */
-  E1001: { code: 1001, message: "CsnDB failed to start. cause=%1" },
+  E1001: { code: 1001, message: "SystemDb failed to start. cause=%1" },
 
   /**
-   * CsnDB failed to increment.
+   * SystemDb failed to increment the value of csn.
    */
-  E1002: { code: 1002, message: "CsnDB failed to increment. cause=%1" },
+  E1002: { code: 1002, message: "SystemDb failed to increment the value of csn. cause=%1" },
 
   /**
-   * CsnDB failed to get current value.
+   * SystemDb failed to get current the value of csn.
    */
-  E1003: { code: 1003, message: "CsnDB failed to get current value. cause=%1" },
+  E1003: { code: 1003, message: "SystemDb failed to get current the value of csn. cause=%1" },
 
   /**
-   * CsnDB failed to update csn.
+   * SystemDb failed to update the value of csn.
    */
-  E1004: { code: 1004, message: "CsnDB failed to update csn. cause=%1" },
+  E1004: { code: 1004, message: "SystemDb failed to update the value of csn. cause=%1" },
+
+  /**
+   * SystemDb failed to check the hash value of the subset query.
+   */
+  E1005: { code: 1005, message: "SystemDb failed to check the hash value of the subset query. cause=%1" },
+
+  /**
+   * SystemDb failed to update the hash value of the subset query.
+   */
+  E1006: { code: 1006, message: "SystemDb failed to update the hash value of the subset query. cause=%1" },
+
+  /**
+   * SystemDb failed to prepare the value of csn.
+   */
+  E1007: { code: 1007, message: "SystemDb failed to prepare the value of csn. cause=%1" },
 
   /**
    * JournalDB failed to start.
@@ -26,29 +41,29 @@ export const ERROR = {
   E1101: { code: 1101, message: "JournalDB failed to start. cause=%1" },
 
   /**
-   * checkConsistent error: already exists
+   * Consistent Error: already exists
    */
-  E1102: { code: 1102, message: "checkConsistent error: already exists. target=%1" },
+  E1102: { code: 1102, message: "Consistent Error: already exists. target=%1" },
 
   /**
-   * checkConsistent error: Not found
+   * Consistent Error: Not found
    */
-  E1103: { code: 1103, message: "checkConsistent error: Not found" },
+  E1103: { code: 1103, message: "Consistent Error: Not found" },
 
   /**
-   * checkConsistent error: The object has already been deleted
+   * Consistent Error: The object has already been deleted
    */
-  E1104: { code: 1104, message: "checkConsistent error: The object has already been deleted" },
+  E1104: { code: 1104, message: "Consistent Error: The object has already been deleted" },
 
   /**
-   * checkConsistent error: The csn is old. Update the data.
+   * Consistent Error: The csn is old. Update the data.
    */
-  E1105: { code: 1105, message: "checkConsistent error: The csn is old. Update the data. object.csn=%1, before.csn=%2" },
+  E1105: { code: 1105, message: "Consistent Error: The csn is old. Update the data. object.csn=%1, before.csn=%2" },
 
   /**
-   * checkConsistent error: "before" data is required
+   * Consistent Error: "before" data is required
    */
-  E1106: { code: 1106, message: 'checkConsistent error: "before" data is required' },
+  E1106: { code: 1106, message: 'Consistent Error: "before" data is required' },
 
   /**
    * JournalDB failed to get a last digest.
@@ -71,19 +86,14 @@ export const ERROR = {
   E1110: { code: 1110, message: "JournalDB failed to do find by csn. cause=%1" },
 
   /**
-   * JournalDB failed to rebase journals.
-   */
-  E1111: { code: 1111, message: "JournalDB failed to rebase journals. cause=%1" },
-
-  /**
    * JournalDB failed to delete journals.
    */
   E1112: { code: 1112, message: "JournalDB failed to delete journals. cause=%1" },
 
   /**
-   * checkConsistent error: The csn is old. Update the data.
+   * Consistent Error: The csn is old. Update the data.
    */
-  E1113: { code: 1113, message: "checkConsistent error: The csn is old. Update the data. postulateCsn=%1, protectedCsn=%2" },
+  E1113: { code: 1113, message: "Consistent Error: The csn is old. Update the data. postulateCsn=%1, protectedCsn=%2" },
 
   /**
    * JournalDB failed to get a check point journal.
@@ -94,6 +104,16 @@ export const ERROR = {
    * JournalDB failed to get a check point journal.
    */
   E1115: { code: 1115, message: "JournalDB failed to get a check point journal. cause=%1" },
+
+  /**
+   * JournalDB failed to get a last journal.
+   */
+  E1116: { code: 1116, message: "JournalDB failed to get a last journal. cause=%1" },
+
+  /**
+   * JournalDB failed to replace a journal.
+   */
+  E1117: { code: 1117, message: "JournalDB failed to replace a journal. cause=%1" },
 
   /**
    * SubsetDb failed to start.
@@ -189,6 +209,11 @@ export const ERROR = {
    * SubsetStorage Config Error
    */
   E2401: { code: 2401, message: "SubsetStorage Config Error: %1" },
+
+  /**
+   * Query before protected csn Error
+   */
+  E2402: { code: 2402, message: "not a supported query before protected csn: csn=%1, protectedCsn=%2" },
 
   /**
    * UpdateManager Config Error

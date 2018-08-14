@@ -84,8 +84,14 @@ export class DatabaseRegistry extends ServiceEngine {
   start(node: ResourceNode): Promise<void> {
     this.node = node;
     this.logger.debug("DatabaseRegistry is starting");
+    if (!this.option.database) {
+      throw new DadgetError(ERROR.E2201, ["Database name is missing."]);
+    }
+    if (this.option.database.match(/--/)) {
+      throw new DadgetError(ERROR.E2201, ["Database name can not contain '--'."]);
+    }
     if (!this.option.metadata) {
-      return Promise.reject(new DadgetError(ERROR.E2201, ["metadata is missing."]));
+      throw new DadgetError(ERROR.E2201, ["metadata is missing."]);
     }
     this.logger.debug("DatabaseRegistry is started");
     return Promise.resolve();

@@ -1,8 +1,6 @@
-import * as parser from "mongo-parse";
-
-import { Util } from "../util/Util";
+import { Util } from "../../util/Util";
+import { TransactionRequest } from "../Transaction";
 import { IDb } from "./IDb";
-import { TransactionRequest } from "./Transaction";
 
 export class CacheDb implements IDb {
   private static dataMap: { [database: string]: { [collection: string]: { [_id: string]: object } } } = {};

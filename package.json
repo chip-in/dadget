@@ -1,6 +1,6 @@
 {
   "name": "@chip-in/dadget",
-  "version": "0.0.21",
+  "version": "0.0.22",
   "description": "chip-in Dadget",
   "keywords": [
     "chip-in"
@@ -12,7 +12,7 @@
   "main": "./lib/se/Dadget.js",
   "types": "./src/se/Dadget.ts",
   "browser": {
-    "./lib/db/PersistentDb.js": "./lib/db/PersistentDbOnBrowser.js",
+    "./lib/db/container/PersistentDb.js": "./lib/db/container/PersistentDbOnBrowser.js",
     "mongodb": false
   },
   "scripts": {

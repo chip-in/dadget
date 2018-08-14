@@ -3,7 +3,7 @@ import * as hash from "object-hash";
 import { ERROR } from "../Errors";
 import { IndexDef } from "../se/DatabaseRegistry";
 import { DadgetError } from "../util/DadgetError";
-import { IDb } from "./IDb";
+import { IDb } from "./container/IDb";
 
 const SUBSET_COLLECTION = "subset_data";
 

@@ -46,7 +46,7 @@ export class QueryResult {
   resultSet: object[];
 
   /**
-   * 問い合わせに対するオブジェクトを全て列挙できなかった場合に、残った集合に対するクエリ（サブセットのクエリハンドラの場合のみで、クエリルータの返却時は undefined）
+   * 問い合わせに対するオブジェクトを全て列挙できなかった場合に、残った集合に対するクエリ（サブセットのクエリハンドラの場合のみで、APIからの返却時は undefined）
    */
   restQuery: object | undefined;
 
@@ -99,7 +99,10 @@ export default class Dadget extends ServiceEngine {
     this.node = node;
     this.logger.debug("Dadget is starting");
     if (!this.option.database) {
-      return Promise.reject(new DadgetError(ERROR.E2101, ["Database name is missing."]));
+      throw new DadgetError(ERROR.E2101, ["Database name is missing."]);
+    }
+    if (this.option.database.match(/--/)) {
+      throw new DadgetError(ERROR.E2101, ["Database name can not contain '--'."]);
     }
     this.database = this.option.database;
     this.logger.debug("Dadget is started");
@@ -277,7 +280,7 @@ export default class Dadget extends ServiceEngine {
       throw new Error("The TransactionType is not supported.");
     }
     const sendData = { csn, request };
-    return this.node.fetch(CORE_NODE.PATH_CONTEXT.replace(/:database\b/g, this.database) + "/exec", {
+    return this.node.fetch(CORE_NODE.PATH_CONTEXT.replace(/:database\b/g, this.database) + CORE_NODE.PATH_EXEC, {
       method: "POST",
       headers: {
         "Content-Type": "application/json",
@@ -353,7 +356,6 @@ export default class Dadget extends ServiceEngine {
 
         onReceive(transctionJSON: string) {
           const transaction = EJSON.parse(transctionJSON) as TransactionObject;
-          if (transaction.type === TransactionType.CHECKPOINT) { return; }
           this.logger.info("received:", transaction.type, transaction.csn);
           if (transaction.type === TransactionType.ROLLBACK) {
             parent.notifyCsn = transaction.csn;

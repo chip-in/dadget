@@ -1,5 +1,5 @@
 import { Db, MongoClient } from "mongodb";
-import { Mongo } from "../Config";
+import { Mongo } from "../../Config";
 import { IDb } from "./IDb";
 
 export class PersistentDb implements IDb {
@@ -34,6 +34,7 @@ export class PersistentDb implements IDb {
   start(): Promise<void> {
     if (!PersistentDb.dbMap[this.database]) {
       return MongoClient.connect(Mongo.getUrl() + this.database)
+        .then((_) => this.renameOldName(_))
         .then((_) => {
           this.db = _;
           PersistentDb.dbMap[this.database] = _;
@@ -41,8 +42,21 @@ export class PersistentDb implements IDb {
         });
     } else {
       this.db = PersistentDb.dbMap[this.database];
-      return this.createIndexes();
+      return this.renameOldName(this.db)
+        .then(() => this.createIndexes());
     }
+  }
+
+  renameOldName(db: Db): Promise<Db> {
+    const oldName = "__" + this.collection + "__";
+    return db.collection(oldName).count({})
+      .then((count) => {
+        if (count > 0) {
+          return db.renameCollection(oldName, this.collection)
+            .then(() => db);
+        }
+        return db;
+      });
   }
 
   findOne(query: object): Promise<object | null> {
@@ -118,9 +132,13 @@ export class PersistentDb implements IDb {
   }
 
   deleteAll(): Promise<void> {
-    return this.db.collection(this.collection).deleteMany({})
-      .then((result) => {
-        if (!result.result.ok) { throw new Error("failed to delete: " + JSON.stringify(result)); }
+    const newName = this.collection + "-" + new Date().toISOString();
+    return this.db.collection(this.collection).count({})
+      .then((count) => {
+        if (count > 0) {
+          return this.db.renameCollection(this.collection, newName)
+            .then(() => { });
+        }
       });
   }
 

@@ -54,18 +54,25 @@ export class QueryHandler extends ServiceEngine {
     this.logger.debug("QueryHandler is starting");
 
     if (!this.option.database) {
-      return Promise.reject(new DadgetError(ERROR.E2301, ["Database name is missing."]));
+      throw new DadgetError(ERROR.E2301, ["Database name is missing."]);
+    }
+    if (this.option.database.match(/--/)) {
+      throw new DadgetError(ERROR.E2301, ["Database name can not contain '--'."]);
     }
     this.database = this.option.database;
+
     if (!this.option.subset) {
-      return Promise.reject(new DadgetError(ERROR.E2301, ["Subset name is missing."]));
+      throw new DadgetError(ERROR.E2301, ["Subset name is missing."]);
+    }
+    if (this.option.subset.match(/--/)) {
+      throw new DadgetError(ERROR.E2301, ["Subset name can not contain '--'."]);
     }
     this.subsetName = this.option.subset;
 
     // サブセットの定義を取得する
     const seList = node.searchServiceEngine("DatabaseRegistry", { database: this.database });
     if (seList.length !== 1) {
-      return Promise.reject(new DadgetError(ERROR.E2301, ["DatabaseRegistry is missing, or there are multiple ones."]));
+      throw new DadgetError(ERROR.E2301, ["DatabaseRegistry is missing, or there are multiple ones."]);
     }
     const registry = seList[0] as DatabaseRegistry;
     this.subsetDefinition = registry.getMetadata().subsets[this.subsetName];
@@ -82,7 +89,7 @@ export class QueryHandler extends ServiceEngine {
     const request = { csn, query, sort, limit, csnMode };
     return this.node.fetch(CORE_NODE.PATH_SUBSET
       .replace(/:database\b/g, this.database)
-      .replace(/:subset\b/g, this.subsetName) + "/query", {
+      .replace(/:subset\b/g, this.subsetName) + CORE_NODE.PATH_QUERY, {
         method: "POST",
         headers: {
           "Content-Type": "application/json",
@@ -98,6 +105,10 @@ export class QueryHandler extends ServiceEngine {
         if (data.status === "NG") { throw data.reason; }
         if (data.status === "OK") { return data.result; }
         throw new Error("fetch error:" + JSON.stringify(data));
+      })
+      .catch((reason) => {
+        this.logger.warn("query error:" + reason);
+        return { csn, resultSet: [], restQuery: query, csnMode };
       });
   }
 }

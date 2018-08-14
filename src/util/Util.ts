@@ -1,4 +1,9 @@
+import { ResourceNode } from "@chip-in/resource-node";
 import * as parser from "mongo-parse";
+import { CORE_NODE } from "../Config";
+import { TransactionObject } from "../db/Transaction";
+import * as EJSON from "../util/Ejson";
+import { DadgetError } from "./DadgetError";
 
 export class Util {
 
@@ -53,5 +58,33 @@ export class Util {
         return 0;
       }
     }
+  }
+
+  static fetchJournal(csn: number, database: string, node: ResourceNode): Promise<TransactionObject | null> {
+    return node.fetch(CORE_NODE.PATH_CONTEXT.replace(/:database\b/g, database) + CORE_NODE.PATH_GET_TRANSACTION, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+      },
+      body: EJSON.stringify({ csn }),
+    })
+      .then((fetchResult) => {
+        if (typeof fetchResult.ok !== "undefined" && !fetchResult.ok) { throw Error(fetchResult.statusText); }
+        return fetchResult.json();
+      })
+      .then((_) => {
+        const result = EJSON.deserialize(_);
+        console.log("fetchJournal: ", JSON.stringify(result));
+        if (result.status === "OK") {
+          return result.journal as TransactionObject;
+        } else if (result.status === "NG") {
+          return null;
+        } else if (result.reason) {
+          const reason = result.reason as DadgetError;
+          throw new DadgetError({ code: reason.code, message: reason.message }, reason.inserts, reason.ns);
+        } else {
+          throw JSON.stringify(result);
+        }
+      });
   }
 }

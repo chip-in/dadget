@@ -30,4 +30,7 @@ export const CORE_NODE = {
   PATH_CONTEXT: "/d/:database/context",
   PATH_SUBSET_TRANSACTION: "/m/d/:database/subset/:subset/transaction",
   PATH_SUBSET: "/d/:database/subset/:subset",
+  PATH_EXEC: "/exec",
+  PATH_GET_TRANSACTION: "/getTransactionJournal",
+  PATH_QUERY: "/query",
 };
