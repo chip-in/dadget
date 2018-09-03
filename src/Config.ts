@@ -33,4 +33,5 @@ export const CORE_NODE = {
   PATH_EXEC: "/exec",
   PATH_GET_TRANSACTION: "/getTransactionJournal",
   PATH_QUERY: "/query",
+  PATH_COUNT: "/count",
 };

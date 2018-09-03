@@ -17,7 +17,7 @@ import { DadgetError } from "../util/DadgetError";
 import { LogicalOperator } from "../util/LogicalOperator";
 import { ProxyHelper } from "../util/ProxyHelper";
 import { Util } from "../util/Util";
-import { CsnMode, default as Dadget, QueryResult } from "./Dadget";
+import { CountResult, CsnMode, default as Dadget, QueryResult } from "./Dadget";
 import { DatabaseRegistry, SubsetDef } from "./DatabaseRegistry";
 import { UpdateManager } from "./UpdateManager";
 
@@ -511,9 +511,19 @@ export class SubsetStorage extends ServiceEngine implements Proxy {
       return ProxyHelper.procOption(req, res);
     } else if (url.pathname.endsWith(CORE_NODE.PATH_QUERY) && method === "POST") {
       return ProxyHelper.procPost(req, res, (data) => {
-        this.logger.debug("/query");
+        this.logger.debug(CORE_NODE.PATH_QUERY);
         const request = EJSON.parse(data);
         return this.query(request.csn, request.query, request.sort, request.limit, request.csnMode)
+          .then((result) => {
+            console.dir(result);
+            return { status: "OK", result };
+          });
+      });
+    } else if (url.pathname.endsWith(CORE_NODE.PATH_COUNT) && method === "POST") {
+      return ProxyHelper.procPost(req, res, (data) => {
+        this.logger.debug(CORE_NODE.PATH_COUNT);
+        const request = EJSON.parse(data);
+        return this.count(request.csn, request.query, request.csnMode)
           .then((result) => {
             console.dir(result);
             return { status: "OK", result };
@@ -523,6 +533,86 @@ export class SubsetStorage extends ServiceEngine implements Proxy {
       this.logger.warn("server command not found!:", url.pathname);
       return ProxyHelper.procError(req, res);
     }
+  }
+
+  count(csn: number, query: object, csnMode?: CsnMode): Promise<CountResult> {
+    if (!this.readyFlag) {
+      return Promise.resolve({ csn, resultCount: 0, restQuery: query, csnMode });
+    }
+    const innerQuery = LogicalOperator.getInsideOfCache(query, this.subsetDefinition.query);
+    if (!innerQuery) {
+      return Promise.resolve({ csn, resultCount: 0, restQuery: query, csnMode });
+    }
+    const restQuery = LogicalOperator.getOutsideOfCache(query, this.subsetDefinition.query);
+    let release: () => void;
+    const promise = new Promise<void>((resolve, reject) => {
+      this.getLock().readLock((unlock) => {
+        this.logger.debug("get readLock");
+        release = () => {
+          this.logger.debug("release readLock");
+          unlock();
+        };
+        resolve();
+      });
+    });
+
+    const protectedCsn = this.getJournalDb().getProtectedCsn();
+
+    return promise
+      .then(() => this.getSystemDb().getCsn())
+      .then((currentCsn) => {
+        if (csn === 0 || csn === currentCsn || (csn < currentCsn && csnMode === "latest")) {
+          return this.getSubsetDb().count(innerQuery)
+            .then((result) => {
+              release();
+              return { csn: currentCsn, resultCount: result, restQuery };
+            });
+        } else if (csn < protectedCsn) {
+          throw new DadgetError(ERROR.E2402, [csn, protectedCsn]);
+        } else if (csn < currentCsn) {
+          this.logger.info("rollback transactions", csn, currentCsn);
+          // rollback transactions
+          return this.getJournalDb().findByCsnRange(csn + 1, currentCsn)
+            .then((transactions) => {
+              if (transactions.length !== currentCsn - csn) {
+                release();
+                this.logger.info("not enough rollback transactions");
+                return { csn, resultCount: 0, restQuery: query };
+              }
+              return this.getSubsetDb().count({$and: [innerQuery, {csn: {$lte: csn}}]})
+                .then((result) => {
+                  release();
+                  const resultSet = SubsetStorage.rollbackAndFind([], transactions, innerQuery);
+                  console.log("rollback count:", result, resultSet.length);
+                  return { csn, resultCount: result + resultSet.length, restQuery };
+                });
+            });
+        } else {
+          this.logger.info("wait for transactions", csn, currentCsn);
+          // wait for transactions
+          return new Promise<CountResult>((resolve, reject) => {
+            if (!this.queryWaitingList[csn]) { this.queryWaitingList[csn] = []; }
+            this.queryWaitingList[csn].push(() => {
+              return this.getSubsetDb().count(innerQuery)
+                .then((result) => {
+                  resolve({ csn, resultCount: result, restQuery });
+                });
+            });
+            release();
+
+            let promise = Promise.resolve();
+            for (let i = currentCsn + 1; i <= csn; i++) {
+              const _csn = i;
+              promise = promise.then(() => this.updateProcessor.fetchJournal(_csn))
+                .then((journal) => { if (journal) { this.updateProcessor.procTransaction(journal); } });
+            }
+          });
+        }
+      }).catch((e) => {
+        this.logger.warn("SubsetStorage query error: " + e.toString());
+        release();
+        return Promise.reject(e);
+      });
   }
 
   query(csn: number, query: object, sort?: object, limit?: number, csnMode?: CsnMode): Promise<QueryResult> {
@@ -536,11 +626,11 @@ export class SubsetStorage extends ServiceEngine implements Proxy {
     const restQuery = LogicalOperator.getOutsideOfCache(query, this.subsetDefinition.query);
     let release: () => void;
     const promise = new Promise<void>((resolve, reject) => {
-      this.getLock().readLock((_) => {
+      this.getLock().readLock((unlock) => {
         this.logger.debug("get readLock");
         release = () => {
           this.logger.debug("release readLock");
-          _();
+          unlock();
         };
         resolve();
       });

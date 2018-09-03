@@ -4,7 +4,7 @@ import { ResourceNode, ServiceEngine } from "@chip-in/resource-node";
 import { CORE_NODE } from "../Config";
 import { ERROR } from "../Errors";
 import { DadgetError } from "../util/DadgetError";
-import { CsnMode, QueryResult } from "./Dadget";
+import { CountResult, CsnMode, QueryResult } from "./Dadget";
 import { DatabaseRegistry, SubsetDef } from "./DatabaseRegistry";
 
 /**
@@ -109,6 +109,33 @@ export class QueryHandler extends ServiceEngine {
       .catch((reason) => {
         this.logger.warn("query error:" + reason);
         return { csn, resultSet: [], restQuery: query, csnMode };
+      });
+  }
+
+  count(csn: number, query: object, csnMode?: CsnMode): Promise<CountResult> {
+    const request = { csn, query, csnMode };
+    return this.node.fetch(CORE_NODE.PATH_SUBSET
+      .replace(/:database\b/g, this.database)
+      .replace(/:subset\b/g, this.subsetName) + CORE_NODE.PATH_COUNT, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+        },
+        body: EJSON.stringify(request),
+      })
+      .then((result) => {
+        if (typeof result.ok !== "undefined" && !result.ok) { throw Error("fetch error:" + result.statusText); }
+        return result.json();
+      })
+      .then((_) => {
+        const data = EJSON.deserialize(_);
+        if (data.status === "NG") { throw data.reason; }
+        if (data.status === "OK") { return data.result; }
+        throw new Error("fetch error:" + JSON.stringify(data));
+      })
+      .catch((reason) => {
+        this.logger.warn("query error:" + reason);
+        return { csn, resultCount: 0, restQuery: query, csnMode };
       });
   }
 }

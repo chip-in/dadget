@@ -67,6 +67,7 @@ export class PersistentDb implements IDb {
           request.onupgradeneeded = (event) => {
             const db = (event.target as IDBRequest).result as IDBDatabase;
             const upgradeTransaction = (event.target as IDBRequest).transaction;
+            if (upgradeTransaction == null) { return reject("upgradeTransaction is null."); }
             console.log("create: " + dbName);
             let hasObjectStore = false;
             // tslint:disable-next-line:prefer-for-of
