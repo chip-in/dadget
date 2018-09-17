@@ -459,11 +459,11 @@ export class SubsetStorage extends ServiceEngine implements Proxy {
     // ストレージを準備
     const dbName = this.database + "--" + this.subsetName;
     if (this.type === "cache") {
-      this.subsetDb = new SubsetDb(new CacheDb(dbName), this.subsetName, metaData.indexes);
+      this.subsetDb = new SubsetDb(new CacheDb(dbName), this.subsetName, metaData.indexes || []);
       this.journalDb = new JournalDb(new CacheDb(dbName));
       this.systemDb = new SystemDb(new CacheDb(dbName));
     } else if (this.type === "persistent") {
-      this.subsetDb = new SubsetDb(new PersistentDb(dbName), this.subsetName, metaData.indexes);
+      this.subsetDb = new SubsetDb(new PersistentDb(dbName), this.subsetName, metaData.indexes || []);
       this.journalDb = new JournalDb(new PersistentDb(dbName));
       this.systemDb = new SystemDb(new PersistentDb(dbName));
     }

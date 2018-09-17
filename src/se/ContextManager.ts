@@ -13,6 +13,8 @@ import { DadgetError } from "../util/DadgetError";
 import * as EJSON from "../util/Ejson";
 import { ProxyHelper } from "../util/ProxyHelper";
 import { Util } from "../util/Util";
+import Dadget from "./Dadget";
+import { DatabaseRegistry, IndexDef } from "./DatabaseRegistry";
 
 const KEEP_TIME_AFTER_CONTEXT_MANAGER_MASTER_ACQUIRED_MS = 3000; // 3000ms
 const KEEP_TIME_AFTER_SENDING_ROLLBACK_MS = 1000; // 1000ms
@@ -339,6 +341,7 @@ class ContextManagementServer extends Proxy {
  * コンテキストマネージャ(ContextManager)
  *
  * コンテキストマネージャは、逆接続プロキシの Rest API で exec メソッドを提供する。
+ * TODO IndexedDB対応
  */
 export class ContextManager extends ServiceEngine {
 
@@ -353,6 +356,7 @@ export class ContextManager extends ServiceEngine {
   private mountHandle?: string;
   private lock: AsyncLock;
   private subscriberKey: string | null;
+  private uniqueIndexes: IndexDef[];
 
   constructor(option: ContextManagerConfigDef) {
     super(option);
@@ -396,6 +400,15 @@ export class ContextManager extends ServiceEngine {
       throw new DadgetError(ERROR.E2001, ["Database name can not contain '--'."]);
     }
     this.database = this.option.database;
+
+    // サブセットの定義を取得する
+    const seList = node.searchServiceEngine("DatabaseRegistry", { database: this.database });
+    if (seList.length !== 1) {
+      throw new DadgetError(ERROR.E2001, ["DatabaseRegistry is missing, or there are multiple ones."]);
+    }
+    const registry = seList[0] as DatabaseRegistry;
+    const metaData = registry.getMetadata();
+    this.uniqueIndexes = (metaData.indexes || []).filter((val) => val.property && val.property.unique);
 
     // ストレージを準備
     this.journalDb = new JournalDb(new PersistentDb(this.database));
@@ -487,17 +500,46 @@ export class ContextManager extends ServiceEngine {
   }
 
   checkUniqueConstraint(csn: number, request: TransactionRequest): Promise<object> {
-    // TODO ユニーク制約についてはクエリーを発行して確認 前提csnはジャーナルの最新を使用しなればならない
     if (request.type === TransactionType.INSERT && request.new) {
-      // TODO 追加されたオブジェクトと一意属性が競合していないかを調べる
-      return Promise.resolve(request.new);
+      const newObj = request.new;
+      return this._checkUniqueConstraint(csn, newObj)
+        .then(() => Promise.resolve(newObj));
     } else if (request.type === TransactionType.UPDATE && request.before) {
       const newObj = TransactionRequest.applyOperator(request);
-      return Promise.resolve(newObj);
+      return this._checkUniqueConstraint(csn, newObj, request.target)
+        .then(() => Promise.resolve(newObj));
     } else if (request.type === TransactionType.DELETE && request.before) {
       return Promise.resolve(request.before);
     } else {
       throw new Error("checkConsistent error");
     }
+  }
+
+  private _checkUniqueConstraint(csn: number, obj: { [field: string]: any }, exceptId?: string): Promise<void> {
+    const loopData = { count: 0 };
+    return Util.promiseWhile<{ count: number }>(
+      loopData,
+      (loopData) => {
+        return loopData.count < this.uniqueIndexes.length;
+      },
+      (loopData) => {
+        const indexDef = this.uniqueIndexes[loopData.count++];
+        const condition: Array<{ [field: string]: any }> = [];
+        for (const field in indexDef.index) {
+          if (!indexDef.index.hasOwnProperty(field)) { continue; }
+          const val = typeof obj[field] === "undefined" ? null : obj[field];
+          condition.push({ [field]: val });
+        }
+        if (exceptId) {
+          condition.push({ _id: { $ne: exceptId } });
+        }
+        return Dadget._count(this.getNode(), this.database, { $and: condition }, csn, "strict")
+          .then((result) => {
+            if (result.restQuery) { throw new Error("The queryHandlers has been empty before completing queries."); }
+            if (result.resultCount === 0) { return loopData; }
+            throw new Error("duplicate data error: " + JSON.stringify(condition));
+          });
+      },
+    ).then(() => { return; });
   }
 }

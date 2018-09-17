@@ -183,7 +183,6 @@ export default class Dadget extends ServiceEngine {
       })
       .then((result) => {
         const itemMap: { [id: string]: any } = {};
-        // TODO 理論上hasDupulicateが存在しなければcountは効率化できる
         let hasDupulicate = false;
         for (const item of result.resultSet as Array<{ _id: string }>) {
           if (itemMap[item._id]) {
@@ -502,10 +501,4 @@ export default class Dadget extends ServiceEngine {
       this.updateListenerKey = null;
     }
   }
-
-  addUpdateListenerForSubset(subset: string, listener: (csn: number) => void, minInterval?: number) {
-    // TODO 実装
-
-  }
-
 }

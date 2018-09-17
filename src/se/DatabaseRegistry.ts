@@ -26,7 +26,7 @@ export class IndexDef {
   /**
    * インデックスの属性名をキーとしたハッシュオブジェクトで値はインデックスが昇順(1)か降順(-1)かを示す。その仕様はmongo db の createIndex の第一引数に準じる
    */
-  index: object;
+  index: { [field: string]: number };
 
   /**
    * インデックスの属性を指定する。その仕様はmongo db の createIndex の第二引数に準じる
@@ -42,7 +42,7 @@ export class DatabaseMetadata {
   /**
    * インデックス設定
    */
-  indexes: IndexDef[];
+  indexes?: IndexDef[];
 
   /**
    * サブセット定義
