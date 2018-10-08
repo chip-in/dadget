@@ -1,6 +1,5 @@
 import { Proxy, ResourceNode, ServiceEngine, Subscriber } from "@chip-in/resource-node";
 import * as AsyncLock from "async-lock";
-import { diff } from "deep-diff";
 import * as http from "http";
 import * as URL from "url";
 import { CORE_NODE } from "../Config";
@@ -234,7 +233,7 @@ class ContextManagementServer extends Proxy {
           const _request = { ...request, datetime: new Date() };
           if (this.lastBeforeObj && request.before
             && (!request.before._id || this.lastBeforeObj._id === request.before._id)) {
-            const objDiff = diff(this.lastBeforeObj, request.before);
+            const objDiff = Util.diff(this.lastBeforeObj, request.before);
             if (objDiff) {
               this.logger.error("a mismatch of request.before", JSON.stringify(objDiff));
               throw new DadgetError(ERROR.E2005, [JSON.stringify(request)]);

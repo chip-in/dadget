@@ -102,12 +102,12 @@ export class QueryHandler extends ServiceEngine {
       })
       .then((_) => {
         const data = EJSON.deserialize(_);
-        if (data.status === "NG") { throw data.reason; }
+        if (data.status === "NG") { throw Error(JSON.stringify(data.reason)); }
         if (data.status === "OK") { return data.result; }
         throw new Error("fetch error:" + JSON.stringify(data));
       })
       .catch((reason) => {
-        this.logger.warn("query error:" + reason);
+        this.logger.warn("query error:" + reason.toString() + ", " + JSON.stringify(query));
         return { csn, resultSet: [], restQuery: query, csnMode };
       });
   }
@@ -129,12 +129,12 @@ export class QueryHandler extends ServiceEngine {
       })
       .then((_) => {
         const data = EJSON.deserialize(_);
-        if (data.status === "NG") { throw data.reason; }
+        if (data.status === "NG") { throw Error(JSON.stringify(data.reason)); }
         if (data.status === "OK") { return data.result; }
         throw new Error("fetch error:" + JSON.stringify(data));
       })
       .catch((reason) => {
-        this.logger.warn("query error:" + reason);
+        this.logger.warn("count error:" + reason.toString() + ", " + JSON.stringify(query));
         return { csn, resultCount: 0, restQuery: query, csnMode };
       });
   }

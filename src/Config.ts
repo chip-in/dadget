@@ -7,12 +7,17 @@ export class Mongo {
   }
 }
 
-const ACCESS_CONTROL_ALLOW_ORIGIN = process.env.ACCESS_CONTROL_ALLOW_ORIGIN;
+let accessControlAllowOrigin: string;
+
+export function setAccessControlAllowOrigin(origin: string) {
+  accessControlAllowOrigin = origin;
+}
 
 export function getAccessControlAllowOrigin(origin: string) {
   if (!origin) { return null; }
-  if (!ACCESS_CONTROL_ALLOW_ORIGIN) { return null; }
-  const allowOrigins = ACCESS_CONTROL_ALLOW_ORIGIN.split(",");
+  const allowOrigin = accessControlAllowOrigin || process.env.ACCESS_CONTROL_ALLOW_ORIGIN;
+  if (!allowOrigin) { return null; }
+  const allowOrigins = allowOrigin.split(",");
   for (const allowOrigin of allowOrigins) {
     if (allowOrigin.toLowerCase().replace(/\/$/, "") === origin.toLowerCase().replace(/\/$/, "")) { return origin; }
   }

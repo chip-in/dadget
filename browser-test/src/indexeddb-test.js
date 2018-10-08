@@ -1,5 +1,5 @@
 var chai = require('chai')
-var { PersistentDb } = require('../../lib/db/PersistentDbOnBrowser')
+var { PersistentDb } = require('../../lib/db/container/PersistentDbOnBrowser')
 
 describe('PersistentDb', () => {
   it('increment', () => {
@@ -201,5 +201,81 @@ describe('PersistentDb', () => {
         chai.assert.deepEqual(val, [])
       })
   });
+
+  it('findOneBySort', () => {
+    const db = new PersistentDb("test_sort");
+    db.setCollection("Collection");
+    return Promise.resolve()
+      .then(() => {
+        db.setIndexes({
+          csn_index: {
+            index: { csn: -1 },
+            property: { unique: true },
+          },
+          datetime_index: {
+            index: { datetime: -1, csn: -1 },
+          },
+            })
+      })
+      .then(() => {
+        console.log("findOneBySort a")
+        return db.start()
+      })
+      .then(() => {
+        console.log("c")
+        return db.deleteAll()
+      })
+      .then(() => {
+        console.log("d")
+        const date1 = new Date('1995-12-17T03:24:00')
+        const date2 = new Date('2000-12-17T03:24:00')
+        const date3 = new Date('2010-12-17T03:24:00')
+        return db.insertMany([
+          { _id: "test1", datetime: date1, csn: 1 },
+          { _id: "test2", datetime: date1, csn: 2 },
+          { _id: "test3", datetime: date2, csn: 3 },
+          { _id: "test4", datetime: date2, csn: 4 },
+          { _id: "test5", datetime: date3, csn: 5 },
+          { _id: "test6", datetime: date3, csn: 6 },
+        ])
+      })
+      .then(() => {
+        console.log("e")
+        const date = new Date('2003-12-17T03:24:00')
+        return db.findOneBySort({ datetime: { $lt: date } }, { csn: -1 })
+      })
+      .then((val) => {
+        chai.assert.equal(val._id, "test4")
+      })
+      .then(() => {
+        console.log("f")
+        const date = new Date('2000-12-17T03:24:00')
+        return db.findOneBySort({ datetime: { $lt: date } }, { csn: -1 })
+      })
+      .then((val) => {
+        chai.assert.equal(val._id, "test2")
+      })
+      .then(() => {
+        console.log("g")
+        return db.findOneBySort({ csn: { $gt: 4 } }, { csn: 1 })
+      })
+      .then((val) => {
+        chai.assert.equal(val._id, "test5")
+      })
+      .then(() => {
+        console.log("h")
+        return db.findOneBySort({ csn: { $gt: 0 } }, { csn: 1 })
+      })
+      .then((val) => {
+        chai.assert.equal(val._id, "test1")
+      })
+      .then(() => {
+        console.log("i")
+        return db.findOneBySort({ csn: { $gt: 7 } }, { csn: 1 })
+      })
+      .then((val) => {
+        chai.assert.equal(val, null)
+      })
+    });
 
 });

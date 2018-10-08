@@ -30,7 +30,10 @@ export class JournalDb {
         property: { unique: true },
       },
       target_index: {
-        index: { target: 1, csn: -1 },
+        index: { target: -1, csn: -1 },
+      },
+      datetime_index: {
+        index: { datetime: -1, csn: -1 },
       },
     });
     return this.db.start()

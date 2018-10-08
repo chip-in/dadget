@@ -2,7 +2,7 @@ import * as parser from "mongo-parse";
 import { v1 as uuidv1 } from "uuid";
 
 import { ResourceNode, ServiceEngine, Subscriber } from "@chip-in/resource-node";
-import { CORE_NODE } from "../Config";
+import { CORE_NODE, setAccessControlAllowOrigin } from "../Config";
 import { TransactionObject, TransactionRequest, TransactionType } from "../db/Transaction";
 import { ERROR } from "../Errors";
 import { DadgetError } from "../util/DadgetError";
@@ -500,5 +500,12 @@ export default class Dadget extends ServiceEngine {
       this.node.unsubscribe(this.updateListenerKey);
       this.updateListenerKey = null;
     }
+  }
+
+  /**
+   * Access-Control-Allow-Origin を設定する
+   */
+  static setServerAccessControlAllowOrigin(origin: string) {
+    setAccessControlAllowOrigin(origin);
   }
 }

@@ -1,4 +1,5 @@
 import { ResourceNode } from "@chip-in/resource-node";
+import * as dDiff from "deep-diff";
 import * as parser from "mongo-parse";
 import { CORE_NODE } from "../Config";
 import { TransactionObject } from "../db/Transaction";
@@ -86,5 +87,14 @@ export class Util {
           throw JSON.stringify(result);
         }
       });
+  }
+
+  static diff(lhs: object, rhs: object): object[] {
+    if (dDiff.diff) {
+      return dDiff.diff(lhs, rhs);
+    } else {
+      // for browsers
+      return (dDiff as any).default.diff(lhs, rhs);
+    }
   }
 }
