@@ -7,7 +7,7 @@
     "@chip-in/resource-node": "^0.0.18"
   },
   "devDependencies": {
-    "babel-cli": "^6.24.1",
+    "babel-cli": "^6.26.0",
     "babel-preset-es2015": "^6.24.1"
   },
   "scripts": {
