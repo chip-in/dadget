@@ -67,6 +67,7 @@ export class PersistentDb implements IDb {
           request.onupgradeneeded = (event) => {
             const db = (event.target as IDBRequest).result as IDBDatabase;
             const upgradeTransaction = (event.target as IDBRequest).transaction;
+            if (upgradeTransaction == null) { return reject("upgradeTransaction is null."); }
             console.log("create: " + dbName);
             let hasObjectStore = false;
             // tslint:disable-next-line:prefer-for-of
@@ -213,7 +214,8 @@ export class PersistentDb implements IDb {
     if (queryFields.length > 1) { return Promise.reject("not supported sort for findOneBySort: " + JSON.stringify(query)); }
     const sortFields = Object.keys(sort);
     if (sortFields.length !== 1) { return Promise.reject("not supported sort for findOneBySort: " + JSON.stringify(sort)); }
-    const fields = [...queryFields, ...sortFields];
+    const rawFields = [...queryFields, ...sortFields];
+    const fields = (rawFields.length === 2 && rawFields[0] === rawFields[1]) ? [rawFields[0]] : rawFields;
     const fieldsName = fields.join(",");
     const indexName = this.indexRevMap[fieldsName];
     if (!indexName) { return Promise.reject("Index is not defined for key: " + fieldsName); }
@@ -238,7 +240,17 @@ export class PersistentDb implements IDb {
         } else {
           const key = queryFields[0];
           const val = (query as any)[key];
-          request = dbIndex.openCursor(IDBKeyRange.bound([val], [val, []]), dir);
+          if (typeof val === "object" && !(val instanceof Date)) {
+            if (val.hasOwnProperty("$lt") && dir === "prev" && fields.length === 2) {
+              request = dbIndex.openCursor(IDBKeyRange.bound([], [val.$lt], false, true), dir);
+            } else if (val.hasOwnProperty("$gt") && dir === "next" && fields.length === 1) {
+              request = dbIndex.openCursor(IDBKeyRange.bound(val.$gt, [], true, false), dir);
+            } else {
+              return Promise.reject("findOneBySort is not supported for the query: " + JSON.stringify(query));
+            }
+          } else {
+            request = dbIndex.openCursor(IDBKeyRange.bound([val], [val, []]), dir);
+          }
         }
         request.onsuccess = (event) => {
           const cursor = (event.target as IDBRequest).result;

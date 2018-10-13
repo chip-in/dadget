@@ -2,7 +2,7 @@ import * as parser from "mongo-parse";
 import { v1 as uuidv1 } from "uuid";
 
 import { ResourceNode, ServiceEngine, Subscriber } from "@chip-in/resource-node";
-import { CORE_NODE } from "../Config";
+import { CORE_NODE, setAccessControlAllowOrigin } from "../Config";
 import { TransactionObject, TransactionRequest, TransactionType } from "../db/Transaction";
 import { ERROR } from "../Errors";
 import { DadgetError } from "../util/DadgetError";
@@ -44,6 +44,31 @@ export class QueryResult {
    * クエリに合致したオブジェクトの配列
    */
   resultSet: object[];
+
+  /**
+   * 問い合わせに対するオブジェクトを全て列挙できなかった場合に、残った集合に対するクエリ（サブセットのクエリハンドラの場合のみで、APIからの返却時は undefined）
+   */
+  restQuery: object | undefined;
+
+  queryHandlers?: QueryHandler[];
+
+  csnMode?: CsnMode;
+}
+
+/**
+ * 計数結果オブジェクト
+ */
+export class CountResult {
+
+  /**
+   * トランザクションをコミットしたコンテキスト通番
+   */
+  csn: number;
+
+  /**
+   * クエリに合致したオブジェクトの数
+   */
+  resultCount: number;
 
   /**
    * 問い合わせに対するオブジェクトを全て列挙できなかった場合に、残った集合に対するクエリ（サブセットのクエリハンドラの場合のみで、APIからの返却時は undefined）
@@ -158,7 +183,6 @@ export default class Dadget extends ServiceEngine {
       })
       .then((result) => {
         const itemMap: { [id: string]: any } = {};
-        // TODO 理論上hasDupulicateが存在しなければcountは効率化できる
         let hasDupulicate = false;
         for (const item of result.resultSet as Array<{ _id: string }>) {
           if (itemMap[item._id]) {
@@ -191,6 +215,37 @@ export default class Dadget extends ServiceEngine {
           }
         }
         return { ...result, resultSet: list };
+      });
+  }
+
+  public static _count(
+    node: ResourceNode,
+    database: string,
+    query: object,
+    csn?: number,
+    csnMode?: CsnMode): Promise<CountResult> {
+
+    let queryHandlers = node.searchServiceEngine("QueryHandler", { database }) as QueryHandler[];
+    if (queryHandlers.length === 0) { throw new Error("QueryHandlers required"); }
+    queryHandlers = Dadget.sortQueryHandlers(queryHandlers);
+    if (!csn) { csn = 0; }
+    const resultCount = 0;
+    return Promise.resolve({ csn, resultCount, restQuery: query, queryHandlers, csnMode } as CountResult)
+      .then(function queryFallback(request): Promise<CountResult> {
+        if (!request.restQuery) { return Promise.resolve(request); }
+        if (!request.queryHandlers || request.queryHandlers.length === 0) {
+          return Promise.resolve(request);
+        }
+        const qh = request.queryHandlers.shift();
+        if (qh == null) { throw new Error("never happen"); }
+        return qh.count(request.csn, request.restQuery, csnMode)
+          .then((result) => queryFallback({
+            csn: result.csn,
+            resultCount: request.resultCount + result.resultCount,
+            restQuery: result.restQuery,
+            queryHandlers: request.queryHandlers,
+            csnMode: result.csnMode,
+          }));
       });
   }
 
@@ -256,8 +311,45 @@ export default class Dadget extends ServiceEngine {
    * @returns 取得した件数を返すPromiseオブジェクト
    */
   count(query: object, csn?: number, csnMode?: CsnMode): Promise<number> {
-    // TODO 実装の効率化
-    return this.query(query, undefined, undefined, undefined, csn, csnMode).then((result) => result.resultSet.length);
+    if (this.latestCsn && !csn) {
+      csn = this.latestCsn;
+      csnMode = "latest";
+    }
+    let count = QUERY_ERROR_RETRY_COUNT;
+    const retryAction = (_: any) => {
+      count--;
+      return new Promise<CountResult>((resolve) => {
+        setTimeout(() => {
+          Dadget._count(this.node, this.database, query, csn, csnMode)
+            .then((result) => {
+              resolve(result);
+            });
+        }, QUERY_ERROR_WAIT_TIME);
+      });
+    };
+    return Dadget._count(this.node, this.database, query, csn, csnMode)
+      .then((result) => Util.promiseWhile<CountResult>(result, (result) => !!(result.restQuery && count > 0), retryAction))
+      .then((result) => {
+        if (result.restQuery) { throw new Error("The queryHandlers has been empty before completing count queries."); }
+        this.currentCsn = result.csn;
+        for (const id of Object.keys(this.updateListeners)) {
+          const listener = this.updateListeners[id];
+          if (listener.csn === PREQUERY_CSN) {
+            listener.csn = result.csn;
+            listener.notifyTime = Date.now();
+          }
+        }
+        setTimeout(() => {
+          this.notifyAll();
+        });
+        return result.resultCount;
+      })
+      .catch((reason) => {
+        console.dir(reason);
+        const cause = reason instanceof DadgetError ? reason :
+          (reason.code ? DadgetError.from(reason) : new DadgetError(ERROR.E2102, [reason.toString()]));
+        return Promise.reject(cause);
+      });
   }
 
   /**
@@ -410,9 +502,10 @@ export default class Dadget extends ServiceEngine {
     }
   }
 
-  addUpdateListenerForSubset(subset: string, listener: (csn: number) => void, minInterval?: number) {
-    // TODO 実装
-
+  /**
+   * Access-Control-Allow-Origin を設定する
+   */
+  static setServerAccessControlAllowOrigin(origin: string) {
+    setAccessControlAllowOrigin(origin);
   }
-
 }

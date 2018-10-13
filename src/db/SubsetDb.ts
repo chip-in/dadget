@@ -63,7 +63,7 @@ export class SubsetDb {
   find(query: object, sort?: object, limit?: number): Promise<any[]> {
     return this.db.find(query, sort, limit)
       .then((result) => {
-        console.log("find:", JSON.stringify(result));
+        console.log("find:", JSON.stringify(result), JSON.stringify(query));
         return result;
       })
       .catch((err) => Promise.reject(new DadgetError(ERROR.E1205, [err.toString()])));
@@ -72,7 +72,7 @@ export class SubsetDb {
   count(query: object): Promise<number> {
     return this.db.count(query)
       .then((count) => {
-        console.log("count:", count);
+        console.log("count:", count, JSON.stringify(query));
         return count;
       })
       .catch((err) => Promise.reject(new DadgetError(ERROR.E1208, [err.toString()])));

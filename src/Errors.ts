@@ -211,9 +211,9 @@ export const ERROR = {
   E2401: { code: 2401, message: "SubsetStorage Config Error: %1" },
 
   /**
-   * Query before protected csn Error
+   * No supported query for a csn less than protected csn Error
    */
-  E2402: { code: 2402, message: "not a supported query before protected csn: csn=%1, protectedCsn=%2" },
+  E2402: { code: 2402, message: "No supported query for a csn less than protected csn: csn=%1, protectedCsn=%2" },
 
   /**
    * UpdateManager Config Error
