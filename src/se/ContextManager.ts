@@ -178,16 +178,14 @@ class ContextManagementServer extends Proxy {
     if (method === "OPTIONS") {
       return ProxyHelper.procOption(req, res);
     } else if (url.pathname.endsWith(CORE_NODE.PATH_EXEC) && method === "POST") {
-      return ProxyHelper.procPost(req, res, (data) => {
-        this.logger.debug("/exec");
-        const request = EJSON.parse(data);
+      return ProxyHelper.procPost(req, res, this.logger, (request) => {
+        this.logger.debug(CORE_NODE.PATH_EXEC);
         return this.exec(request.csn, request.request);
       });
-    } else if (url.pathname.endsWith(CORE_NODE.PATH_GET_TRANSACTION) && method === "POST") {
-      return ProxyHelper.procPost(req, res, (data) => {
-        this.logger.debug("/getTransactionJournal");
-        const request = EJSON.parse(data);
-        return this.getTransactionJournal(request.csn);
+    } else if (url.pathname.endsWith(CORE_NODE.PATH_GET_TRANSACTION) && method === "GET") {
+      return ProxyHelper.procGet(req, res, this.logger, (request) => {
+        this.logger.debug(CORE_NODE.PATH_GET_TRANSACTION);
+        return this.getTransactionJournal(Number(request.csn));
       });
     } else {
       this.logger.warn("server command not found!:", method, url.pathname);

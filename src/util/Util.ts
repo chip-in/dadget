@@ -1,6 +1,7 @@
 import { ResourceNode } from "@chip-in/resource-node";
 import * as dDiff from "deep-diff";
 import * as parser from "mongo-parse";
+import * as URL from "url";
 import { CORE_NODE } from "../Config";
 import { TransactionObject } from "../db/Transaction";
 import * as EJSON from "../util/Ejson";
@@ -62,13 +63,11 @@ export class Util {
   }
 
   static fetchJournal(csn: number, database: string, node: ResourceNode): Promise<TransactionObject | null> {
-    return node.fetch(CORE_NODE.PATH_CONTEXT.replace(/:database\b/g, database) + CORE_NODE.PATH_GET_TRANSACTION, {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-      },
-      body: EJSON.stringify({ csn }),
-    })
+    const reqUrl = URL.format({
+      pathname: CORE_NODE.PATH_CONTEXT.replace(/:database\b/g, database) + CORE_NODE.PATH_GET_TRANSACTION,
+      query: { csn },
+    });
+    return node.fetch(reqUrl)
       .then((fetchResult) => {
         if (typeof fetchResult.ok !== "undefined" && !fetchResult.ok) { throw Error(fetchResult.statusText); }
         return fetchResult.json();

@@ -1,3 +1,4 @@
+import * as URL from "url";
 import * as EJSON from "../util/Ejson";
 
 import { ResourceNode, ServiceEngine } from "@chip-in/resource-node";
@@ -86,16 +87,14 @@ export class QueryHandler extends ServiceEngine {
   }
 
   query(csn: number, query: object, sort?: object, limit?: number, csnMode?: CsnMode): Promise<QueryResult> {
-    const request = { csn, query, sort, limit, csnMode };
-    return this.node.fetch(CORE_NODE.PATH_SUBSET
-      .replace(/:database\b/g, this.database)
-      .replace(/:subset\b/g, this.subsetName) + CORE_NODE.PATH_QUERY, {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-        },
-        body: EJSON.stringify(request),
-      })
+    const request = { csn, query: EJSON.stringify(query), sort, limit, csnMode };
+    const reqUrl = URL.format({
+      pathname: CORE_NODE.PATH_SUBSET
+        .replace(/:database\b/g, this.database)
+        .replace(/:subset\b/g, this.subsetName) + CORE_NODE.PATH_QUERY,
+      query: request,
+    });
+    return this.node.fetch(reqUrl)
       .then((result) => {
         if (typeof result.ok !== "undefined" && !result.ok) { throw Error("fetch error:" + result.statusText); }
         return result.json();
@@ -113,16 +112,14 @@ export class QueryHandler extends ServiceEngine {
   }
 
   count(csn: number, query: object, csnMode?: CsnMode): Promise<CountResult> {
-    const request = { csn, query, csnMode };
-    return this.node.fetch(CORE_NODE.PATH_SUBSET
-      .replace(/:database\b/g, this.database)
-      .replace(/:subset\b/g, this.subsetName) + CORE_NODE.PATH_COUNT, {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-        },
-        body: EJSON.stringify(request),
-      })
+    const request = { csn, query: EJSON.stringify(query), csnMode };
+    const reqUrl = URL.format({
+      pathname: CORE_NODE.PATH_SUBSET
+        .replace(/:database\b/g, this.database)
+        .replace(/:subset\b/g, this.subsetName) + CORE_NODE.PATH_COUNT,
+      query: request,
+    });
+    return this.node.fetch(reqUrl)
       .then((result) => {
         if (typeof result.ok !== "undefined" && !result.ok) { throw Error("fetch error:" + result.statusText); }
         return result.json();

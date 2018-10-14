@@ -397,7 +397,6 @@ export class SubsetStorage extends ServiceEngine implements Proxy {
   }
 
   setReady(): void {
-    console.log("setReady");
     this.readyFlag = true;
 
     // Rest サービスを登録する。
@@ -509,21 +508,24 @@ export class SubsetStorage extends ServiceEngine implements Proxy {
     this.logger.debug(method, url.pathname);
     if (method === "OPTIONS") {
       return ProxyHelper.procOption(req, res);
-    } else if (url.pathname.endsWith(CORE_NODE.PATH_QUERY) && method === "POST") {
-      return ProxyHelper.procPost(req, res, (data) => {
+    } else if (url.pathname.endsWith(CORE_NODE.PATH_QUERY) && method === "GET") {
+      return ProxyHelper.procGet(req, res, this.logger, (request) => {
         this.logger.debug(CORE_NODE.PATH_QUERY);
-        const request = EJSON.parse(data);
-        return this.query(request.csn, request.query, request.sort, request.limit, request.csnMode)
+        const csn = Number(request.csn);
+        const query = EJSON.parse(request.query);
+        const limit = request.limit ? Number(request.limit) : undefined;
+        return this.query(csn, query, request.sort, limit, request.csnMode)
           .then((result) => {
             console.dir(result);
             return { status: "OK", result };
           });
       });
-    } else if (url.pathname.endsWith(CORE_NODE.PATH_COUNT) && method === "POST") {
-      return ProxyHelper.procPost(req, res, (data) => {
+    } else if (url.pathname.endsWith(CORE_NODE.PATH_COUNT) && method === "GET") {
+      return ProxyHelper.procGet(req, res, this.logger, (request) => {
         this.logger.debug(CORE_NODE.PATH_COUNT);
-        const request = EJSON.parse(data);
-        return this.count(request.csn, request.query, request.csnMode)
+        const csn = Number(request.csn);
+        const query = EJSON.parse(request.query);
+        return this.count(csn, query, request.csnMode)
           .then((result) => {
             console.dir(result);
             return { status: "OK", result };
@@ -579,7 +581,7 @@ export class SubsetStorage extends ServiceEngine implements Proxy {
                 this.logger.info("not enough rollback transactions");
                 return { csn, resultCount: 0, restQuery: query };
               }
-              return this.getSubsetDb().count({$and: [innerQuery, {csn: {$lte: csn}}]})
+              return this.getSubsetDb().count({ $and: [innerQuery, { csn: { $lte: csn } }] })
                 .then((result) => {
                   release();
                   const resultSet = SubsetStorage.rollbackAndFind([], transactions, innerQuery);
