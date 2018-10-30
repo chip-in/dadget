@@ -513,8 +513,9 @@ export class SubsetStorage extends ServiceEngine implements Proxy {
         this.logger.debug(CORE_NODE.PATH_QUERY);
         const csn = Number(request.csn);
         const query = EJSON.parse(request.query);
+        const sort = request.sort ? EJSON.parse(request.sort) : undefined;
         const limit = request.limit ? Number(request.limit) : undefined;
-        return this.query(csn, query, request.sort, limit, request.csnMode)
+        return this.query(csn, query, sort, limit, request.csnMode)
           .then((result) => {
             console.dir(result);
             return { status: "OK", result };

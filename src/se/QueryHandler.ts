@@ -87,7 +87,12 @@ export class QueryHandler extends ServiceEngine {
   }
 
   query(csn: number, query: object, sort?: object, limit?: number, csnMode?: CsnMode): Promise<QueryResult> {
-    const request = { csn, query: EJSON.stringify(query), sort, limit, csnMode };
+    const request = {
+      csn,
+      query: EJSON.stringify(query),
+      sort: sort ? EJSON.stringify(sort) : undefined,
+      limit,
+      csnMode };
     const reqUrl = URL.format({
       pathname: CORE_NODE.PATH_SUBSET
         .replace(/:database\b/g, this.database)
