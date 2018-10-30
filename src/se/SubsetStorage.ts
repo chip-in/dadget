@@ -511,10 +511,10 @@ export class SubsetStorage extends ServiceEngine implements Proxy {
     } else if (url.pathname.endsWith(CORE_NODE.PATH_QUERY) && method === "GET") {
       return ProxyHelper.procGet(req, res, this.logger, (request) => {
         this.logger.debug(CORE_NODE.PATH_QUERY);
-        const csn = Number(request.csn);
+        const csn = ProxyHelper.validateNumberRequired(request.csn, "csn");
         const query = EJSON.parse(request.query);
         const sort = request.sort ? EJSON.parse(request.sort) : undefined;
-        const limit = request.limit ? Number(request.limit) : undefined;
+        const limit = ProxyHelper.validateNumber(request.limit, "limit");
         return this.query(csn, query, sort, limit, request.csnMode)
           .then((result) => {
             console.dir(result);
@@ -524,7 +524,7 @@ export class SubsetStorage extends ServiceEngine implements Proxy {
     } else if (url.pathname.endsWith(CORE_NODE.PATH_COUNT) && method === "GET") {
       return ProxyHelper.procGet(req, res, this.logger, (request) => {
         this.logger.debug(CORE_NODE.PATH_COUNT);
-        const csn = Number(request.csn);
+        const csn = ProxyHelper.validateNumberRequired(request.csn, "csn");
         const query = EJSON.parse(request.query);
         return this.count(csn, query, request.csnMode)
           .then((result) => {

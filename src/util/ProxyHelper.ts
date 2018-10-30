@@ -112,4 +112,16 @@ export class ProxyHelper {
 
     return Promise.resolve(res);
   }
+
+  static validateNumber(val: any, name: string): number | undefined {
+    if (typeof val === "undefined" || val === "" || val === null) { return undefined; }
+    if (!isFinite(val)) { throw new Error(name + " should be number."); }
+    return Number(val);
+  }
+
+  static validateNumberRequired(val: any, name: string): number {
+    if (typeof val === "undefined" || val === "" || val === null) { throw new Error(name + " is required."); }
+    if (!isFinite(val)) { throw new Error(name + " should be number."); }
+    return Number(val);
+  }
 }
