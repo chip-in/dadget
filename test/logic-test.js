@@ -204,6 +204,39 @@ describe('LogicalOperator', () => {
     result = LogicalOperator.getOutsideOfCache(query1, query2)
     chai.assert.deepEqual(result, { "$and": [{ "category": { "$in": ["EvacuationOrder", "Shelter1"] } }, { "category": { "$nin": ["EvacuationOrder", "Shelter2", "TemporaryStayFacilities"] } }] })
   });
+
+  it('pattern 18', () => {
+    let query1 = { "a": { "$ne": 2 }, "b": 2, "c": { $elemMatch: { "d": 3 } } }
+    let query2 = { "a": 2 }
+
+    let result = LogicalOperator.getInsideOfCache(query1, query2)
+    chai.assert.deepEqual(result, undefined)
+
+    result = LogicalOperator.getOutsideOfCache(query1, query2)
+    chai.assert.deepEqual(result, { $and: [{ "a": { "$ne": 2 } }, { "b": 2 }, { "c": { $elemMatch: { "d": 3 } } }] })
+  });
+
+  it('pattern 19', () => {
+    let query1 = { "a": { "$ne": 2 }, "b": 2, "c": { "a": { "d": 3 } } }
+    let query2 = { "a": 2 }
+
+    let result = LogicalOperator.getInsideOfCache(query1, query2)
+    chai.assert.deepEqual(result, undefined)
+
+    result = LogicalOperator.getOutsideOfCache(query1, query2)
+    chai.assert.deepEqual(result, { $and: [{ "a": { "$ne": 2 } }, { "b": 2 }, { "c": { "a": { "d": 3 } } }] })
+  });
+
+  it('pattern 20', () => {
+    let query1 = { "a": { "$ne": 2 }, "b": 2, "c": { "$and": [{ "d": 3 }, { "e": 4 }] } }
+    let query2 = { "a": 2 }
+
+    let result = LogicalOperator.getInsideOfCache(query1, query2)
+    chai.assert.deepEqual(result, undefined)
+
+    result = LogicalOperator.getOutsideOfCache(query1, query2)
+    chai.assert.deepEqual(result, { $and: [{ "a": { "$ne": 2 } }, { "b": 2 }, { "c": { "$and": [{ "d": 3 }, { "e": 4 }] } }] })
+  });
 });
 
 describe('mongo-parse', () => {

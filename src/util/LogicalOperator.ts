@@ -179,7 +179,7 @@ abstract class ValueOperator extends Operator {
           const _op = comparisonParserMap[op](field, query[op], query);
           if (_op) { opList.push(_op); }
         } else {
-          opList.push(ValueOperator.fromFieldAndQuery(field, query[op]));
+          opList.push(new EqOperator(field, { [op]: query[op] }));
         }
       }
       if (opList.length === 1) { return opList[0]; }
