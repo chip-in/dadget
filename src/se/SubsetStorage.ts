@@ -484,6 +484,7 @@ export class SubsetStorage extends ServiceEngine implements Proxy {
         .replace(/:database\b/g, this.database)
         .replace(/:subset\b/g, this.subsetName), this.updateProcessor).then((key) => { this.subscriberKey = key; }),
     );
+    promise = promise.then(() => new Promise<void>((resolve) => setTimeout(resolve, 1)));
 
     this.logger.debug("SubsetStorage is started");
     return promise;
