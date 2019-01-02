@@ -59,12 +59,12 @@ export class CacheDb implements IDb {
     return Promise.resolve(null);
   }
 
-  find(query: object, sort?: object, limit?: number, offset?: number): Promise<any[]> {
+  find(query: object, sort?: object, limit?: number, offset?: number, projection?: object): Promise<any[]> {
     const dataList = [];
     for (const _id of Object.keys(this.data)) {
       dataList.push(this.data[_id]);
     }
-    let list = Util.mongoSearch(dataList, query, sort) as object[];
+    let list = (Util.mongoSearch(dataList, query, sort) as object[]).map((val) => Util.project(val, projection));
     if (offset) {
       if (limit) {
         list = list.slice(offset, offset + limit);

@@ -96,4 +96,27 @@ export class Util {
       return (dDiff as any).default.diff(lhs, rhs);
     }
   }
+
+  static project(data: any, projection?: any): object {
+    if (!projection) { return data; }
+    let mode = 0;
+    for (const key in projection) {
+      if (key !== "_id") { mode = projection[key]; }
+    }
+    let newData;
+    if (mode === 0) {
+      newData = { ...data };
+      for (const key in data) {
+        if (projection[key] === 0) { delete newData[key]; }
+      }
+    } else {
+      newData = {} as any;
+      for (const key in data) {
+        if (key === "_id") {
+          if (projection[key] !== 0) { newData[key] = data[key]; }
+        } else if (projection[key]) { newData[key] = data[key]; }
+      }
+    }
+    return newData;
+  }
 }

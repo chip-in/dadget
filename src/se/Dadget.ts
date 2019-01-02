@@ -155,7 +155,8 @@ export default class Dadget extends ServiceEngine {
     limit?: number,
     offset?: number,
     csn?: number,
-    csnMode?: CsnMode): Promise<QueryResult> {
+    csnMode?: CsnMode,
+    projection?: object): Promise<QueryResult> {
 
     let queryHandlers = node.searchServiceEngine("QueryHandler", { database }) as QueryHandler[];
     if (queryHandlers.length === 0) { throw new Error("QueryHandlers required"); }
@@ -172,7 +173,7 @@ export default class Dadget extends ServiceEngine {
         }
         const qh = request.queryHandlers.shift();
         if (qh == null) { throw new Error("never happen"); }
-        return qh.query(request.csn, request.restQuery, sort, maxLimit, csnMode)
+        return qh.query(request.csn, request.restQuery, sort, maxLimit, csnMode, projection)
           .then((result) => queryFallback({
             csn: result.csn,
             resultSet: [...request.resultSet, ...result.resultSet],
@@ -258,9 +259,10 @@ export default class Dadget extends ServiceEngine {
    * @param offset 開始位置
    * @param csn 問い合わせの前提CSN
    * @param csnMode 問い合わせの前提CSNの意味付け
+   * @param projection mongoDBと同じprojectionオブジェクト
    * @returns 取得した結果オブジェクトを返すPromiseオブジェクト
    */
-  query(query: object, sort?: object, limit?: number, offset?: number, csn?: number, csnMode?: CsnMode): Promise<QueryResult> {
+  query(query: object, sort?: object, limit?: number, offset?: number, csn?: number, csnMode?: CsnMode, projection?: object): Promise<QueryResult> {
     if (this.latestCsn && !csn) {
       csn = this.latestCsn;
       csnMode = "latest";
@@ -270,14 +272,14 @@ export default class Dadget extends ServiceEngine {
       count--;
       return new Promise<QueryResult>((resolve) => {
         setTimeout(() => {
-          Dadget._query(this.node, this.database, query, sort, limit, offset, csn, csnMode)
+          Dadget._query(this.node, this.database, query, sort, limit, offset, csn, csnMode, projection)
             .then((result) => {
               resolve(result);
             });
         }, QUERY_ERROR_WAIT_TIME);
       });
     };
-    return Dadget._query(this.node, this.database, query, sort, limit, offset, csn, csnMode)
+    return Dadget._query(this.node, this.database, query, sort, limit, offset, csn, csnMode, projection)
       .then((result) => Util.promiseWhile<QueryResult>(result, (result) => !!(result.restQuery && count > 0), retryAction))
       .then((result) => {
         if (result.restQuery) { throw new Error("The queryHandlers has been empty before completing queries."); }

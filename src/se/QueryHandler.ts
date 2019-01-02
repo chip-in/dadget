@@ -86,13 +86,15 @@ export class QueryHandler extends ServiceEngine {
     return Promise.resolve();
   }
 
-  query(csn: number, query: object, sort?: object, limit?: number, csnMode?: CsnMode): Promise<QueryResult> {
+  query(csn: number, query: object, sort?: object, limit?: number, csnMode?: CsnMode, projection?: object): Promise<QueryResult> {
     const request = {
       csn,
       query: EJSON.stringify(query),
       sort: sort ? EJSON.stringify(sort) : undefined,
       limit,
-      csnMode };
+      csnMode,
+      projection: projection ? EJSON.stringify(projection) : undefined,
+    };
     const reqUrl = URL.format({
       pathname: CORE_NODE.PATH_SUBSET
         .replace(/:database\b/g, this.database)

@@ -13,7 +13,7 @@ export interface IDb {
 
   findOneBySort(query: object, sort: object): Promise<any>;
 
-  find(query: object, sort?: object, limit?: number, offset?: number): Promise<any[]>;
+  find(query: object, sort?: object, limit?: number, offset?: number, projection?: object): Promise<any[]>;
 
   count(query: object): Promise<number>;
 

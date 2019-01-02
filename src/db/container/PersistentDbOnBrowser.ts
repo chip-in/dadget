@@ -270,7 +270,7 @@ export class PersistentDb implements IDb {
     });
   }
 
-  find(query: object, sort?: object, limit?: number, offset?: number): Promise<any[]> {
+  find(query: object, sort?: object, limit?: number, offset?: number, projection?: object): Promise<any[]> {
     const sortFields = sort ? Object.keys(sort) : [];
     const parserQuery = parser.parse(query);
 
@@ -292,7 +292,7 @@ export class PersistentDb implements IDb {
       request.onsuccess = (event) => {
         const cursor = (event.target as IDBRequest).result;
         if (cursor) {
-          if (parserQuery.matches(cursor.value, false)) { dataList.push(cursor.value); }
+          if (parserQuery.matches(cursor.value, false)) { dataList.push(Util.project(cursor.value, projection)); }
           if (!listNum || dataList.length < listNum) { cursor.continue(); }
         }
       };
@@ -300,7 +300,7 @@ export class PersistentDb implements IDb {
         reject("find request error: " + request.error);
       };
       transaction.oncomplete = (event) => {
-        let list = indexName ? dataList : Util.mongoSearch(dataList, query, sort) as object[];
+        let list = indexName ? dataList : Util.mongoSearch(dataList, {}, sort) as object[];
         if (offset) {
           if (limit) {
             list = list.slice(offset, offset + limit);
