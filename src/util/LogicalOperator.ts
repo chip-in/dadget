@@ -120,7 +120,7 @@ abstract class Operator {
           opList.push(ValueOperator.fromFieldAndQuery(key, query[key]));
         }
       }
-      return new AndOperator(opList);
+      return opList.length === 1 ? opList[0] : new AndOperator(opList);
     }
     return FALSE;
   }
@@ -269,7 +269,7 @@ const expandAndOperand = (a: Operator, b: Operator): Operator => {
       c = expandLogicalQuery(c);
     } else {
       if (b instanceof AndOperator) {
-        c = combineLogicalAnd(b, a);
+        c = b.opList.reduce(expandAndOperand, a);
       } else if (b instanceof OrOperator) {
         c = new OrOperator(b.opList.map((x: any) => expandAndOperand(a, x)));
         c = expandLogicalQuery(c);
@@ -319,6 +319,10 @@ const andInAndIn = (a: any[], b: any[]): any[] => {
   return a.filter((value, index, self) => b.indexOf(value) >= 0);
 };
 
+const arrayDifference = (a: any[], b: any[]): any[] => {
+  return a.filter((value, index, self) => b.indexOf(value) < 0);
+};
+
 const combineLogicalAnd = (base: AndOperator, addition: Operator): Operator => {
   indent++;
   try {
@@ -335,11 +339,6 @@ const combineLogicalAnd = (base: AndOperator, addition: Operator): Operator => {
           if (containCond(addition, cond)) {
             return new AndOperator([...base.opList.slice(0, i), addition, ...base.opList.slice(i + 1)]);
           }
-          if (cond instanceof InOperator && addition instanceof InOperator) {
-            const val = andInAndIn(cond.val, addition.val);
-            if (val.length === 0) { return FALSE; }
-            return new AndOperator([...base.opList.slice(0, i), new InOperator(cond.field, val), ...base.opList.slice(i + 1)]);
-          }
           if (cond instanceof InOperator && addition instanceof EqOperator) {
             const val = andInAndIn(cond.val, [addition.val]);
             if (val.length === 0) { return FALSE; }
@@ -349,6 +348,16 @@ const combineLogicalAnd = (base: AndOperator, addition: Operator): Operator => {
             const val = andInAndIn([cond.val], addition.val);
             if (val.length === 0) { return FALSE; }
             return base;
+          }
+          if (cond instanceof InOperator && addition instanceof NotValueOperator && addition.op instanceof InOperator) {
+            const val = arrayDifference(cond.val, addition.op.val);
+            if (val.length === 0) { return FALSE; }
+            return new AndOperator([...base.opList, addition]);
+          }
+          if (addition instanceof InOperator && cond instanceof NotValueOperator && cond.op instanceof InOperator) {
+            const val = arrayDifference(addition.val, cond.op.val);
+            if (val.length === 0) { return FALSE; }
+            return new AndOperator([...base.opList, addition]);
           }
           if (cond instanceof EqOperator && addition instanceof NotValueOperator && addition.op instanceof InOperator) {
             if (addition.op.val.indexOf(cond.val) >= 0) { return FALSE; }
@@ -368,6 +377,11 @@ const combineLogicalAnd = (base: AndOperator, addition: Operator): Operator => {
           }
         }
       }
+    } else if (addition instanceof OrOperator) {
+      const query = new OrOperator(addition.opList.map((x: any) => expandAndOperand(base, x)));
+      return expandLogicalQuery(query);
+    } else if (addition instanceof AndOperator) {
+      return addition.opList.reduce(expandAndOperand, base);
     }
     return new AndOperator([...base.opList, addition]);
   } finally {
