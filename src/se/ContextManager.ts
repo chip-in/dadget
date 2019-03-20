@@ -71,6 +71,8 @@ class TransactionJournalSubscriber extends Subscriber {
     this.context.getLock().acquire("transaction", () => {
       if (transaction.type === TransactionType.ROLLBACK) {
         this.logger.warn("ROLLBACK:", transaction.csn);
+        const protectedCsn = this.context.getJournalDb().getProtectedCsn();
+        this.context.getJournalDb().setProtectedCsn(Math.min(protectedCsn, transaction.csn));
         this.masterManagerUuid = transaction.manager;
         return this.context.getJournalDb().findByCsn(transaction.csn)
           .then((tr) => {
@@ -494,6 +496,9 @@ export class ContextManager extends ServiceEngine {
             .then((csn) => {
               return this.journalDb.findByCsn(csn)
                 .then((tr) => {
+                  const protectedCsn = this.getJournalDb().getProtectedCsn();
+                  this.getJournalDb().setProtectedCsn(Math.min(protectedCsn, csn));
+
                   const transaction = new TransactionObject();
                   if (tr) {
                     transaction.digest = tr.digest;
