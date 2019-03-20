@@ -87,6 +87,7 @@ export class QueryHandler extends ServiceEngine {
   }
 
   query(csn: number, query: object, sort?: object, limit?: number, csnMode?: CsnMode, projection?: object): Promise<QueryResult> {
+    this.logger.debug("query:" + JSON.stringify(query));
     const request = {
       csn,
       query: EJSON.stringify(query),

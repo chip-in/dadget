@@ -24,6 +24,7 @@ import { UpdateManager } from "./UpdateManager";
 class UpdateProcessor extends Subscriber {
 
   private lock: ReadWriteLock;
+  private masterManagerUuid?: string;
 
   constructor(
     protected storage: SubsetStorage,
@@ -43,6 +44,13 @@ class UpdateProcessor extends Subscriber {
 
   procTransaction(transaction: TransactionObject) {
     this.logger.info("procTransaction:", transaction.type, transaction.csn);
+    if (transaction.type === TransactionType.ROLLBACK) {
+      this.masterManagerUuid = transaction.manager;
+    }
+    if (this.masterManagerUuid && this.masterManagerUuid !== transaction.manager) {
+      this.logger.warn("ignored transaction:", transaction.csn);
+      return;
+    }
 
     if (transaction.protectedCsn) {
       if (this.storage.getJournalDb().getProtectedCsn() < transaction.protectedCsn) {

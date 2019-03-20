@@ -2,6 +2,7 @@ import { Proxy, ResourceNode, ServiceEngine, Subscriber } from "@chip-in/resourc
 import * as AsyncLock from "async-lock";
 import * as http from "http";
 import * as URL from "url";
+import { v1 as uuidv1 } from "uuid";
 import { CORE_NODE } from "../Config";
 import { PersistentDb } from "../db/container/PersistentDb";
 import { JournalDb } from "../db/JournalDb";
@@ -33,6 +34,8 @@ export class ContextManagerConfigDef {
 
 class TransactionJournalSubscriber extends Subscriber {
 
+  private masterManagerUuid?: string;
+
   constructor(protected context: ContextManager) {
     super();
     this.logger.category = "TransJournalSubscriber";
@@ -61,6 +64,7 @@ class TransactionJournalSubscriber extends Subscriber {
     this.context.getLock().acquire("transaction", () => {
       if (transaction.type === TransactionType.ROLLBACK) {
         this.logger.warn("ROLLBACK:", transaction.csn);
+        this.masterManagerUuid = transaction.manager;
         return this.context.getJournalDb().findByCsn(transaction.csn)
           .then((tr) => {
             return this.context.getJournalDb().deleteAfterCsn(transaction.csn)
@@ -75,7 +79,7 @@ class TransactionJournalSubscriber extends Subscriber {
           .catch((err) => {
             this.logger.error(err.toString());
           });
-      } else {
+      } else if (!this.masterManagerUuid || this.masterManagerUuid === transaction.manager) {
         // Assume this node is a slave.
         return this.context.getSystemDb().getCsn()
           .then((csn) => {
@@ -108,6 +112,8 @@ class TransactionJournalSubscriber extends Subscriber {
           .catch((err) => {
             this.logger.error(err.toString());
           });
+      } else {
+        this.logger.warn("ignored transaction:", transaction.csn);
       }
     });
   }
@@ -254,9 +260,10 @@ class ContextManagementServer extends Proxy {
                   transaction = Object.assign({
                     csn: newCsn,
                     beforeDigest: lastDigest,
-                    protectedCsn: this.context.getJournalDb().getProtectedCsn(),
                   }, _request);
                   transaction.digest = TransactionObject.calcDigest(transaction);
+                  transaction.protectedCsn = this.context.getJournalDb().getProtectedCsn();
+                  transaction.manager = this.context.getManagerUuid();
                   return this.context.getJournalDb().insert(transaction);
                 });
             }).then(() => {
@@ -340,7 +347,6 @@ class ContextManagementServer extends Proxy {
  * コンテキストマネージャ(ContextManager)
  *
  * コンテキストマネージャは、逆接続プロキシの Rest API で exec メソッドを提供する。
- * TODO IndexedDB対応
  */
 export class ContextManager extends ServiceEngine {
 
@@ -356,6 +362,7 @@ export class ContextManager extends ServiceEngine {
   private lock: AsyncLock;
   private subscriberKey: string | null;
   private uniqueIndexes: IndexDef[];
+  private managerUuid?: string;
 
   constructor(option: ContextManagerConfigDef) {
     super(option);
@@ -386,6 +393,10 @@ export class ContextManager extends ServiceEngine {
 
   getMountHandle(): string | undefined {
     return this.mountHandle;
+  }
+
+  getManagerUuid(): string | undefined {
+    return this.managerUuid;
   }
 
   start(node: ResourceNode): Promise<void> {
@@ -447,6 +458,7 @@ export class ContextManager extends ServiceEngine {
         onDisconnect: () => {
           this.logger.info("ContextManagementServer is disconnected");
           this.mountHandle = undefined;
+          this.managerUuid = undefined;
         },
         onRemount: (mountHandle: string) => {
           this.logger.info("ContextManagementServer is remounted");
@@ -464,6 +476,8 @@ export class ContextManager extends ServiceEngine {
 
   private procAfterContextManagementServerConnect(mountHandle: string) {
     this.mountHandle = mountHandle;
+    this.managerUuid = uuidv1();
+    this.logger.info("publisher UUID:" + this.managerUuid);
     this.getLock().acquire("master", () => {
       return new Promise<void>((resolve) => {
         setTimeout(resolve, KEEP_TIME_AFTER_CONTEXT_MANAGER_MASTER_ACQUIRED_MS);
@@ -479,6 +493,7 @@ export class ContextManager extends ServiceEngine {
                   }
                   transaction.csn = csn;
                   transaction.type = TransactionType.ROLLBACK;
+                  transaction.manager = this.managerUuid;
                   // As this is a master, other slaves must be rollback.
                   return this.getNode().publish(
                     CORE_NODE.PATH_TRANSACTION.replace(/:database\b/g, this.getDatabase())
