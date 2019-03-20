@@ -174,13 +174,17 @@ class TransactionJournalSubscriber extends Subscriber {
 }
 
 class ContextManagementServer extends Proxy {
-  private lastBeforeObj: { _id?: string, csn?: number };
+  private lastBeforeObj?: { _id?: string, csn?: number };
   private lastCheckPointTime: number = 0;
 
   constructor(protected context: ContextManager) {
     super();
     this.logger.category = "ContextManagementServer";
     this.logger.debug("ContextManagementServer is created");
+  }
+
+  resetLastBeforeObj() {
+    this.lastBeforeObj = undefined;
   }
 
   onReceive(req: http.IncomingMessage, res: http.ServerResponse): Promise<http.ServerResponse> {
@@ -468,6 +472,7 @@ export class ContextManager extends ServiceEngine {
           this.logger.info("ContextManagementServer is disconnected");
           this.mountHandle = undefined;
           this.subscriber.resetMasterManagerUuid();
+          this.server.resetLastBeforeObj();
         },
         onRemount: (mountHandle: string) => {
           this.logger.info("ContextManagementServer is remounted");
