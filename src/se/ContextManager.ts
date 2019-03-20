@@ -42,6 +42,10 @@ class TransactionJournalSubscriber extends Subscriber {
     this.logger.debug("TransactionJournalSubscriber is created");
   }
 
+  resetMasterManagerUuid() {
+    this.masterManagerUuid = undefined;
+  }
+
   onReceive(msg: string) {
     console.log("TransactionJournalSubscriber onReceive:", msg.toString());
     const transaction: TransactionObject = EJSON.parse(msg);
@@ -61,6 +65,9 @@ class TransactionJournalSubscriber extends Subscriber {
       }
     }
 
+    if (!this.masterManagerUuid) {
+      this.masterManagerUuid = transaction.manager;
+    }
     this.context.getLock().acquire("transaction", () => {
       if (transaction.type === TransactionType.ROLLBACK) {
         this.logger.warn("ROLLBACK:", transaction.csn);
@@ -79,7 +86,7 @@ class TransactionJournalSubscriber extends Subscriber {
           .catch((err) => {
             this.logger.error(err.toString());
           });
-      } else if (!this.masterManagerUuid || this.masterManagerUuid === transaction.manager) {
+      } else if (this.masterManagerUuid === transaction.manager) {
         // Assume this node is a slave.
         return this.context.getSystemDb().getCsn()
           .then((csn) => {
@@ -458,7 +465,7 @@ export class ContextManager extends ServiceEngine {
         onDisconnect: () => {
           this.logger.info("ContextManagementServer is disconnected");
           this.mountHandle = undefined;
-          this.managerUuid = undefined;
+          this.subscriber.resetMasterManagerUuid();
         },
         onRemount: (mountHandle: string) => {
           this.logger.info("ContextManagementServer is remounted");
