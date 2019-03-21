@@ -397,6 +397,9 @@ export class SubsetStorage extends ServiceEngine implements Proxy {
   }
 
   setReady(): void {
+    if (this.readyFlag) {
+      return;
+    }
     this.readyFlag = true;
 
     // Rest サービスを登録する。
