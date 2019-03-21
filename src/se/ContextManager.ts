@@ -448,6 +448,7 @@ export class ContextManager extends ServiceEngine {
         },
         onRemount: (mountHandle: string) => {
           this.logger.info("ContextManagementServer is remounted");
+          this.server.resetLastBeforeObj();
           this.procAfterContextManagementServerConnect(mountHandle);
         },
       })
