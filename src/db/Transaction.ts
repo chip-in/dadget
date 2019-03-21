@@ -342,9 +342,4 @@ export class TransactionObject extends TransactionRequest {
    * 保護CSN
    */
   protectedCsn?: number;
-
-  /**
-   * 送信したContextManagementServerのUUID
-   */
-  manager?: string;
 }

@@ -102,7 +102,6 @@ export class JournalDb {
       saveTrans.operator = EJSON.stringify(transaction.operator);
     }
     delete saveTrans.protectedCsn;
-    delete saveTrans.manager;
     return saveTrans;
   }
 
