@@ -331,6 +331,40 @@ describe('LogicalOperator', () => {
     result = LogicalOperator.getOutsideOfCache(query1, query2)
     chai.assert.deepEqual(result, undefined)
   });
+
+  it('pattern 23', () => {
+    let query1 = {
+      "areacode": { "$regex": "^(01|02|00000|99999)" },
+      "category": { "$in": ["Shelter"] },
+      "distributionStatus": { "$in": ["Actual", "Exercise"] },
+      "expired": { "$gt": "2019-04-04T12:10:00+09:00" },
+      "receivedTime": { "$lte": "2019-04-04T12:10:00+09:00" }
+    }
+
+    let query2 = {
+      "isEffective": true,
+      "category": {
+        "$in": [
+          "EvacuationOrder"
+        ]
+      },
+      "distributionStatus": {
+        "$in": [
+          "Actual",
+          "Exercise"
+        ]
+      },
+      "areacode": {
+        "$regex": "^(01|06|04|00000|99999)"
+      }
+    }
+
+    let result = LogicalOperator.getInsideOfCache(query1, query2)
+    chai.assert.deepEqual(result, {"$and":[{"areacode":{"$regex":"^(01|02|00000|99999)"}},{"category":{"$in":["Shelter"]}},{"distributionStatus":{"$in":["Actual","Exercise"]}},{"expired":{"$gt":"2019-04-04T12:10:00+09:00"}},{"receivedTime":{"$lte":"2019-04-04T12:10:00+09:00"}},{"isEffective":true},{"category":{"$in":["EvacuationOrder"]}},{"areacode":{"$regex":"^(01|06|04|00000|99999)"}}]})
+
+    result = LogicalOperator.getOutsideOfCache(query1, query2)
+    chai.assert.deepEqual(result, {"$and":[{"areacode":{"$regex":"^(01|02|00000|99999)"}},{"category":{"$in":["Shelter"]}},{"distributionStatus":{"$in":["Actual","Exercise"]}},{"expired":{"$gt":"2019-04-04T12:10:00+09:00"}},{"receivedTime":{"$lte":"2019-04-04T12:10:00+09:00"}},{"$or":[{"isEffective":{"$ne":true}},{"category":{"$nin":["EvacuationOrder"]}},{"areacode":{"$not":{"$regex":"^(01|06|04|00000|99999)"}}}]}]})
+  });
 });
 
 describe('mongo-parse', () => {

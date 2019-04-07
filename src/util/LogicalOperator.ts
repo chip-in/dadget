@@ -14,6 +14,7 @@ export class LogicalOperator {
     } while (!equal(result.toMongo(), query.toMongo()));
     if (result instanceof FalseOperator) { return undefined; }
     if (result instanceof TrueOperator) { return cond; }
+    result = shrinkLogicalQuery(result);
     return Operator.toMongo(result);
   }
 
@@ -28,6 +29,7 @@ export class LogicalOperator {
     } while (!equal(result.toMongo(), query.toMongo()));
     if (result instanceof FalseOperator) { return undefined; }
     if (result instanceof TrueOperator) { return cond; }
+    result = shrinkLogicalQuery(result);
     return Operator.toMongo(result);
   }
 }
@@ -149,12 +151,18 @@ const FALSE = new FalseOperator();
 
 class AndOperator extends Operator {
   constructor(public opList: Operator[]) { super(); }
-  toMongo(): object { return { $and: this.opList.map((val) => val.toMongo()) }; }
+  toMongo(): object {
+    if (this.opList.length === 1) { return this.opList[0].toMongo(); }
+    return { $and: this.opList.map((val) => val.toMongo()) };
+  }
 }
 
 class OrOperator extends Operator {
   constructor(public opList: Operator[]) { super(); }
-  toMongo(): object { return { $or: this.opList.map((val) => val.toMongo()) }; }
+  toMongo(): object {
+    if (this.opList.length === 1) { return this.opList[0].toMongo(); }
+    return { $or: this.opList.map((val) => val.toMongo()) };
+  }
 }
 
 class NotOperator extends Operator {
@@ -232,6 +240,53 @@ class RegexOperator extends ValueOperator {
 }
 
 let indent = 0;
+
+const shrinkLogicalQuery = (query: Operator): Operator => {
+  if (query instanceof TrueOperator || query instanceof FalseOperator) { return query; }
+  indent++;
+  try {
+    if (showLog) { console.log(" ".repeat(indent) + query); }
+    if (query instanceof OrOperator) {
+      const intersection = query.opList.reduce(calcIntersection, TRUE);
+      if (intersection instanceof AndOperator) {
+        const opList = query.opList.map((op) => {
+          const andOp = op as AndOperator;
+          const newOp = andOp.opList.filter((op) => !intersection.opList.find((iOp) => equal(op, iOp)));
+          if (newOp.length === 0) { return TRUE; }
+          return new AndOperator(newOp);
+        }).reduce((a, b) => {
+          if (a instanceof TrueOperator || b instanceof TrueOperator) { return TRUE; }
+          a.push(b);
+          return a;
+        }, [] as Operator[]);
+        if (opList instanceof TrueOperator) {
+          query = intersection;
+        } else {
+          query = new AndOperator([...intersection.opList, new OrOperator(opList)]);
+        }
+      }
+    }
+    if (query instanceof AndOperator) {
+      query.opList = query.opList.map(shrinkLogicalQuery);
+    }
+    if (query instanceof NotOperator) {
+      query = expandNotOperand(shrinkLogicalQuery(query.op));
+    }
+    return query;
+  } finally {
+    indent--;
+  }
+};
+
+const calcIntersection = (a: Operator, b: Operator): Operator => {
+  if (a === TRUE && b instanceof AndOperator) { return b; }
+  if (a instanceof AndOperator && b instanceof AndOperator) {
+    const opList = a.opList.filter((aOp) => b.opList.find((bOp) => equal(aOp, bOp)));
+    if (opList.length === 0) { return FALSE; }
+    return new AndOperator(opList);
+  }
+  return FALSE;
+};
 
 const expandLogicalQuery = (query: Operator): Operator => {
   if (query instanceof TrueOperator || query instanceof FalseOperator) { return query; }
