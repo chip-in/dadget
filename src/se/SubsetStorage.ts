@@ -607,13 +607,6 @@ export class SubsetStorage extends ServiceEngine implements Proxy {
                 });
             });
             release();
-
-            let promise = Promise.resolve();
-            for (let i = currentCsn + 1; i <= csn; i++) {
-              const _csn = i;
-              promise = promise.then(() => this.updateProcessor.fetchJournal(_csn))
-                .then((journal) => { if (journal) { this.updateProcessor.procTransaction(journal); } });
-            }
           });
         }
       }).catch((e) => {
@@ -680,21 +673,7 @@ export class SubsetStorage extends ServiceEngine implements Proxy {
           this.logger.info("wait for transactions", csn, currentCsn);
           // wait for transactions
           return new Promise<QueryResult>((resolve, reject) => {
-            if (!this.queryWaitingList[csn]) {
-              this.queryWaitingList[csn] = [];
-              setTimeout(() => {
-                this.getSystemDb().getCsn()
-                  .then((currentCsn) => {
-                    let promise = Promise.resolve();
-                    for (let i = currentCsn + 1; i <= csn; i++) {
-                      console.log("fetch a journal for wait timeout: " + i);
-                      const _csn = i;
-                      promise = promise.then(() => this.updateProcessor.fetchJournal(_csn))
-                        .then((journal) => { if (journal) { this.updateProcessor.procTransaction(journal); } });
-                    }
-                  });
-              }, 2000);
-            }
+            if (!this.queryWaitingList[csn]) { this.queryWaitingList[csn] = []; }
             this.queryWaitingList[csn].push(() => {
               return this.getSubsetDb().find(innerQuery, sort, limit, projection)
                 .then((result) => {
