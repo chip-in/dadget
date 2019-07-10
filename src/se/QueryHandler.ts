@@ -114,7 +114,7 @@ export class QueryHandler extends ServiceEngine {
         throw new Error("fetch error:" + JSON.stringify(data));
       })
       .catch((reason) => {
-        this.logger.warn("query error:" + reason.toString() + ", " + JSON.stringify(query));
+        this.logger.warn("query error:" + reason.toString() + ", url:" + reqUrl);
         return { csn, resultSet: [], restQuery: query, csnMode };
       });
   }
@@ -139,7 +139,7 @@ export class QueryHandler extends ServiceEngine {
         throw new Error("fetch error:" + JSON.stringify(data));
       })
       .catch((reason) => {
-        this.logger.warn("count error:" + reason.toString() + ", " + JSON.stringify(query));
+        this.logger.warn("count error:" + reason.toString() + ", url:" + reqUrl);
         return { csn, resultCount: 0, restQuery: query, csnMode };
       });
   }

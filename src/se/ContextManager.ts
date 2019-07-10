@@ -19,6 +19,7 @@ const KEEP_TIME_AFTER_CONTEXT_MANAGER_MASTER_ACQUIRED_MS = 3000; // 3000ms
 const KEEP_TIME_AFTER_SENDING_ROLLBACK_MS = 1000; // 1000ms
 const CHECK_POINT_CHECK_PERIOD_MS = 10 * 60 * 1000;  // 10 minutes
 const CHECK_POINT_DELETE_PERIOD_MS = 72 * 60 * 60 * 1000; // 72 hours
+const MAX_RESPONSE_SIZE_OF_JOURNALS = 10485760;
 
 /**
  * コンテキストマネージャコンフィグレーションパラメータ
@@ -177,15 +178,22 @@ class ContextManagementServer extends Proxy {
       return ProxyHelper.procOption(req, res);
     } else if (url.pathname.endsWith(CORE_NODE.PATH_EXEC) && method === "POST") {
       return ProxyHelper.procPost(req, res, this.logger, (request) => {
-        this.logger.debug(CORE_NODE.PATH_EXEC);
         const csn = ProxyHelper.validateNumberRequired(request.csn, "csn");
+        this.logger.info(CORE_NODE.PATH_EXEC, "postulatedCsn:", csn);
         return this.exec(csn, request.request);
       });
     } else if (url.pathname.endsWith(CORE_NODE.PATH_GET_TRANSACTION) && method === "GET") {
       return ProxyHelper.procGet(req, res, this.logger, (request) => {
-        this.logger.debug(CORE_NODE.PATH_GET_TRANSACTION);
         const csn = ProxyHelper.validateNumberRequired(request.csn, "csn");
+        this.logger.info(CORE_NODE.PATH_GET_TRANSACTION, "csn:", csn);
         return this.getTransactionJournal(csn);
+      });
+    } else if (url.pathname.endsWith(CORE_NODE.PATH_GET_TRANSACTIONS) && method === "GET") {
+      return ProxyHelper.procGet(req, res, this.logger, (request) => {
+        const fromCsn = ProxyHelper.validateNumberRequired(request.fromCsn, "fromCsn");
+        const toCsn = ProxyHelper.validateNumberRequired(request.toCsn, "toCsn");
+        this.logger.info(CORE_NODE.PATH_GET_TRANSACTIONS, "from:", fromCsn, "to:", toCsn);
+        return this.getTransactionJournals(fromCsn, toCsn);
       });
     } else {
       this.logger.warn("server command not found!:", method, url.pathname);
@@ -194,8 +202,6 @@ class ContextManagementServer extends Proxy {
   }
 
   exec(postulatedCsn: number, request: TransactionRequest): Promise<object> {
-    this.logger.info("exec csn:", postulatedCsn);
-
     let err: string | null = null;
     if (!request.target) {
       err = "target required in a transaction";
@@ -331,6 +337,34 @@ class ContextManagementServer extends Proxy {
           };
         }
       });
+  }
+
+  getTransactionJournals(fromCsn: number, toCsn: number): Promise<object> {
+    const loopData = {
+      csn: fromCsn,
+      size: 0,
+    };
+    const journals: string[] = [];
+    return Util.promiseWhile<{ csn: number, size: number }>(
+      loopData,
+      (loopData) => {
+        return loopData.csn <= toCsn && loopData.size <= MAX_RESPONSE_SIZE_OF_JOURNALS;
+      },
+      (loopData) => {
+        return this.context.getJournalDb().findByCsn(loopData.csn)
+          .then((journal) => {
+            if (!journal) { throw new Error("journal not found: " + loopData.csn); }
+            delete (journal as any)._id;
+            const journalStr = JSON.stringify(journal);
+            journals.push(journalStr);
+            return { csn: loopData.csn + 1, size: loopData.size + journalStr.length };
+          });
+      },
+    )
+      .then(() => ({
+        status: "OK",
+        journals,
+      }));
   }
 }
 

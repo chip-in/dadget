@@ -88,6 +88,62 @@ export class Util {
       });
   }
 
+  static fetchJournals(
+    fromCsn: number,
+    toCsn: number,
+    database: string,
+    node: ResourceNode,
+    callback: (obj: TransactionObject) => Promise<void>,
+  ): Promise<void> {
+    const mainLoop = {
+      csn: fromCsn,
+    };
+    return Util.promiseWhile<{ csn: number }>(
+      mainLoop,
+      (mainLoop) => mainLoop.csn <= toCsn,
+      (mainLoop) => {
+        const reqUrl = URL.format({
+          pathname: CORE_NODE.PATH_CONTEXT.replace(/:database\b/g, database) + CORE_NODE.PATH_GET_TRANSACTIONS,
+          query: { fromCsn: mainLoop.csn, toCsn },
+        });
+        return node.fetch(reqUrl)
+          .then((fetchResult) => {
+            if (typeof fetchResult.ok !== "undefined" && !fetchResult.ok) { throw Error(fetchResult.statusText); }
+            return fetchResult.json();
+          })
+          .then((result) => {
+            console.log("fetchJournals: ", JSON.stringify(result));
+            if (result.status === "OK") {
+              const loopData = {
+                csn: mainLoop.csn,
+                journals: result.journals,
+              };
+              return Util.promiseWhile<{ csn: number, journals: string[] }>(
+                loopData,
+                (loopData) => loopData.journals.length > 0,
+                (loopData) => {
+                  const journalStr = loopData.journals.shift();
+                  if (!journalStr) { throw new Error("empty journal string"); }
+                  const journal = EJSON.deserialize(JSON.parse(journalStr)) as TransactionObject;
+                  return callback(journal)
+                    .then(() => ({
+                      csn: journal.csn,
+                      journals: loopData.journals,
+                    }));
+                },
+              ).then((loopData) => loopData.csn + 1);
+            } else if (result.reason) {
+              const reason = result.reason as DadgetError;
+              throw new DadgetError({ code: reason.code, message: reason.message }, reason.inserts, reason.ns);
+            } else {
+              throw new Error(JSON.stringify(result));
+            }
+          })
+          .then((csn) => ({ csn }));
+      })
+      .then(() => { });
+  }
+
   static diff(lhs: object, rhs: object): object[] {
     if (dDiff.diff) {
       return dDiff.diff(lhs, rhs);

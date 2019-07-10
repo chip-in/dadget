@@ -195,6 +195,14 @@ class UpdateProcessor extends Subscriber {
     return Util.fetchJournal(csn, this.database, this.storage.getNode());
   }
 
+  fetchJournals(
+    fromCsn: number,
+    toCsn: number,
+    callback: (obj: TransactionObject) => Promise<void>,
+  ): Promise<void> {
+    return Util.fetchJournals(fromCsn, toCsn, this.database, this.storage.getNode(), callback);
+  }
+
   private adjustData(csn: number): Promise<void> {
     this.logger.warn("adjustData:" + csn);
     return Promise.resolve()
@@ -237,26 +245,10 @@ class UpdateProcessor extends Subscriber {
                         return this.adjustData(csn);
                       });
                   } else {
-                    const loopData = {
-                      csn: journal.csn,
-                      to: csn,
-                    };
-                    return Util.promiseWhile<{ csn: number, to: number }>(
-                      loopData,
-                      (loopData) => {
-                        return loopData.csn < loopData.to;
-                      },
-                      (loopData) => {
-                        const nextCsn = loopData.csn + 1;
-                        return this.fetchJournal(nextCsn)
-                          .then((fetchJournal) => {
-                            if (!fetchJournal) { throw new Error("journal not found: " + nextCsn); }
-                            const subsetTransaction = UpdateManager.convertTransactionForSubset(this.subsetDefinition, fetchJournal);
-                            return this.updateSubsetDb(Promise.resolve(), subsetTransaction);
-                          })
-                          .then(() => ({ ...loopData, csn: nextCsn }));
-                      },
-                    )
+                    return this.fetchJournals(journal.csn + 1, csn, (fetchJournal) => {
+                      const subsetTransaction = UpdateManager.convertTransactionForSubset(this.subsetDefinition, fetchJournal);
+                      return this.updateSubsetDb(Promise.resolve(), subsetTransaction);
+                    })
                       .then(() => { this.storage.setReady(); });
                   }
                 });
