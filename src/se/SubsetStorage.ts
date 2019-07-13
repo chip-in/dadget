@@ -1,4 +1,5 @@
 import * as http from "http";
+import * as parser from "mongo-parse";
 import * as hash from "object-hash";
 import * as ReadWriteLock from "rwlock";
 import * as URL from "url";
@@ -19,7 +20,6 @@ import { ProxyHelper } from "../util/ProxyHelper";
 import { Util } from "../util/Util";
 import { CountResult, CsnMode, default as Dadget, QueryResult } from "./Dadget";
 import { DatabaseRegistry, SubsetDef } from "./DatabaseRegistry";
-import { UpdateManager } from "./UpdateManager";
 
 class UpdateProcessor extends Subscriber {
 
@@ -246,7 +246,7 @@ class UpdateProcessor extends Subscriber {
                       });
                   } else {
                     return this.fetchJournals(journal.csn + 1, csn, (fetchJournal) => {
-                      const subsetTransaction = UpdateManager.convertTransactionForSubset(this.subsetDefinition, fetchJournal);
+                      const subsetTransaction = UpdateListener.convertTransactionForSubset(this.subsetDefinition, fetchJournal);
                       return this.updateSubsetDb(Promise.resolve(), subsetTransaction);
                     })
                       .then(() => { this.storage.setReady(); });
@@ -268,7 +268,7 @@ class UpdateProcessor extends Subscriber {
     return this.fetchJournal(csn)
       .then((fetchJournal) => {
         if (!fetchJournal) { throw new Error("journal not found: " + csn); }
-        const subsetTransaction = UpdateManager.convertTransactionForSubset(this.subsetDefinition, fetchJournal);
+        const subsetTransaction = UpdateListener.convertTransactionForSubset(this.subsetDefinition, fetchJournal);
         return Dadget._query(this.storage.getNode(), this.database, query, undefined, undefined, undefined, csn, "strict")
           .then((result) => {
             if (result.restQuery) { throw new Error("The queryHandlers has been empty before completing queries."); }
@@ -308,6 +308,85 @@ class UpdateProcessor extends Subscriber {
 }
 
 /**
+ * 更新マネージャ(UpdateManager)
+ *
+ * 更新マネージャは、コンテキストマネージャが発信する更新情報（トランザクションオブジェクト）を受信して更新トランザクションをサブセットへのトランザクションに変換し更新レシーバに転送する。
+ */
+class UpdateListener extends Subscriber {
+
+  constructor(
+    protected storage: SubsetStorage,
+    protected database: string,
+    protected subsetDefinition: SubsetDef) {
+
+    super();
+    this.logger.category = "UpdateListener";
+    this.logger.debug("UpdateListener is created");
+  }
+
+  onReceive(transctionJSON: string) {
+    const transaction = EJSON.parse(transctionJSON) as TransactionObject;
+    this.logger.info("received:", transaction.type, transaction.csn);
+    const subsetTransaction = UpdateListener.convertTransactionForSubset(this.subsetDefinition, transaction);
+    this.storage.getNode().publish(CORE_NODE.PATH_SUBSET_TRANSACTION
+      .replace(/:database\b/g, this.database)
+      .replace(/:subset\b/g, this.storage.getOption().subset), EJSON.stringify(subsetTransaction));
+  }
+
+  static convertTransactionForSubset(subsetDefinition: SubsetDef, transaction: TransactionObject): TransactionObject {
+    // サブセット用のトランザクション内容に変換
+
+    if (transaction.type === TransactionType.ROLLBACK) {
+      return transaction;
+    }
+    if (!subsetDefinition.query) { return transaction; }
+    const query = parser.parse(subsetDefinition.query);
+
+    if (transaction.type === TransactionType.INSERT && transaction.new) {
+      if (query.matches(transaction.new, false)) {
+        // insert to inner -> INSERT
+        return transaction;
+      } else {
+        // insert to outer -> NONE
+        return { ...transaction, type: TransactionType.NONE, new: undefined };
+      }
+    }
+
+    if (transaction.type === TransactionType.UPDATE && transaction.before) {
+      const updateObj = TransactionRequest.applyOperator(transaction);
+      if (query.matches(transaction.before, false)) {
+        if (query.matches(updateObj, false)) {
+          // update from inner to inner -> UPDATE
+          return transaction;
+        } else {
+          // update from inner to outer -> DELETE
+          return { ...transaction, type: TransactionType.DELETE, operator: undefined };
+        }
+      } else {
+        if (query.matches(updateObj, false)) {
+          // update from outer to inner -> INSERT
+          return { ...transaction, type: TransactionType.INSERT, new: updateObj, before: undefined, operator: undefined };
+        } else {
+          // update from outer to outer -> NONE
+          return { ...transaction, type: TransactionType.NONE, before: undefined, operator: undefined };
+        }
+      }
+    }
+
+    if (transaction.type === TransactionType.DELETE && transaction.before) {
+      if (query.matches(transaction.before, false)) {
+        // delete from inner -> DELETE
+        return transaction;
+      } else {
+        // delete from out -> NONE
+        return { ...transaction, type: TransactionType.NONE, before: undefined };
+      }
+    }
+    throw new Error("Bad transaction data:" + JSON.stringify(transaction));
+  }
+}
+
+/**
  * サブセットストレージコンフィグレーションパラメータ
  */
 export class SubsetStorageConfigDef {
@@ -315,22 +394,22 @@ export class SubsetStorageConfigDef {
   /**
    * データベース名
    */
-  database: string;
+  readonly database: string;
 
   /**
    * サブセット名
    */
-  subset: string;
+  readonly subset: string;
 
   /**
    * true の場合はクエリハンドラを "loadBalancing" モードで登録し、外部にサービスを公開する。 false の場合はクエリハンドラを "localOnly" モードで登録する
    */
-  exported: boolean;
+  readonly exported: boolean;
 
   /**
    * サブセットストレージのタイプで persistent か cache のいずれかである
    */
-  type: "persistent" | "cache";
+  readonly type: "persistent" | "cache";
 }
 
 /**
@@ -356,12 +435,18 @@ export class SubsetStorage extends ServiceEngine implements Proxy {
   private subscriberKey: string | null;
   private readyFlag: boolean = false;
   private updateProcessor: UpdateProcessor;
+  private updateListener: UpdateListener;
+  private updateListenerKey: string | null;
 
   constructor(option: SubsetStorageConfigDef) {
     super(option);
     this.logger.debug(JSON.stringify(option));
     this.option = option;
     this.lock = new ReadWriteLock();
+  }
+
+  getOption(): SubsetStorageConfigDef {
+    return this.option;
   }
 
   getNode(): ResourceNode {
@@ -463,7 +548,9 @@ export class SubsetStorage extends ServiceEngine implements Proxy {
     }
 
     this.updateProcessor = new UpdateProcessor(this, this.database, this.subsetDefinition);
+    this.updateListener = new UpdateListener(this, this.database, this.subsetDefinition);
     let promise = this.subsetDb.start();
+    promise = promise.then(() => { this.logger.debug("SubsetStorage is starting"); });
     promise = promise.then(() => this.journalDb.start());
     promise = promise.then(() => this.systemDb.start());
     promise = promise.then(() => {
@@ -474,19 +561,25 @@ export class SubsetStorage extends ServiceEngine implements Proxy {
           }
         });
     });
+    // トランザクションを購読する
+    promise = promise.then(() => node.subscribe(
+      CORE_NODE.PATH_TRANSACTION.replace(/:database\b/g, this.database), this.updateListener))
+      .then((key) => { this.updateListenerKey = key; });
     promise = promise.then(() =>
       node.subscribe(CORE_NODE.PATH_SUBSET_TRANSACTION
         .replace(/:database\b/g, this.database)
         .replace(/:subset\b/g, this.subsetName), this.updateProcessor).then((key) => { this.subscriberKey = key; }),
     );
     promise = promise.then(() => new Promise<void>((resolve) => setTimeout(resolve, 1)));
-
-    this.logger.debug("SubsetStorage is started");
+    promise = promise.then(() => { this.logger.debug("SubsetStorage is started"); });
     return promise;
   }
 
   stop(node: ResourceNode): Promise<void> {
     return Promise.resolve()
+      .then(() => {
+        if (this.updateListenerKey) { return this.node.unsubscribe(this.updateListenerKey); }
+      })
       .then(() => {
         if (this.mountHandle) { return this.node.unmount(this.mountHandle).catch(); }
       })
