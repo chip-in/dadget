@@ -19,6 +19,7 @@ const KEEP_TIME_AFTER_CONTEXT_MANAGER_MASTER_ACQUIRED_MS = 3000; // 3000ms
 const KEEP_TIME_AFTER_SENDING_ROLLBACK_MS = 1000; // 1000ms
 const CHECK_POINT_CHECK_PERIOD_MS = 10 * 60 * 1000;  // 10 minutes
 const CHECK_POINT_DELETE_PERIOD_MS = 72 * 60 * 60 * 1000; // 72 hours
+const MAX_RESPONSE_SIZE_OF_JOURNALS = 10485760;
 
 /**
  * コンテキストマネージャコンフィグレーションパラメータ
@@ -61,6 +62,8 @@ class TransactionJournalSubscriber extends Subscriber {
     this.context.getLock().acquire("transaction", () => {
       if (transaction.type === TransactionType.ROLLBACK) {
         this.logger.warn("ROLLBACK:", transaction.csn);
+        const protectedCsn = this.context.getJournalDb().getProtectedCsn();
+        this.context.getJournalDb().setProtectedCsn(Math.min(protectedCsn, transaction.csn));
         return this.context.getJournalDb().findByCsn(transaction.csn)
           .then((tr) => {
             return this.context.getJournalDb().deleteAfterCsn(transaction.csn)
@@ -94,14 +97,6 @@ class TransactionJournalSubscriber extends Subscriber {
                 this.logger.info("insert transaction:", transaction.csn);
                 return this.context.getJournalDb().insert(transaction)
                   .then(() => this.context.getSystemDb().updateCsn(transaction.csn));
-              } else {
-                this.logger.warn("beforeDigest mismatch:", transaction.csn);
-                return this.adjustData(transaction.csn);
-              }
-            } else {
-              if (savedTransaction.digest !== transaction.digest) {
-                this.logger.warn("digest mismatch:", transaction.csn);
-                return this.adjustData(transaction.csn);
               }
             }
           })
@@ -159,13 +154,17 @@ class TransactionJournalSubscriber extends Subscriber {
 }
 
 class ContextManagementServer extends Proxy {
-  private lastBeforeObj: { _id?: string, csn?: number };
+  private lastBeforeObj?: { _id?: string, csn?: number };
   private lastCheckPointTime: number = 0;
 
   constructor(protected context: ContextManager) {
     super();
     this.logger.category = "ContextManagementServer";
     this.logger.debug("ContextManagementServer is created");
+  }
+
+  resetLastBeforeObj() {
+    this.lastBeforeObj = undefined;
   }
 
   onReceive(req: http.IncomingMessage, res: http.ServerResponse): Promise<http.ServerResponse> {
@@ -178,16 +177,23 @@ class ContextManagementServer extends Proxy {
     if (method === "OPTIONS") {
       return ProxyHelper.procOption(req, res);
     } else if (url.pathname.endsWith(CORE_NODE.PATH_EXEC) && method === "POST") {
-      return ProxyHelper.procPost(req, res, (data) => {
-        this.logger.debug("/exec");
-        const request = EJSON.parse(data);
-        return this.exec(request.csn, request.request);
+      return ProxyHelper.procPost(req, res, this.logger, (request) => {
+        const csn = ProxyHelper.validateNumberRequired(request.csn, "csn");
+        this.logger.info(CORE_NODE.PATH_EXEC, "postulatedCsn:", csn);
+        return this.exec(csn, request.request);
       });
-    } else if (url.pathname.endsWith(CORE_NODE.PATH_GET_TRANSACTION) && method === "POST") {
-      return ProxyHelper.procPost(req, res, (data) => {
-        this.logger.debug("/getTransactionJournal");
-        const request = EJSON.parse(data);
-        return this.getTransactionJournal(request.csn);
+    } else if (url.pathname.endsWith(CORE_NODE.PATH_GET_TRANSACTION) && method === "GET") {
+      return ProxyHelper.procGet(req, res, this.logger, (request) => {
+        const csn = ProxyHelper.validateNumberRequired(request.csn, "csn");
+        this.logger.info(CORE_NODE.PATH_GET_TRANSACTION, "csn:", csn);
+        return this.getTransactionJournal(csn);
+      });
+    } else if (url.pathname.endsWith(CORE_NODE.PATH_GET_TRANSACTIONS) && method === "GET") {
+      return ProxyHelper.procGet(req, res, this.logger, (request) => {
+        const fromCsn = ProxyHelper.validateNumberRequired(request.fromCsn, "fromCsn");
+        const toCsn = ProxyHelper.validateNumberRequired(request.toCsn, "toCsn");
+        this.logger.info(CORE_NODE.PATH_GET_TRANSACTIONS, "from:", fromCsn, "to:", toCsn);
+        return this.getTransactionJournals(fromCsn, toCsn);
       });
     } else {
       this.logger.warn("server command not found!:", method, url.pathname);
@@ -196,8 +202,6 @@ class ContextManagementServer extends Proxy {
   }
 
   exec(postulatedCsn: number, request: TransactionRequest): Promise<object> {
-    this.logger.info("exec csn:", postulatedCsn);
-
     let err: string | null = null;
     if (!request.target) {
       err = "target required in a transaction";
@@ -254,9 +258,9 @@ class ContextManagementServer extends Proxy {
                   transaction = Object.assign({
                     csn: newCsn,
                     beforeDigest: lastDigest,
-                    protectedCsn: this.context.getJournalDb().getProtectedCsn(),
                   }, _request);
                   transaction.digest = TransactionObject.calcDigest(transaction);
+                  transaction.protectedCsn = this.context.getJournalDb().getProtectedCsn();
                   return this.context.getJournalDb().insert(transaction);
                 });
             }).then(() => {
@@ -334,13 +338,40 @@ class ContextManagementServer extends Proxy {
         }
       });
   }
+
+  getTransactionJournals(fromCsn: number, toCsn: number): Promise<object> {
+    const loopData = {
+      csn: fromCsn,
+      size: 0,
+    };
+    const journals: string[] = [];
+    return Util.promiseWhile<{ csn: number, size: number }>(
+      loopData,
+      (loopData) => {
+        return loopData.csn <= toCsn && loopData.size <= MAX_RESPONSE_SIZE_OF_JOURNALS;
+      },
+      (loopData) => {
+        return this.context.getJournalDb().findByCsn(loopData.csn)
+          .then((journal) => {
+            if (!journal) { throw new Error("journal not found: " + loopData.csn); }
+            delete (journal as any)._id;
+            const journalStr = JSON.stringify(journal);
+            journals.push(journalStr);
+            return { csn: loopData.csn + 1, size: loopData.size + journalStr.length };
+          });
+      },
+    )
+      .then(() => ({
+        status: "OK",
+        journals,
+      }));
+  }
 }
 
 /**
  * コンテキストマネージャ(ContextManager)
  *
  * コンテキストマネージャは、逆接続プロキシの Rest API で exec メソッドを提供する。
- * TODO IndexedDB対応
  */
 export class ContextManager extends ServiceEngine {
 
@@ -447,9 +478,11 @@ export class ContextManager extends ServiceEngine {
         onDisconnect: () => {
           this.logger.info("ContextManagementServer is disconnected");
           this.mountHandle = undefined;
+          this.server.resetLastBeforeObj();
         },
         onRemount: (mountHandle: string) => {
           this.logger.info("ContextManagementServer is remounted");
+          this.server.resetLastBeforeObj();
           this.procAfterContextManagementServerConnect(mountHandle);
         },
       })
@@ -473,6 +506,9 @@ export class ContextManager extends ServiceEngine {
             .then((csn) => {
               return this.journalDb.findByCsn(csn)
                 .then((tr) => {
+                  const protectedCsn = this.getJournalDb().getProtectedCsn();
+                  this.getJournalDb().setProtectedCsn(Math.min(protectedCsn, csn));
+
                   const transaction = new TransactionObject();
                   if (tr) {
                     transaction.digest = tr.digest;

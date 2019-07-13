@@ -101,6 +101,7 @@ export class JournalDb {
     if (transaction.operator) {
       saveTrans.operator = EJSON.stringify(transaction.operator);
     }
+    delete saveTrans.protectedCsn;
     return saveTrans;
   }
 

@@ -1,6 +1,7 @@
 import { ResourceNode } from "@chip-in/resource-node";
 import * as dDiff from "deep-diff";
 import * as parser from "mongo-parse";
+import * as URL from "url";
 import { CORE_NODE } from "../Config";
 import { TransactionObject } from "../db/Transaction";
 import * as EJSON from "../util/Ejson";
@@ -62,13 +63,11 @@ export class Util {
   }
 
   static fetchJournal(csn: number, database: string, node: ResourceNode): Promise<TransactionObject | null> {
-    return node.fetch(CORE_NODE.PATH_CONTEXT.replace(/:database\b/g, database) + CORE_NODE.PATH_GET_TRANSACTION, {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-      },
-      body: EJSON.stringify({ csn }),
-    })
+    const reqUrl = URL.format({
+      pathname: CORE_NODE.PATH_CONTEXT.replace(/:database\b/g, database) + CORE_NODE.PATH_GET_TRANSACTION,
+      query: { csn },
+    });
+    return node.fetch(reqUrl)
       .then((fetchResult) => {
         if (typeof fetchResult.ok !== "undefined" && !fetchResult.ok) { throw Error(fetchResult.statusText); }
         return fetchResult.json();
@@ -89,6 +88,62 @@ export class Util {
       });
   }
 
+  static fetchJournals(
+    fromCsn: number,
+    toCsn: number,
+    database: string,
+    node: ResourceNode,
+    callback: (obj: TransactionObject) => Promise<void>,
+  ): Promise<void> {
+    const mainLoop = {
+      csn: fromCsn,
+    };
+    return Util.promiseWhile<{ csn: number }>(
+      mainLoop,
+      (mainLoop) => mainLoop.csn <= toCsn,
+      (mainLoop) => {
+        const reqUrl = URL.format({
+          pathname: CORE_NODE.PATH_CONTEXT.replace(/:database\b/g, database) + CORE_NODE.PATH_GET_TRANSACTIONS,
+          query: { fromCsn: mainLoop.csn, toCsn },
+        });
+        return node.fetch(reqUrl)
+          .then((fetchResult) => {
+            if (typeof fetchResult.ok !== "undefined" && !fetchResult.ok) { throw Error(fetchResult.statusText); }
+            return fetchResult.json();
+          })
+          .then((result) => {
+            console.log("fetchJournals: ", JSON.stringify(result));
+            if (result.status === "OK") {
+              const loopData = {
+                csn: mainLoop.csn,
+                journals: result.journals,
+              };
+              return Util.promiseWhile<{ csn: number, journals: string[] }>(
+                loopData,
+                (loopData) => loopData.journals.length > 0,
+                (loopData) => {
+                  const journalStr = loopData.journals.shift();
+                  if (!journalStr) { throw new Error("empty journal string"); }
+                  const journal = EJSON.deserialize(JSON.parse(journalStr)) as TransactionObject;
+                  return callback(journal)
+                    .then(() => ({
+                      csn: journal.csn,
+                      journals: loopData.journals,
+                    }));
+                },
+              ).then((loopData) => loopData.csn + 1);
+            } else if (result.reason) {
+              const reason = result.reason as DadgetError;
+              throw new DadgetError({ code: reason.code, message: reason.message }, reason.inserts, reason.ns);
+            } else {
+              throw new Error(JSON.stringify(result));
+            }
+          })
+          .then((csn) => ({ csn }));
+      })
+      .then(() => { });
+  }
+
   static diff(lhs: object, rhs: object): object[] {
     if (dDiff.diff) {
       return dDiff.diff(lhs, rhs);
@@ -96,5 +151,28 @@ export class Util {
       // for browsers
       return (dDiff as any).default.diff(lhs, rhs);
     }
+  }
+
+  static project(data: any, projection?: any): object {
+    if (!projection) { return data; }
+    let mode = 0;
+    for (const key in projection) {
+      if (key !== "_id") { mode = projection[key]; }
+    }
+    let newData;
+    if (mode === 0) {
+      newData = { ...data };
+      for (const key in data) {
+        if (projection[key] === 0) { delete newData[key]; }
+      }
+    } else {
+      newData = {} as any;
+      for (const key in data) {
+        if (key === "_id") {
+          if (projection[key] !== 0) { newData[key] = data[key]; }
+        } else if (projection[key]) { newData[key] = data[key]; }
+      }
+    }
+    return newData;
   }
 }

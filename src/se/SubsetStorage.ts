@@ -195,6 +195,14 @@ class UpdateProcessor extends Subscriber {
     return Util.fetchJournal(csn, this.database, this.storage.getNode());
   }
 
+  fetchJournals(
+    fromCsn: number,
+    toCsn: number,
+    callback: (obj: TransactionObject) => Promise<void>,
+  ): Promise<void> {
+    return Util.fetchJournals(fromCsn, toCsn, this.database, this.storage.getNode(), callback);
+  }
+
   private adjustData(csn: number): Promise<void> {
     this.logger.warn("adjustData:" + csn);
     return Promise.resolve()
@@ -237,26 +245,10 @@ class UpdateProcessor extends Subscriber {
                         return this.adjustData(csn);
                       });
                   } else {
-                    const loopData = {
-                      csn: journal.csn,
-                      to: csn,
-                    };
-                    return Util.promiseWhile<{ csn: number, to: number }>(
-                      loopData,
-                      (loopData) => {
-                        return loopData.csn < loopData.to;
-                      },
-                      (loopData) => {
-                        const nextCsn = loopData.csn + 1;
-                        return this.fetchJournal(nextCsn)
-                          .then((fetchJournal) => {
-                            if (!fetchJournal) { throw new Error("journal not found: " + nextCsn); }
-                            const subsetTransaction = UpdateManager.convertTransactionForSubset(this.subsetDefinition, fetchJournal);
-                            return this.updateSubsetDb(Promise.resolve(), subsetTransaction);
-                          })
-                          .then(() => ({ ...loopData, csn: nextCsn }));
-                      },
-                    )
+                    return this.fetchJournals(journal.csn + 1, csn, (fetchJournal) => {
+                      const subsetTransaction = UpdateManager.convertTransactionForSubset(this.subsetDefinition, fetchJournal);
+                      return this.updateSubsetDb(Promise.resolve(), subsetTransaction);
+                    })
                       .then(() => { this.storage.setReady(); });
                   }
                 });
@@ -397,7 +389,9 @@ export class SubsetStorage extends ServiceEngine implements Proxy {
   }
 
   setReady(): void {
-    console.log("setReady");
+    if (this.readyFlag) {
+      return;
+    }
     this.readyFlag = true;
 
     // Rest サービスを登録する。
@@ -485,6 +479,7 @@ export class SubsetStorage extends ServiceEngine implements Proxy {
         .replace(/:database\b/g, this.database)
         .replace(/:subset\b/g, this.subsetName), this.updateProcessor).then((key) => { this.subscriberKey = key; }),
     );
+    promise = promise.then(() => new Promise<void>((resolve) => setTimeout(resolve, 1)));
 
     this.logger.debug("SubsetStorage is started");
     return promise;
@@ -509,21 +504,26 @@ export class SubsetStorage extends ServiceEngine implements Proxy {
     this.logger.debug(method, url.pathname);
     if (method === "OPTIONS") {
       return ProxyHelper.procOption(req, res);
-    } else if (url.pathname.endsWith(CORE_NODE.PATH_QUERY) && method === "POST") {
-      return ProxyHelper.procPost(req, res, (data) => {
+    } else if (url.pathname.endsWith(CORE_NODE.PATH_QUERY) && method === "GET") {
+      return ProxyHelper.procGet(req, res, this.logger, (request) => {
         this.logger.debug(CORE_NODE.PATH_QUERY);
-        const request = EJSON.parse(data);
-        return this.query(request.csn, request.query, request.sort, request.limit, request.csnMode)
+        const csn = ProxyHelper.validateNumberRequired(request.csn, "csn");
+        const query = EJSON.parse(request.query);
+        const sort = request.sort ? EJSON.parse(request.sort) : undefined;
+        const limit = ProxyHelper.validateNumber(request.limit, "limit");
+        const projection = request.projection ? EJSON.parse(request.projection) : undefined;
+        return this.query(csn, query, sort, limit, request.csnMode, projection)
           .then((result) => {
             console.dir(result);
             return { status: "OK", result };
           });
       });
-    } else if (url.pathname.endsWith(CORE_NODE.PATH_COUNT) && method === "POST") {
-      return ProxyHelper.procPost(req, res, (data) => {
+    } else if (url.pathname.endsWith(CORE_NODE.PATH_COUNT) && method === "GET") {
+      return ProxyHelper.procGet(req, res, this.logger, (request) => {
         this.logger.debug(CORE_NODE.PATH_COUNT);
-        const request = EJSON.parse(data);
-        return this.count(request.csn, request.query, request.csnMode)
+        const csn = ProxyHelper.validateNumberRequired(request.csn, "csn");
+        const query = EJSON.parse(request.query);
+        return this.count(csn, query, request.csnMode)
           .then((result) => {
             console.dir(result);
             return { status: "OK", result };
@@ -579,7 +579,7 @@ export class SubsetStorage extends ServiceEngine implements Proxy {
                 this.logger.info("not enough rollback transactions");
                 return { csn, resultCount: 0, restQuery: query };
               }
-              return this.getSubsetDb().count({$and: [innerQuery, {csn: {$lte: csn}}]})
+              return this.getSubsetDb().count({ $and: [innerQuery, { csn: { $lte: csn } }] })
                 .then((result) => {
                   release();
                   const resultSet = SubsetStorage.rollbackAndFind([], transactions, innerQuery);
@@ -599,13 +599,6 @@ export class SubsetStorage extends ServiceEngine implements Proxy {
                 });
             });
             release();
-
-            let promise = Promise.resolve();
-            for (let i = currentCsn + 1; i <= csn; i++) {
-              const _csn = i;
-              promise = promise.then(() => this.updateProcessor.fetchJournal(_csn))
-                .then((journal) => { if (journal) { this.updateProcessor.procTransaction(journal); } });
-            }
           });
         }
       }).catch((e) => {
@@ -615,7 +608,7 @@ export class SubsetStorage extends ServiceEngine implements Proxy {
       });
   }
 
-  query(csn: number, query: object, sort?: object, limit?: number, csnMode?: CsnMode): Promise<QueryResult> {
+  query(csn: number, query: object, sort?: object, limit?: number, csnMode?: CsnMode, projection?: object): Promise<QueryResult> {
     if (!this.readyFlag) {
       return Promise.resolve({ csn, resultSet: [], restQuery: query, csnMode });
     }
@@ -642,7 +635,7 @@ export class SubsetStorage extends ServiceEngine implements Proxy {
       .then(() => this.getSystemDb().getCsn())
       .then((currentCsn) => {
         if (csn === 0 || csn === currentCsn || (csn < currentCsn && csnMode === "latest")) {
-          return this.getSubsetDb().find(innerQuery, sort, limit)
+          return this.getSubsetDb().find(innerQuery, sort, limit, projection)
             .then((result) => {
               release();
               return { csn: currentCsn, resultSet: result, restQuery };
@@ -663,7 +656,8 @@ export class SubsetStorage extends ServiceEngine implements Proxy {
               return this.getSubsetDb().find(innerQuery, sort, possibleLimit)
                 .then((result) => {
                   release();
-                  const resultSet = SubsetStorage.rollbackAndFind(result, transactions, innerQuery, sort, limit);
+                  const resultSet = SubsetStorage.rollbackAndFind(result, transactions, innerQuery, sort, limit)
+                    .map((val) => Util.project(val, projection));
                   return { csn, resultSet, restQuery };
                 });
             });
@@ -673,19 +667,12 @@ export class SubsetStorage extends ServiceEngine implements Proxy {
           return new Promise<QueryResult>((resolve, reject) => {
             if (!this.queryWaitingList[csn]) { this.queryWaitingList[csn] = []; }
             this.queryWaitingList[csn].push(() => {
-              return this.getSubsetDb().find(innerQuery, sort, limit)
+              return this.getSubsetDb().find(innerQuery, sort, limit, projection)
                 .then((result) => {
                   resolve({ csn, resultSet: result, restQuery });
                 });
             });
             release();
-
-            let promise = Promise.resolve();
-            for (let i = currentCsn + 1; i <= csn; i++) {
-              const _csn = i;
-              promise = promise.then(() => this.updateProcessor.fetchJournal(_csn))
-                .then((journal) => { if (journal) { this.updateProcessor.procTransaction(journal); } });
-            }
           });
         }
       }).catch((e) => {

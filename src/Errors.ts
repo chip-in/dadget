@@ -11,9 +11,9 @@ export const ERROR = {
   E1002: { code: 1002, message: "SystemDb failed to increment the value of csn. cause=%1" },
 
   /**
-   * SystemDb failed to get current the value of csn.
+   * SystemDb failed to get the current value of csn.
    */
-  E1003: { code: 1003, message: "SystemDb failed to get current the value of csn. cause=%1" },
+  E1003: { code: 1003, message: "SystemDb failed to get the current value of csn. cause=%1" },
 
   /**
    * SystemDb failed to update the value of csn.

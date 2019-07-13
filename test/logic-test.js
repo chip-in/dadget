@@ -165,7 +165,7 @@ describe('LogicalOperator', () => {
     }
 
     let result = LogicalOperator.getInsideOfCache(query1, query2)
-    chai.assert.deepEqual(result, { "$and": [{ "category": { "$in": ["EvacuationOrder", "Shelter", "TemporaryStayFacilities"] } }, { "distributionStatus": { "$in": ["Actual", "Exercise"] } }, { "areaCode": { "$regex": "^(11|13|00000|99999)" } }, { "overwritten": null }, { "expired": { "$gt": "2017-06-15T08:47:43.664Z" } }, { "a": 10 }] })
+    chai.assert.deepEqual(result, { "$and": [{ "a": 10 }, { "category": { "$in": ["EvacuationOrder", "Shelter", "TemporaryStayFacilities"] } }, { "distributionStatus": { "$in": ["Actual", "Exercise"] } }, { "areaCode": { "$regex": "^(11|13|00000|99999)" } }, { "overwritten": null }, { "expired": { "$gt": "2017-06-15T08:47:43.664Z" } }] })
 
     result = LogicalOperator.getOutsideOfCache(query1, query2)
     //    chai.assert.deepEqual(result, { "a": 10 })
@@ -199,10 +199,171 @@ describe('LogicalOperator', () => {
     }
 
     let result = LogicalOperator.getInsideOfCache(query1, query2)
-    chai.assert.deepEqual(result, { "category": { "$in": ["EvacuationOrder"] } })
+    chai.assert.deepEqual(result, {"$and":[{"category":{"$in":["EvacuationOrder","Shelter1"]}},{"category":{"$in":["EvacuationOrder","Shelter2","TemporaryStayFacilities"]}}]})
 
     result = LogicalOperator.getOutsideOfCache(query1, query2)
     chai.assert.deepEqual(result, { "$and": [{ "category": { "$in": ["EvacuationOrder", "Shelter1"] } }, { "category": { "$nin": ["EvacuationOrder", "Shelter2", "TemporaryStayFacilities"] } }] })
+  });
+
+  it('pattern 18', () => {
+    let query1 = { "a": { "$ne": 2 }, "b": 2, "c": { $elemMatch: { "d": 3 } } }
+    let query2 = { "a": 2 }
+
+    let result = LogicalOperator.getInsideOfCache(query1, query2)
+    chai.assert.deepEqual(result, undefined)
+
+    result = LogicalOperator.getOutsideOfCache(query1, query2)
+    chai.assert.deepEqual(result, { $and: [{ "a": { "$ne": 2 } }, { "b": 2 }, { "c": { $elemMatch: { "d": 3 } } }] })
+  });
+
+  it('pattern 19', () => {
+    let query1 = { "a": { "$ne": 2 }, "b": 2, "c": { "a": { "d": 3 } } }
+    let query2 = { "a": 2 }
+
+    let result = LogicalOperator.getInsideOfCache(query1, query2)
+    chai.assert.deepEqual(result, undefined)
+
+    result = LogicalOperator.getOutsideOfCache(query1, query2)
+    chai.assert.deepEqual(result, { $and: [{ "a": { "$ne": 2 } }, { "b": 2 }, { "c": { "a": { "d": 3 } } }] })
+  });
+
+  it('pattern 20', () => {
+    let query1 = { "a": { "$ne": 2 }, "b": 2, "c": { "$and": [{ "d": 3 }, { "e": 4 }] } }
+    let query2 = { "a": 2 }
+
+    let result = LogicalOperator.getInsideOfCache(query1, query2)
+    chai.assert.deepEqual(result, undefined)
+
+    result = LogicalOperator.getOutsideOfCache(query1, query2)
+    chai.assert.deepEqual(result, { $and: [{ "a": { "$ne": 2 } }, { "b": 2 }, { "c": { "$and": [{ "d": 3 }, { "e": 4 }] } }] })
+  });
+
+  it('pattern 21', () => {
+    let query1 = {
+      "isEffective": true,
+      "category": {
+        "$in": [
+          "EvacuationOrder",
+          "Shelter",
+          "TemporaryStayFacilities",
+          "DamageInformation",
+          "AntidisasterHeadquarter",
+          "EscalationMessage_UrgentMail",
+          "UrgentMail",
+          "CivilProtection",
+          "Event",
+          "PowerFailure",
+          "GeneralInformation"
+        ]
+      }
+    }
+    let query2 = {
+      "isEffective": true,
+      "category": {
+        "$in": [
+          "EvacuationOrder",
+          "Shelter",
+          "TemporaryStayFacilities",
+          "DamageInformation",
+          "AntidisasterHeadquarter",
+          "EscalationMessage_UrgentMail",
+          "UrgentMail",
+          "CivilProtection",
+          "Event",
+          "PowerFailure",
+          "GeneralInformation"
+        ]
+      }
+    }
+
+    let result = LogicalOperator.getInsideOfCache(query1, query2)
+    chai.assert.deepEqual(result, { $and: [
+      {
+        "isEffective": true,
+      },
+      {"category": {
+        "$in": [
+          "EvacuationOrder",
+          "Shelter",
+          "TemporaryStayFacilities",
+          "DamageInformation",
+          "AntidisasterHeadquarter",
+          "EscalationMessage_UrgentMail",
+          "UrgentMail",
+          "CivilProtection",
+          "Event",
+          "PowerFailure",
+          "GeneralInformation"
+        ]
+      }},
+    ]})
+
+    result = LogicalOperator.getOutsideOfCache(query1, query2)
+    chai.assert.deepEqual(result, undefined)
+  });
+
+  it('pattern 22', () => {
+    let query1 = {
+      "isEffective": true,
+      "category": {
+        "$in": [
+          "CivilProtection",
+          "PowerFailure",
+          "GeneralInformation"
+        ]
+      }
+    }
+    let query2 = {
+      "isEffective": true,
+      "category": {
+        "$in": [
+          "CivilProtection",
+          "Event",
+          "PowerFailure",
+          "GeneralInformation"
+        ]
+      }
+    }
+
+    let result = LogicalOperator.getInsideOfCache(query1, query2)
+    chai.assert.deepEqual(result, {"$and":[{"isEffective":true},{"category":{"$in":["CivilProtection","PowerFailure","GeneralInformation"]}},{"category":{"$in":["CivilProtection","Event","PowerFailure","GeneralInformation"]}}]})
+
+    result = LogicalOperator.getOutsideOfCache(query1, query2)
+    chai.assert.deepEqual(result, undefined)
+  });
+
+  it('pattern 23', () => {
+    let query1 = {
+      "areacode": { "$regex": "^(01|02|00000|99999)" },
+      "category": { "$in": ["Shelter"] },
+      "distributionStatus": { "$in": ["Actual", "Exercise"] },
+      "expired": { "$gt": "2019-04-04T12:10:00+09:00" },
+      "receivedTime": { "$lte": "2019-04-04T12:10:00+09:00" }
+    }
+
+    let query2 = {
+      "isEffective": true,
+      "category": {
+        "$in": [
+          "EvacuationOrder"
+        ]
+      },
+      "distributionStatus": {
+        "$in": [
+          "Actual",
+          "Exercise"
+        ]
+      },
+      "areacode": {
+        "$regex": "^(01|06|04|00000|99999)"
+      }
+    }
+
+    let result = LogicalOperator.getInsideOfCache(query1, query2)
+    chai.assert.deepEqual(result, {"$and":[{"areacode":{"$regex":"^(01|02|00000|99999)"}},{"category":{"$in":["Shelter"]}},{"distributionStatus":{"$in":["Actual","Exercise"]}},{"expired":{"$gt":"2019-04-04T12:10:00+09:00"}},{"receivedTime":{"$lte":"2019-04-04T12:10:00+09:00"}},{"isEffective":true},{"category":{"$in":["EvacuationOrder"]}},{"areacode":{"$regex":"^(01|06|04|00000|99999)"}}]})
+
+    result = LogicalOperator.getOutsideOfCache(query1, query2)
+    chai.assert.deepEqual(result, {"$and":[{"areacode":{"$regex":"^(01|02|00000|99999)"}},{"category":{"$in":["Shelter"]}},{"distributionStatus":{"$in":["Actual","Exercise"]}},{"expired":{"$gt":"2019-04-04T12:10:00+09:00"}},{"receivedTime":{"$lte":"2019-04-04T12:10:00+09:00"}},{"$or":[{"isEffective":{"$ne":true}},{"category":{"$nin":["EvacuationOrder"]}},{"areacode":{"$not":{"$regex":"^(01|06|04|00000|99999)"}}}]}]})
   });
 });
 
