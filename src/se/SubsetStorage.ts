@@ -469,6 +469,14 @@ export class SubsetStorage extends ServiceEngine implements Proxy {
     return this.lock;
   }
 
+  getDbName(): string {
+    return this.database + "--" + this.subsetName;
+  }
+
+  getType(): string {
+    return this.type;
+  }
+
   getReady(): boolean {
     return this.readyFlag;
   }
@@ -519,6 +527,7 @@ export class SubsetStorage extends ServiceEngine implements Proxy {
     }
     this.subsetName = this.option.subset;
     this.logger.info("subsetName:", this.subsetName);
+    console.dir(this.option);
 
     // サブセットの定義を取得する
     const seList = node.searchServiceEngine("DatabaseRegistry", { database: this.database });
@@ -536,7 +545,7 @@ export class SubsetStorage extends ServiceEngine implements Proxy {
     }
 
     // ストレージを準備
-    const dbName = this.database + "--" + this.subsetName;
+    const dbName = this.getDbName();
     if (this.type === "cache") {
       this.subsetDb = new SubsetDb(new CacheDb(dbName), this.subsetName, metaData.indexes || []);
       this.journalDb = new JournalDb(new CacheDb(dbName));

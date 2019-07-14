@@ -19,6 +19,17 @@ export class PersistentDb implements IDb {
     return query;
   }
 
+  public static getAllStorage(): Promise<string[]> {
+    return MongoClient.connect(Mongo.getUrl())
+      .then((db) => db.admin().listDatabases())
+      .then((list) => list.databases.map((_: { name: string; }) => _.name));
+  }
+
+  public static deleteStorage(name: string) {
+    return MongoClient.connect(Mongo.getUrl() + name)
+      .then((db) => db.dropDatabase());
+  }
+
   constructor(protected database: string) {
     console.log("PersistentDb is created");
   }

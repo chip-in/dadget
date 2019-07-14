@@ -3,6 +3,7 @@ import { v1 as uuidv1 } from "uuid";
 
 import { ResourceNode, ServiceEngine, Subscriber } from "@chip-in/resource-node";
 import { CORE_NODE, setAccessControlAllowOrigin } from "../Config";
+import { PersistentDb } from "../db/container/PersistentDb";
 import { TransactionObject, TransactionRequest, TransactionType } from "../db/Transaction";
 import { ERROR } from "../Errors";
 import { DadgetError } from "../util/DadgetError";
@@ -129,8 +130,26 @@ export default class Dadget extends ServiceEngine {
     if (this.option.database.match(/--/)) {
       throw new DadgetError(ERROR.E2101, ["Database name can not contain '--'."]);
     }
-    this.database = this.option.database;
+    const database = this.database = this.option.database;
     this.logger.debug("Dadget is started");
+
+    // Delete unused persistent databases
+    PersistentDb.getAllStorage()
+      .then((storageList) => {
+        const subsetStorages = node.searchServiceEngine("SubsetStorage", { database }) as SubsetStorage[];
+        const subsetNames = subsetStorages
+          .filter((subset) => subset.getType() === "persistent")
+          .map((subset) => subset.getDbName());
+        for (const storageName of storageList) {
+          if (!storageName.startsWith(database + "--")) { continue; }
+          const [dbName] = storageName.split("__");
+          if (subsetNames.indexOf(dbName) < 0) {
+            this.logger.warn("Delete storage", storageName);
+            PersistentDb.deleteStorage(storageName);
+          }
+        }
+      });
+
     return Promise.resolve();
   }
 
