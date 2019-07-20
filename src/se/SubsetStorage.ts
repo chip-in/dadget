@@ -21,6 +21,8 @@ import { Util } from "../util/Util";
 import { CountResult, CsnMode, default as Dadget, QueryResult } from "./Dadget";
 import { DatabaseRegistry, SubsetDef } from "./DatabaseRegistry";
 
+const MAX_RESPONSE_SIZE_OF_JOURNALS = 10485760;
+
 class UpdateProcessor extends Subscriber {
 
   private lock: ReadWriteLock;
@@ -36,7 +38,7 @@ class UpdateProcessor extends Subscriber {
   }
 
   onReceive(msg: string) {
-    console.log("UpdateProcessor received: " + msg.toString());
+    console.log("UpdateProcessor received: ", this.storage.getOption().subset, msg.toString());
     const transaction = EJSON.parse(msg) as TransactionObject;
     this.procTransaction(transaction);
   }
@@ -61,6 +63,9 @@ class UpdateProcessor extends Subscriber {
       const release1 = () => {
         console.log("UpdateProcessor released writeLock1");
         _release1();
+        if (this.storage.notifyListener) {
+          this.storage.notifyListener.procNotify(transaction);
+        }
       };
       console.log("UpdateProcessor waiting writeLock2");
       this.storage.getLock().writeLock((_release2) => {
@@ -192,7 +197,7 @@ class UpdateProcessor extends Subscriber {
   }
 
   fetchJournal(csn: number): Promise<TransactionObject | null> {
-    return Util.fetchJournal(csn, this.database, this.storage.getNode());
+    return Util.fetchJournal(csn, this.database, this.storage.getNode(), this.storage.getOption().subscribe);
   }
 
   fetchJournals(
@@ -200,7 +205,7 @@ class UpdateProcessor extends Subscriber {
     toCsn: number,
     callback: (obj: TransactionObject) => Promise<void>,
   ): Promise<void> {
-    return Util.fetchJournals(fromCsn, toCsn, this.database, this.storage.getNode(), callback);
+    return Util.fetchJournals(fromCsn, toCsn, this.database, this.storage.getNode(), callback, this.storage.getOption().subscribe);
   }
 
   private adjustData(csn: number): Promise<void> {
@@ -317,8 +322,10 @@ class UpdateListener extends Subscriber {
   constructor(
     protected storage: SubsetStorage,
     protected database: string,
-    protected subsetDefinition: SubsetDef) {
-
+    protected subsetDefinition: SubsetDef,
+    protected updateProcessor: UpdateProcessor,
+    protected exported: boolean,
+  ) {
     super();
     this.logger.category = "UpdateListener";
     this.logger.debug("UpdateListener is created");
@@ -328,15 +335,18 @@ class UpdateListener extends Subscriber {
     const transaction = EJSON.parse(transctionJSON) as TransactionObject;
     this.logger.info("received:", transaction.type, transaction.csn);
     const subsetTransaction = UpdateListener.convertTransactionForSubset(this.subsetDefinition, transaction);
-    this.storage.getNode().publish(CORE_NODE.PATH_SUBSET_TRANSACTION
-      .replace(/:database\b/g, this.database)
-      .replace(/:subset\b/g, this.storage.getOption().subset), EJSON.stringify(subsetTransaction));
+    if (this.exported) {
+      this.storage.getNode().publish(CORE_NODE.PATH_SUBSET_TRANSACTION
+        .replace(/:database\b/g, this.database)
+        .replace(/:subset\b/g, this.storage.getOption().subset), EJSON.stringify(subsetTransaction));
+    }
+    this.updateProcessor.procTransaction(subsetTransaction);
   }
 
   static convertTransactionForSubset(subsetDefinition: SubsetDef, transaction: TransactionObject): TransactionObject {
     // サブセット用のトランザクション内容に変換
 
-    if (transaction.type === TransactionType.ROLLBACK) {
+    if (transaction.type === TransactionType.ROLLBACK || transaction.type === TransactionType.NONE) {
       return transaction;
     }
     if (!subsetDefinition.query) { return transaction; }
@@ -386,6 +396,88 @@ class UpdateListener extends Subscriber {
   }
 }
 
+class SubsetUpdatorProxy extends Proxy {
+
+  constructor(protected storage: SubsetStorage) {
+    super();
+    this.logger.category = "SubsetUpdatorProxy";
+    this.logger.debug("SubsetUpdatorProxy is created");
+  }
+
+  onReceive(req: http.IncomingMessage, res: http.ServerResponse): Promise<http.ServerResponse> {
+    if (!req.url) { throw new Error("url is required."); }
+    if (!req.method) { throw new Error("method is required."); }
+    const url = URL.parse(req.url);
+    if (url.pathname == null) { throw new Error("pathname is required."); }
+    const method = req.method.toUpperCase();
+    this.logger.debug(method, url.pathname);
+    if (method === "OPTIONS") {
+      return ProxyHelper.procOption(req, res);
+    } else if (url.pathname.endsWith(CORE_NODE.PATH_GET_TRANSACTION) && method === "GET") {
+      return ProxyHelper.procGet(req, res, this.logger, (request) => {
+        const csn = ProxyHelper.validateNumberRequired(request.csn, "csn");
+        this.logger.info(CORE_NODE.PATH_GET_TRANSACTION, "csn:", csn);
+        return this.getTransactionJournal(csn);
+      });
+    } else if (url.pathname.endsWith(CORE_NODE.PATH_GET_TRANSACTIONS) && method === "GET") {
+      return ProxyHelper.procGet(req, res, this.logger, (request) => {
+        const fromCsn = ProxyHelper.validateNumberRequired(request.fromCsn, "fromCsn");
+        const toCsn = ProxyHelper.validateNumberRequired(request.toCsn, "toCsn");
+        this.logger.info(CORE_NODE.PATH_GET_TRANSACTIONS, "from:", fromCsn, "to:", toCsn);
+        return this.getTransactionJournals(fromCsn, toCsn);
+      });
+    } else {
+      this.logger.warn("server command not found!:", method, url.pathname);
+      return ProxyHelper.procError(req, res);
+    }
+  }
+
+  getTransactionJournal(csn: number): Promise<object> {
+    return this.storage.getJournalDb().findByCsn(csn)
+      .then((journal) => {
+        if (journal) {
+          delete (journal as any)._id;
+          return {
+            status: "OK",
+            journal,
+          };
+        } else {
+          return {
+            status: "NG",
+          };
+        }
+      });
+  }
+
+  getTransactionJournals(fromCsn: number, toCsn: number): Promise<object> {
+    const loopData = {
+      csn: fromCsn,
+      size: 0,
+    };
+    const journals: string[] = [];
+    return Util.promiseWhile<{ csn: number, size: number }>(
+      loopData,
+      (loopData) => {
+        return loopData.csn <= toCsn && loopData.size <= MAX_RESPONSE_SIZE_OF_JOURNALS;
+      },
+      (loopData) => {
+        return this.storage.getJournalDb().findByCsn(loopData.csn)
+          .then((journal) => {
+            if (!journal) { throw new Error("journal not found: " + loopData.csn); }
+            delete (journal as any)._id;
+            const journalStr = JSON.stringify(journal);
+            journals.push(journalStr);
+            return { csn: loopData.csn + 1, size: loopData.size + journalStr.length };
+          });
+      },
+    )
+      .then(() => ({
+        status: "OK",
+        journals,
+      }));
+  }
+}
+
 /**
  * サブセットストレージコンフィグレーションパラメータ
  */
@@ -402,9 +494,14 @@ export class SubsetStorageConfigDef {
   readonly subset: string;
 
   /**
+   * 上位サブセット名
+   */
+  readonly subscribe?: string;
+
+  /**
    * true の場合はクエリハンドラを "loadBalancing" モードで登録し、外部にサービスを公開する。 false の場合はクエリハンドラを "localOnly" モードで登録する
    */
-  readonly exported: boolean;
+  readonly exported?: boolean;
 
   /**
    * サブセットストレージのタイプで persistent か cache のいずれかである
@@ -436,7 +533,9 @@ export class SubsetStorage extends ServiceEngine implements Proxy {
   private readyFlag: boolean = false;
   private updateProcessor: UpdateProcessor;
   private updateListener: UpdateListener;
-  private updateListenerKey: string | null;
+  private updateListenerKey?: string;
+  private updateListenerMountHandle?: string;
+  notifyListener?: { procNotify: (transaction: TransactionObject) => void };
 
   constructor(option: SubsetStorageConfigDef) {
     super(option);
@@ -557,7 +656,7 @@ export class SubsetStorage extends ServiceEngine implements Proxy {
     }
 
     this.updateProcessor = new UpdateProcessor(this, this.database, this.subsetDefinition);
-    this.updateListener = new UpdateListener(this, this.database, this.subsetDefinition);
+    this.updateListener = new UpdateListener(this, this.database, this.subsetDefinition, this.updateProcessor, !!this.option.exported);
     let promise = this.subsetDb.start();
     promise = promise.then(() => { this.logger.debug("SubsetStorage is starting"); });
     promise = promise.then(() => this.journalDb.start());
@@ -570,22 +669,82 @@ export class SubsetStorage extends ServiceEngine implements Proxy {
           }
         });
     });
-    // トランザクションを購読する
-    promise = promise.then(() => node.subscribe(
-      CORE_NODE.PATH_TRANSACTION.replace(/:database\b/g, this.database), this.updateListener))
-      .then((key) => { this.updateListenerKey = key; });
-    promise = promise.then(() =>
-      node.subscribe(CORE_NODE.PATH_SUBSET_TRANSACTION
-        .replace(/:database\b/g, this.database)
-        .replace(/:subset\b/g, this.subsetName), this.updateProcessor).then((key) => { this.subscriberKey = key; }),
-    );
+    if (this.option.exported) {
+      promise = promise.then(() => this.connectUpdateListener());
+      promise = promise.then(() => this.subscribeUpdateProcessor());
+    } else {
+      // Local update mode
+      promise = promise.then(() => this.subscribeUpdateListener());
+    }
     promise = promise.then(() => new Promise<void>((resolve) => setTimeout(resolve, 1)));
     promise = promise.then(() => { this.logger.debug("SubsetStorage is started"); });
     return promise;
   }
 
+  connectUpdateListener() {
+    this.node.mount(CORE_NODE.PATH_SUBSET_UPDATOR
+      .replace(/:database\b/g, this.database)
+      .replace(/:subset\b/g, this.subsetName), "singletonMaster", new SubsetUpdatorProxy(this), {
+        onDisconnect: () => {
+          this.logger.info("updator is disconnected");
+          this.subscribeUpdateProcessor()
+            .then(() => {
+              if (this.updateListenerKey) { this.node.unsubscribe(this.updateListenerKey); }
+              this.updateListenerKey = undefined;
+            });
+        },
+        onRemount: (mountHandle: string) => {
+          this.logger.info("updator is remounted");
+          this.updateListenerMountHandle = mountHandle;
+          this.subscribeUpdateListener()
+            .then(() => {
+              if (this.subscriberKey) { this.node.unsubscribe(this.subscriberKey); }
+            });
+        },
+      })
+      .then((mountHandle) => {
+        // マスターを取得した場合のみ実行される
+        this.logger.info("updator is connected");
+        if (this.updateListenerMountHandle === "stopped") {
+          setTimeout(() => { this.node.unmount(mountHandle); }, 1);
+          return;
+        }
+        this.updateListenerMountHandle = mountHandle;
+        this.subscribeUpdateListener()
+          .then(() => {
+            if (this.subscriberKey) { this.node.unsubscribe(this.subscriberKey); }
+          });
+      });
+  }
+
+  subscribeUpdateListener(): Promise<void> {
+    if (this.option.subscribe) {
+      return this.node.subscribe(
+        CORE_NODE.PATH_SUBSET_TRANSACTION
+          .replace(/:database\b/g, this.database)
+          .replace(/:subset\b/g, this.option.subscribe), this.updateListener)
+        .then((key) => { this.updateListenerKey = key; });
+    } else {
+      return this.node.subscribe(
+        CORE_NODE.PATH_TRANSACTION.replace(/:database\b/g, this.database), this.updateListener)
+        .then((key) => { this.updateListenerKey = key; });
+    }
+  }
+
+  subscribeUpdateProcessor(): Promise<void> {
+    return this.node.subscribe(
+      CORE_NODE.PATH_SUBSET_TRANSACTION
+        .replace(/:database\b/g, this.database)
+        .replace(/:subset\b/g, this.subsetName), this.updateProcessor)
+      .then((key) => { this.subscriberKey = key; });
+  }
+
   stop(node: ResourceNode): Promise<void> {
     return Promise.resolve()
+      .then(() => {
+        if (this.updateListenerMountHandle) { return this.node.unmount(this.updateListenerMountHandle).catch(); }
+        this.updateListenerMountHandle = "stopped";
+      })
       .then(() => {
         if (this.updateListenerKey) { return this.node.unsubscribe(this.updateListenerKey); }
       })

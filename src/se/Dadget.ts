@@ -99,6 +99,7 @@ export default class Dadget extends ServiceEngine {
   private updateListeners: { [id: string]: { listener: (csn: number) => void, csn: number, minInterval: number, notifyTime: number } } = {};
   private updateListenerKey: string | null;
   private latestCsn: number;
+  private hasSubset = false;
 
   constructor(option: DadgetConfigDef) {
     super(option);
@@ -133,10 +134,10 @@ export default class Dadget extends ServiceEngine {
     const database = this.database = this.option.database;
     this.logger.debug("Dadget is started");
 
+    const subsetStorages = node.searchServiceEngine("SubsetStorage", { database }) as SubsetStorage[];
     // Delete unused persistent databases
     PersistentDb.getAllStorage()
       .then((storageList) => {
-        const subsetStorages = node.searchServiceEngine("SubsetStorage", { database }) as SubsetStorage[];
         const subsetNames = subsetStorages
           .filter((subset) => subset.getType() === "persistent")
           .map((subset) => subset.getDbName());
@@ -149,6 +150,11 @@ export default class Dadget extends ServiceEngine {
           }
         }
       });
+
+    if (subsetStorages.length > 0) {
+      this.hasSubset = true;
+      subsetStorages[0].notifyListener = this;
+    }
 
     return Promise.resolve();
   }
@@ -450,6 +456,18 @@ export default class Dadget extends ServiceEngine {
     }
   }
 
+  procNotify(transaction: TransactionObject) {
+    if (transaction.type === TransactionType.ROLLBACK) {
+      this.notifyCsn = transaction.csn;
+      this.notifyRollback(transaction.csn);
+    } else if (transaction.csn > this.notifyCsn) {
+      this.notifyCsn = transaction.csn;
+      setTimeout(() => {
+        this.notifyAll();
+      });
+    }
+  }
+
   /**
    * データベースの更新通知のリスナを登録する
    * @param listener 更新があった場合、csn を引数にしてこの関数を呼び出す
@@ -458,7 +476,7 @@ export default class Dadget extends ServiceEngine {
    */
   addUpdateListener(listener: (csn: number) => void, minInterval?: number): string {
     const parent = this;
-    if (Object.keys(this.updateListeners).length === 0) {
+    if (Object.keys(this.updateListeners).length === 0 && !this.hasSubset) {
       class NotifyListener extends Subscriber {
 
         constructor() {
@@ -470,15 +488,7 @@ export default class Dadget extends ServiceEngine {
         onReceive(transctionJSON: string) {
           const transaction = EJSON.parse(transctionJSON) as TransactionObject;
           this.logger.info("received:", transaction.type, transaction.csn);
-          if (transaction.type === TransactionType.ROLLBACK) {
-            parent.notifyCsn = transaction.csn;
-            parent.notifyRollback(transaction.csn);
-          } else if (transaction.csn > parent.notifyCsn) {
-            parent.notifyCsn = transaction.csn;
-            setTimeout(() => {
-              parent.notifyAll();
-            });
-          }
+          parent.procNotify(transaction);
         }
       }
 

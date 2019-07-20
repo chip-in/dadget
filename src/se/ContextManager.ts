@@ -457,7 +457,7 @@ export class ContextManager extends ServiceEngine {
       this.connect();
     });
 
-    this.logger.debug("ContextManager is started");
+    promise = promise.then(() => { this.logger.debug("ContextManager is started"); });
     return promise;
   }
 
@@ -471,28 +471,24 @@ export class ContextManager extends ServiceEngine {
       });
   }
 
-  connect(): Promise<void> {
-    let promise = Promise.resolve();
-    promise = promise.then(() => {
-      this.node.mount(CORE_NODE.PATH_CONTEXT.replace(/:database\b/g, this.database), "singletonMaster", this.server, {
-        onDisconnect: () => {
-          this.logger.info("ContextManagementServer is disconnected");
-          this.mountHandle = undefined;
-          this.server.resetLastBeforeObj();
-        },
-        onRemount: (mountHandle: string) => {
-          this.logger.info("ContextManagementServer is remounted");
-          this.server.resetLastBeforeObj();
-          this.procAfterContextManagementServerConnect(mountHandle);
-        },
-      })
-        .then((mountHandle) => {
-          // マスターを取得した場合のみ実行される
-          this.logger.info("ContextManagementServer is connected");
-          this.procAfterContextManagementServerConnect(mountHandle);
-        });
-    });
-    return promise;
+  connect() {
+    this.node.mount(CORE_NODE.PATH_CONTEXT.replace(/:database\b/g, this.database), "singletonMaster", this.server, {
+      onDisconnect: () => {
+        this.logger.info("ContextManagementServer is disconnected");
+        this.mountHandle = undefined;
+        this.server.resetLastBeforeObj();
+      },
+      onRemount: (mountHandle: string) => {
+        this.logger.info("ContextManagementServer is remounted");
+        this.server.resetLastBeforeObj();
+        this.procAfterContextManagementServerConnect(mountHandle);
+      },
+    })
+      .then((mountHandle) => {
+        // マスターを取得した場合のみ実行される
+        this.logger.info("ContextManagementServer is connected");
+        this.procAfterContextManagementServerConnect(mountHandle);
+      });
   }
 
   private procAfterContextManagementServerConnect(mountHandle: string) {

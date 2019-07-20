@@ -4,7 +4,7 @@
   "description": "",
   "main": "lib/server.js",
   "dependencies": {
-    "@chip-in/resource-node": "^0.0.18"
+    "@chip-in/resource-node": "^0.0.20-d5"
   },
   "devDependencies": {
     "babel-cli": "^6.26.0",

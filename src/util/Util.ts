@@ -62,9 +62,12 @@ export class Util {
     }
   }
 
-  static fetchJournal(csn: number, database: string, node: ResourceNode): Promise<TransactionObject | null> {
+  static fetchJournal(csn: number, database: string, node: ResourceNode, subset?: string): Promise<TransactionObject | null> {
+    const pathname = (subset ?
+      CORE_NODE.PATH_SUBSET_UPDATOR.replace(/:database\b/g, database).replace(/:subset\b/g, subset) :
+      CORE_NODE.PATH_CONTEXT.replace(/:database\b/g, database)) + CORE_NODE.PATH_GET_TRANSACTION;
     const reqUrl = URL.format({
-      pathname: CORE_NODE.PATH_CONTEXT.replace(/:database\b/g, database) + CORE_NODE.PATH_GET_TRANSACTION,
+      pathname,
       query: { csn },
     });
     return node.fetch(reqUrl)
@@ -94,7 +97,11 @@ export class Util {
     database: string,
     node: ResourceNode,
     callback: (obj: TransactionObject) => Promise<void>,
+    subset?: string,
   ): Promise<void> {
+    const pathname = (subset ?
+      CORE_NODE.PATH_SUBSET_UPDATOR.replace(/:database\b/g, database).replace(/:subset\b/g, subset) :
+      CORE_NODE.PATH_CONTEXT.replace(/:database\b/g, database)) + CORE_NODE.PATH_GET_TRANSACTIONS;
     const mainLoop = {
       csn: fromCsn,
     };
@@ -103,7 +110,7 @@ export class Util {
       (mainLoop) => mainLoop.csn <= toCsn,
       (mainLoop) => {
         const reqUrl = URL.format({
-          pathname: CORE_NODE.PATH_CONTEXT.replace(/:database\b/g, database) + CORE_NODE.PATH_GET_TRANSACTIONS,
+          pathname,
           query: { fromCsn: mainLoop.csn, toCsn },
         });
         return node.fetch(reqUrl)
