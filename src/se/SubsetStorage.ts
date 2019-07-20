@@ -539,6 +539,9 @@ export class SubsetStorage extends ServiceEngine implements Proxy {
 
   constructor(option: SubsetStorageConfigDef) {
     super(option);
+    if (typeof option.exported === "undefined") {
+      option = { ...option, exported: true };
+    }
     this.logger.debug(JSON.stringify(option));
     this.option = option;
     this.lock = new ReadWriteLock();
