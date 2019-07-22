@@ -9,6 +9,7 @@ const OBJECT_STORE_NAME = "data";
 const DADGET_SCHEMA = "__dadget_schema_ver";
 const SCHEMA_VER = 1;
 const INDEX_VER = "index_ver";
+const INDEX_VER_NAME = "name";
 const userAgent = window.navigator.userAgent;
 const isIE = userAgent.indexOf("MSIE") !== -1 || userAgent.indexOf("Trident/") !== -1 || userAgent.indexOf("Edge/") !== -1;
 
@@ -25,14 +26,17 @@ export class PersistentDb implements IDb {
       const request = indexedDB.open(DADGET_SCHEMA, SCHEMA_VER);
       request.onsuccess = (event) => {
         const schemaDb = (event.target as IDBRequest).result as IDBDatabase;
+        if (!schemaDb.objectStoreNames.contains(INDEX_VER)) {
+          return resolve();
+        }
         const transaction = schemaDb.transaction([INDEX_VER], "readonly");
         const indexVerStore = transaction.objectStore(INDEX_VER);
-        const request = indexVerStore.openKeyCursor();
+        const request = indexVerStore.openCursor();
         request.onsuccess = (event) => {
           if (event.target === null) { return resolve(); }
-          const cursor = (event.target as IDBRequest).result as IDBCursor;
+          const cursor = (event.target as IDBRequest).result as IDBCursorWithValue;
           if (cursor) {
-            dbList.push(cursor.key.toString());
+            dbList.push(cursor.value[INDEX_VER_NAME].toString());
             cursor.continue();
           } else {
             resolve();
@@ -78,7 +82,7 @@ export class PersistentDb implements IDb {
       const request = indexedDB.open(DADGET_SCHEMA, SCHEMA_VER);
       request.onupgradeneeded = (event) => {
         const schemaDb = (event.target as IDBRequest).result as IDBDatabase;
-        const objectStore = schemaDb.createObjectStore(INDEX_VER, { keyPath: "name" });
+        const objectStore = schemaDb.createObjectStore(INDEX_VER, { keyPath: INDEX_VER_NAME });
       };
       request.onerror = (event) => {
         reject("indexedDB open error: " + request.error);
