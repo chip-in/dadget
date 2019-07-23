@@ -23,8 +23,8 @@ export class PersistentDb implements IDb {
   public static getAllStorage(): Promise<string[]> {
     const dbList: string[] = [];
     return new Promise((resolve, reject) => {
-      const request = indexedDB.open(DADGET_SCHEMA, SCHEMA_VER);
-      request.onsuccess = (event) => {
+      const dadgetSchema = PersistentDb.openDadgetSchema(reject);
+      dadgetSchema.onsuccess = (event) => {
         const schemaDb = (event.target as IDBRequest).result as IDBDatabase;
         if (!schemaDb.objectStoreNames.contains(INDEX_VER)) {
           return resolve();
@@ -51,8 +51,8 @@ export class PersistentDb implements IDb {
     const request = indexedDB.deleteDatabase(name);
     request.onsuccess = () => {
       console.log("db delete success", name);
-      const request = indexedDB.open(DADGET_SCHEMA, SCHEMA_VER);
-      request.onsuccess = (event) => {
+      const dadgetSchema = PersistentDb.openDadgetSchema();
+      dadgetSchema.onsuccess = (event) => {
         const schemaDb = (event.target as IDBRequest).result as IDBDatabase;
         const transaction = schemaDb.transaction([INDEX_VER], "readwrite");
         transaction.objectStore(INDEX_VER).delete(name);
@@ -79,15 +79,8 @@ export class PersistentDb implements IDb {
     const indexHash = this.indexMap ? hash(this.indexMap) : "";
     let dbVer = 1;
     return new Promise((resolve, reject) => {
-      const request = indexedDB.open(DADGET_SCHEMA, SCHEMA_VER);
-      request.onupgradeneeded = (event) => {
-        const schemaDb = (event.target as IDBRequest).result as IDBDatabase;
-        const objectStore = schemaDb.createObjectStore(INDEX_VER, { keyPath: INDEX_VER_NAME });
-      };
-      request.onerror = (event) => {
-        reject("indexedDB open error: " + request.error);
-      };
-      request.onsuccess = (event) => {
+      const dadgetSchema = PersistentDb.openDadgetSchema(reject);
+      dadgetSchema.onsuccess = (event) => {
         const schemaDb = (event.target as IDBRequest).result as IDBDatabase;
         const transaction = schemaDb.transaction([INDEX_VER], "readwrite");
         const indexVerStore = transaction.objectStore(INDEX_VER);
@@ -147,6 +140,22 @@ export class PersistentDb implements IDb {
         };
       };
     });
+  }
+
+  private static openDadgetSchema(reject?: (reason?: any) => void) {
+    const request = indexedDB.open(DADGET_SCHEMA, SCHEMA_VER);
+    request.onupgradeneeded = (event) => {
+      const schemaDb = (event.target as IDBRequest).result as IDBDatabase;
+      const objectStore = schemaDb.createObjectStore(INDEX_VER, { keyPath: INDEX_VER_NAME });
+    };
+    request.onerror = (event) => {
+      if (reject) {
+        reject("indexedDB open error: " + request.error);
+      } else {
+        console.error("indexedDB open error: " + request.error);
+      }
+    };
+    return request;
   }
 
   private createIndexes(objectStore: IDBObjectStore): void {

@@ -149,6 +149,9 @@ export default class Dadget extends ServiceEngine {
             PersistentDb.deleteStorage(storageName);
           }
         }
+      })
+      .catch((reason) => {
+        this.logger.error(reason);
       });
 
     if (subsetStorages.length > 0) {
