@@ -5,6 +5,8 @@
         "moduleResolution": "node",
         "noImplicitAny": true,
         "strictNullChecks": true,
+        "declaration": true,
+        "declarationDir": "lib",
         "rootDir": "src",
         "outDir": "dest"
     }

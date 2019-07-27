@@ -18,6 +18,7 @@ export function getAccessControlAllowOrigin(origin: string) {
   const allowOrigin = accessControlAllowOrigin || process.env.ACCESS_CONTROL_ALLOW_ORIGIN;
   if (!allowOrigin) { return null; }
   const allowOrigins = allowOrigin.split(",");
+  origin = origin.toString();
   for (const allowOrigin of allowOrigins) {
     if (allowOrigin.toLowerCase().replace(/\/$/, "") === origin.toLowerCase().replace(/\/$/, "")) { return origin; }
   }
@@ -35,6 +36,7 @@ export const CORE_NODE = {
   PATH_CONTEXT: "/d/:database/context",
   PATH_SUBSET_TRANSACTION: "/m/d/:database/subset/:subset/transaction",
   PATH_SUBSET: "/d/:database/subset/:subset",
+  PATH_SUBSET_UPDATOR: "/d/:database/updator/:subset",
   PATH_EXEC: "/exec",
   PATH_GET_TRANSACTION: "/getTransactionJournal",
   PATH_GET_TRANSACTIONS: "/getTransactionJournals",

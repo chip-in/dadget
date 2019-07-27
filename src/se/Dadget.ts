@@ -3,6 +3,7 @@ import { v1 as uuidv1 } from "uuid";
 
 import { ResourceNode, ServiceEngine, Subscriber } from "@chip-in/resource-node";
 import { CORE_NODE, setAccessControlAllowOrigin } from "../Config";
+import { PersistentDb } from "../db/container/PersistentDb";
 import { TransactionObject, TransactionRequest, TransactionType } from "../db/Transaction";
 import { ERROR } from "../Errors";
 import { DadgetError } from "../util/DadgetError";
@@ -98,6 +99,7 @@ export default class Dadget extends ServiceEngine {
   private updateListeners: { [id: string]: { listener: (csn: number) => void, csn: number, minInterval: number, notifyTime: number } } = {};
   private updateListenerKey: string | null;
   private latestCsn: number;
+  private hasSubset = false;
 
   constructor(option: DadgetConfigDef) {
     super(option);
@@ -129,8 +131,34 @@ export default class Dadget extends ServiceEngine {
     if (this.option.database.match(/--/)) {
       throw new DadgetError(ERROR.E2101, ["Database name can not contain '--'."]);
     }
-    this.database = this.option.database;
+    const database = this.database = this.option.database;
     this.logger.debug("Dadget is started");
+
+    const subsetStorages = node.searchServiceEngine("SubsetStorage", { database }) as SubsetStorage[];
+    // Delete unused persistent databases
+    PersistentDb.getAllStorage()
+      .then((storageList) => {
+        const subsetNames = subsetStorages
+          .filter((subset) => subset.getType() === "persistent")
+          .map((subset) => subset.getDbName());
+        for (const storageName of storageList) {
+          if (!storageName.startsWith(database + "--")) { continue; }
+          const [dbName] = storageName.split("__");
+          if (subsetNames.indexOf(dbName) < 0) {
+            this.logger.warn("Delete storage", storageName);
+            PersistentDb.deleteStorage(storageName);
+          }
+        }
+      })
+      .catch((reason) => {
+        this.logger.error(reason);
+      });
+
+    if (subsetStorages.length > 0) {
+      this.hasSubset = true;
+      subsetStorages[0].notifyListener = this;
+    }
+
     return Promise.resolve();
   }
 
@@ -431,6 +459,18 @@ export default class Dadget extends ServiceEngine {
     }
   }
 
+  procNotify(transaction: TransactionObject) {
+    if (transaction.type === TransactionType.ROLLBACK) {
+      this.notifyCsn = transaction.csn;
+      this.notifyRollback(transaction.csn);
+    } else if (transaction.csn > this.notifyCsn) {
+      this.notifyCsn = transaction.csn;
+      setTimeout(() => {
+        this.notifyAll();
+      });
+    }
+  }
+
   /**
    * データベースの更新通知のリスナを登録する
    * @param listener 更新があった場合、csn を引数にしてこの関数を呼び出す
@@ -439,7 +479,7 @@ export default class Dadget extends ServiceEngine {
    */
   addUpdateListener(listener: (csn: number) => void, minInterval?: number): string {
     const parent = this;
-    if (Object.keys(this.updateListeners).length === 0) {
+    if (Object.keys(this.updateListeners).length === 0 && !this.hasSubset) {
       class NotifyListener extends Subscriber {
 
         constructor() {
@@ -451,15 +491,7 @@ export default class Dadget extends ServiceEngine {
         onReceive(transctionJSON: string) {
           const transaction = EJSON.parse(transctionJSON) as TransactionObject;
           this.logger.info("received:", transaction.type, transaction.csn);
-          if (transaction.type === TransactionType.ROLLBACK) {
-            parent.notifyCsn = transaction.csn;
-            parent.notifyRollback(transaction.csn);
-          } else if (transaction.csn > parent.notifyCsn) {
-            parent.notifyCsn = transaction.csn;
-            setTimeout(() => {
-              parent.notifyAll();
-            });
-          }
+          parent.procNotify(transaction);
         }
       }
 

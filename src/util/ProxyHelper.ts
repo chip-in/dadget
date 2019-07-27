@@ -16,6 +16,7 @@ export class ProxyHelper {
 
     const head: any = {
       "Content-Type": "application/json",
+      "Cache-Control": "no-cache",
     };
     const allowOrigin = getAccessControlAllowOrigin(req.headers.origin as string);
     if (allowOrigin) {
