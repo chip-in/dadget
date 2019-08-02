@@ -151,7 +151,7 @@ export default class Dadget extends ServiceEngine {
         }
       })
       .catch((reason) => {
-        this.logger.error(reason);
+        this.logger.warn("Sweep storage:", reason.toString());
       });
 
     if (subsetStorages.length > 0) {
