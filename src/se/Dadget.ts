@@ -14,6 +14,8 @@ import { DatabaseRegistry } from "./DatabaseRegistry";
 import { QueryHandler } from "./QueryHandler";
 import { SubsetStorage } from "./SubsetStorage";
 import { UpdateManager } from "./UpdateManager";
+const { Logger } = require("@chip-in/logger");
+Logger.setLogLevel("trace");
 
 const QUERY_ERROR_RETRY_COUNT = 4;
 const QUERY_ERROR_WAIT_TIME = 5000;
@@ -100,11 +102,13 @@ export default class Dadget extends ServiceEngine {
   private updateListenerKey: string | null;
   private latestCsn: number;
   private hasSubset = false;
+  private loggerApi: any;
 
   constructor(option: DadgetConfigDef) {
     super(option);
     this.logger.debug(JSON.stringify(option));
     this.option = option;
+    this.loggerApi = Logger.getLogger("Dadget.dadget.chip-in.net");
   }
 
   /**
@@ -397,11 +401,13 @@ export default class Dadget extends ServiceEngine {
    * @return 更新されたオブジェクト
    */
   exec(csn: number, request: TransactionRequest): Promise<object> {
+    this.loggerApi.trace(1, "begin exec");
     request.type = request.type.toLowerCase() as TransactionType;
     if (request.type !== TransactionType.INSERT && request.type !== TransactionType.UPDATE && request.type !== TransactionType.DELETE) {
       throw new Error("The TransactionType is not supported.");
     }
     const sendData = { csn, request };
+    this.loggerApi.trace(2, "begin fetch");
     return this.node.fetch(CORE_NODE.PATH_CONTEXT.replace(/:database\b/g, this.database) + CORE_NODE.PATH_EXEC, {
       method: "POST",
       headers: {
@@ -410,6 +416,7 @@ export default class Dadget extends ServiceEngine {
       body: EJSON.stringify(sendData),
     })
       .then((fetchResult) => {
+        this.loggerApi.trace(3, "end fetch");
         if (typeof fetchResult.ok !== "undefined" && !fetchResult.ok) { throw Error(fetchResult.statusText); }
         return fetchResult.json();
       })
@@ -418,6 +425,7 @@ export default class Dadget extends ServiceEngine {
         console.log("Dadget exec result: " + JSON.stringify(result));
         if (result.status === "OK") {
           this.latestCsn = result.csn;
+          this.loggerApi.trace(4, "end exec");
           return result.updateObject;
         } else if (result.reason) {
           const reason = result.reason as DadgetError;

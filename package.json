@@ -27,6 +27,7 @@
     "browser-test": "cd browser-test && browserify src/indexeddb-test.js -o dest/test.js && cp src/index.html dest/ && http-server dest -c-1"
   },
   "dependencies": {
+    "@chip-in/logger": "0.0.7",
     "@chip-in/resource-node": "*",
     "async-lock": "^1.1.1",
     "deep-diff": "^0.3.8",

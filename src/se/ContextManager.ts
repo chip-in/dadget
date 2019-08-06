@@ -14,6 +14,8 @@ import { ProxyHelper } from "../util/ProxyHelper";
 import { Util } from "../util/Util";
 import Dadget from "./Dadget";
 import { DatabaseRegistry, IndexDef } from "./DatabaseRegistry";
+const { Logger } = require("@chip-in/logger");
+Logger.setLogLevel("trace");
 
 const KEEP_TIME_AFTER_CONTEXT_MANAGER_MASTER_ACQUIRED_MS = 3000; // 3000ms
 const KEEP_TIME_AFTER_SENDING_ROLLBACK_MS = 1000; // 1000ms
@@ -156,11 +158,13 @@ class TransactionJournalSubscriber extends Subscriber {
 class ContextManagementServer extends Proxy {
   private lastBeforeObj?: { _id?: string, csn?: number };
   private lastCheckPointTime: number = 0;
+  private loggerApi: any;
 
   constructor(protected context: ContextManager) {
     super();
     this.logger.category = "ContextManagementServer";
     this.logger.debug("ContextManagementServer is created");
+    this.loggerApi = Logger.getLogger("ContextManagementServer.dadget.chip-in.net");
   }
 
   resetLastBeforeObj() {
@@ -202,6 +206,7 @@ class ContextManagementServer extends Proxy {
   }
 
   exec(postulatedCsn: number, request: TransactionRequest): Promise<object> {
+    this.loggerApi.trace(1, "begin exec");
     let err: string | null = null;
     if (!request.target) {
       err = "target required in a transaction";
@@ -237,7 +242,9 @@ class ContextManagementServer extends Proxy {
           const _request = { ...request, datetime: new Date() };
           if (this.lastBeforeObj && request.before
             && (!request.before._id || this.lastBeforeObj._id === request.before._id)) {
+            this.loggerApi.trace(2, "begin request.before check");
             const objDiff = Util.diff(this.lastBeforeObj, request.before);
+            this.loggerApi.trace(3, "end request.before check");
             if (objDiff) {
               this.logger.error("a mismatch of request.before", JSON.stringify(objDiff));
               throw new DadgetError(ERROR.E2005, [JSON.stringify(request)]);
@@ -245,13 +252,23 @@ class ContextManagementServer extends Proxy {
               this.logger.debug("lastBeforeObj check passed");
             }
           }
+          this.loggerApi.trace(4, "begin checkConsistent");
           return this.context.getJournalDb().checkConsistent(postulatedCsn, _request)
+            .then(() => { this.loggerApi.trace(5, "end checkConsistent"); })
+            .then(() => { this.loggerApi.trace(6, "begin getCsn"); })
             .then(() => this.context.getSystemDb().getCsn())
-            .then((currentCsn) => this.context.checkUniqueConstraint(currentCsn, _request))
+            .then((currentCsn) => {
+              this.loggerApi.trace(7, "end getCsn");
+              this.loggerApi.trace(8, "begin checkUniqueConstraint");
+              return this.context.checkUniqueConstraint(currentCsn, _request);
+            })
             .then((_) => {
+              this.loggerApi.trace(9, "end checkUniqueConstraint");
               updateObject = _;
+              this.loggerApi.trace(10, "begin incrementCsn, getLastDigest");
               return Promise.all([this.context.getSystemDb().incrementCsn(), this.context.getJournalDb().getLastDigest()])
                 .then((values) => {
+                  this.loggerApi.trace(11, "end incrementCsn, getLastDigest");
                   newCsn = values[0];
                   this.logger.info("exec newCsn:", newCsn);
                   const lastDigest = values[1];
@@ -259,18 +276,29 @@ class ContextManagementServer extends Proxy {
                     csn: newCsn,
                     beforeDigest: lastDigest,
                   }, _request);
+                  this.loggerApi.trace(12, "begin calcDigest");
                   transaction.digest = TransactionObject.calcDigest(transaction);
+                  this.loggerApi.trace(13, "end calcDigest");
+                  this.loggerApi.trace(14, "begin getProtectedCsn");
                   transaction.protectedCsn = this.context.getJournalDb().getProtectedCsn();
-                  return this.context.getJournalDb().insert(transaction);
+                  this.loggerApi.trace(15, "end getProtectedCsn");
+                  this.loggerApi.trace(16, "begin insert");
+                  return this.context.getJournalDb().insert(transaction)
+                    .then(() => {
+                      this.loggerApi.trace(17, "end insert");
+                    });
                 });
             }).then(() => {
+              this.loggerApi.trace(18, "begin publish");
               return this.context.getNode().publish(
                 CORE_NODE.PATH_TRANSACTION.replace(/:database\b/g, this.context.getDatabase())
                 , EJSON.stringify(transaction));
             }).then(() => {
+              this.loggerApi.trace(19, "end publish");
               return this.checkProtectedCsn();
             });
         }).then(() => {
+          this.loggerApi.trace(20, "end exec");
           if (!updateObject._id) { updateObject._id = transaction.target; }
           updateObject.csn = newCsn;
           this.lastBeforeObj = updateObject;

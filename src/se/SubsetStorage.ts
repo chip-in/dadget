@@ -20,6 +20,8 @@ import { ProxyHelper } from "../util/ProxyHelper";
 import { Util } from "../util/Util";
 import { CountResult, CsnMode, default as Dadget, QueryResult } from "./Dadget";
 import { DatabaseRegistry, SubsetDef } from "./DatabaseRegistry";
+const { Logger } = require("@chip-in/logger");
+Logger.setLogLevel("trace");
 
 const MAX_RESPONSE_SIZE_OF_JOURNALS = 10485760;
 
@@ -318,6 +320,7 @@ class UpdateProcessor extends Subscriber {
  * 更新マネージャは、コンテキストマネージャが発信する更新情報（トランザクションオブジェクト）を受信して更新トランザクションをサブセットへのトランザクションに変換し更新レシーバに転送する。
  */
 class UpdateListener extends Subscriber {
+  private loggerApi: any;
 
   constructor(
     protected storage: SubsetStorage,
@@ -329,16 +332,24 @@ class UpdateListener extends Subscriber {
     super();
     this.logger.category = "UpdateListener";
     this.logger.debug("UpdateListener is created");
+    this.loggerApi = Logger.getLogger("UpdateListener.dadget.chip-in.net");
   }
 
   onReceive(transctionJSON: string) {
+    this.loggerApi.trace(1, "onReceive");
     const transaction = EJSON.parse(transctionJSON) as TransactionObject;
     this.logger.info("received:", transaction.type, transaction.csn);
+    this.loggerApi.trace(2, "begin convertTransactionForSubset");
     const subsetTransaction = UpdateListener.convertTransactionForSubset(this.subsetDefinition, transaction);
+    this.loggerApi.trace(3, "end convertTransactionForSubset");
     if (this.exported) {
+      this.loggerApi.trace(4, "begin publish");
       this.storage.getNode().publish(CORE_NODE.PATH_SUBSET_TRANSACTION
         .replace(/:database\b/g, this.database)
-        .replace(/:subset\b/g, this.storage.getOption().subset), EJSON.stringify(subsetTransaction));
+        .replace(/:subset\b/g, this.storage.getOption().subset), EJSON.stringify(subsetTransaction))
+        .then(() => {
+          this.loggerApi.trace(5, "end publish");
+        });
     }
     this.updateProcessor.procTransaction(subsetTransaction);
   }

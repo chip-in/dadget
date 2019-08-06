@@ -1,9 +1,19 @@
+const { Logger } = require("@chip-in/logger");
+
+Logger.setLogLevel("trace");
+const loggerApi = Logger.getLogger("Ejson.dadget.chip-in.net");
+
 export function stringify(obj: object): string {
-  return JSON.stringify(serialize(obj));
+  loggerApi.trace(1, "begin stringify");
+  const val = JSON.stringify(serialize(obj));
+  loggerApi.trace(2, "end stringify");
+  return val;
 }
 export function parse(str: string): any {
-  return deserialize(JSON.parse(str));
-
+  loggerApi.trace(3, "begin parse");
+  const val = deserialize(JSON.parse(str));
+  loggerApi.trace(4, "end parse");
+  return val;
 }
 
 /**
