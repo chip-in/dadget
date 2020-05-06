@@ -1,8 +1,9 @@
 import { Proxy, ResourceNode, ServiceEngine, Subscriber } from "@chip-in/resource-node";
 import * as AsyncLock from "async-lock";
+import { serialize } from "bson";
 import * as http from "http";
 import * as URL from "url";
-import { CORE_NODE } from "../Config";
+import { CORE_NODE, MAX_OBJECT_SIZE } from "../Config";
 import { PersistentDb } from "../db/container/PersistentDb";
 import { JournalDb } from "../db/JournalDb";
 import { SystemDb } from "../db/SystemDb";
@@ -41,7 +42,6 @@ class TransactionJournalSubscriber extends Subscriber {
   }
 
   onReceive(msg: string) {
-    console.log("TransactionJournalSubscriber onReceive:", msg.toString());
     const transaction: TransactionObject = EJSON.parse(msg);
     this.logger.info("received:", transaction.type, transaction.csn);
 
@@ -209,7 +209,14 @@ class ContextManagementServer extends Proxy {
     if (request.type === TransactionType.INSERT) {
       if (request.before) { err = "before not required on INSERT"; }
       if (request.operator) { err = "operator not required on INSERT"; }
-      if (!request.new) { err = "new required on INSERT"; }
+      if (!request.new) {
+        err = "new required on INSERT";
+      } else {
+        const keys = Object.keys(request.new);
+        if (keys.indexOf("_id") >= 0 || keys.indexOf("csn") >= 0) {
+          err = "new object must not contain _id or csn";
+        }
+      }
     } else if (request.type === TransactionType.UPDATE) {
       if (!request.before) { err = "before required on UPDATE"; }
       if (!request.operator) { err = "operator required on UPDATE"; }
@@ -250,9 +257,9 @@ class ContextManagementServer extends Proxy {
             .then((currentCsn) => this.context.checkUniqueConstraint(currentCsn, _request))
             .then((_) => {
               updateObject = _;
-              return Promise.all([this.context.getSystemDb().incrementCsn(), this.context.getJournalDb().getLastDigest()])
+              return Promise.all([this.context.getSystemDb().getCsn(), this.context.getJournalDb().getLastDigest()])
                 .then((values) => {
-                  newCsn = values[0];
+                  newCsn = values[0] + 1;
                   this.logger.info("exec newCsn:", newCsn);
                   const lastDigest = values[1];
                   transaction = Object.assign({
@@ -262,7 +269,7 @@ class ContextManagementServer extends Proxy {
                   transaction.digest = TransactionObject.calcDigest(transaction);
                   transaction.protectedCsn = this.context.getJournalDb().getProtectedCsn();
                   return this.context.getJournalDb().insert(transaction);
-                });
+                }).then(() => this.context.getSystemDb().updateCsn(newCsn));
             }).then(() => {
               return this.context.getNode().publish(
                 CORE_NODE.PATH_TRANSACTION.replace(/:database\b/g, this.context.getDatabase())
@@ -533,10 +540,16 @@ export class ContextManager extends ServiceEngine {
   checkUniqueConstraint(csn: number, request: TransactionRequest): Promise<object> {
     if (request.type === TransactionType.INSERT && request.new) {
       const newObj = request.new;
+      if (serialize(newObj).length >= MAX_OBJECT_SIZE) {
+        return Promise.reject(new DadgetError(ERROR.E2006, [MAX_OBJECT_SIZE]));
+      }
       return this._checkUniqueConstraint(csn, newObj)
         .then(() => Promise.resolve(newObj));
     } else if (request.type === TransactionType.UPDATE && request.before) {
       const newObj = TransactionRequest.applyOperator(request);
+      if (serialize(newObj).length >= MAX_OBJECT_SIZE) {
+        return Promise.reject(new DadgetError(ERROR.E2006, [MAX_OBJECT_SIZE]));
+      }
       return this._checkUniqueConstraint(csn, newObj, request.target)
         .then(() => Promise.resolve(newObj));
     } else if (request.type === TransactionType.DELETE && request.before) {

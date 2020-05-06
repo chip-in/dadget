@@ -399,7 +399,7 @@ export default class Dadget extends ServiceEngine {
   exec(csn: number, request: TransactionRequest): Promise<object> {
     request.type = request.type.toLowerCase() as TransactionType;
     if (request.type !== TransactionType.INSERT && request.type !== TransactionType.UPDATE && request.type !== TransactionType.DELETE) {
-      throw new Error("The TransactionType is not supported.");
+      return Promise.reject(new DadgetError(ERROR.E2104));
     }
     const sendData = { csn, request };
     return this.node.fetch(CORE_NODE.PATH_CONTEXT.replace(/:database\b/g, this.database) + CORE_NODE.PATH_EXEC, {
@@ -415,7 +415,6 @@ export default class Dadget extends ServiceEngine {
       })
       .then((_) => {
         const result = EJSON.deserialize(_);
-        console.log("Dadget exec result: " + JSON.stringify(result));
         if (result.status === "OK") {
           this.latestCsn = result.csn;
           return result.updateObject;

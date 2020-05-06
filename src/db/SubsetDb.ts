@@ -30,49 +30,44 @@ export class SubsetDb {
   }
 
   insert(obj: object): Promise<void> {
-    console.log("insert:", JSON.stringify(obj));
     return this.db.insertOne(obj)
       .catch((err) => Promise.reject(new DadgetError(ERROR.E1202, [err.toString()])));
   }
 
   insertMany(obj: object[]): Promise<void> {
     if (obj.length === 0) { return Promise.resolve(); }
-    console.log("insertMany:", JSON.stringify(obj));
     return this.db.insertMany(obj)
       .catch((err) => Promise.reject(new DadgetError(ERROR.E1206, [err.toString()])));
   }
 
   update(id: string, obj: object): Promise<void> {
-    console.log("update:", id, JSON.stringify(obj));
     return this.db.replaceOneById(id, obj)
       .catch((err) => Promise.reject(new DadgetError(ERROR.E1203, [err.toString()])));
   }
 
   deleteById(id: string): Promise<void> {
-    console.log("deleteById:", id);
     return this.db.deleteOneById(id)
       .catch((err) => Promise.reject(new DadgetError(ERROR.E1204, [err.toString()])));
   }
 
   deleteAll(): Promise<void> {
-    console.log("deleteAll:");
     return this.db.deleteAll()
       .catch((err) => Promise.reject(new DadgetError(ERROR.E1207, [err.toString()])));
   }
 
   find(query: object, sort?: object, limit?: number, projection?: object): Promise<any[]> {
+    console.log("find:", JSON.stringify(query));
     return this.db.find(query, sort, limit, undefined, projection)
       .then((result) => {
-        console.log("find:", JSON.stringify(result), JSON.stringify(query));
         return result;
       })
       .catch((err) => Promise.reject(new DadgetError(ERROR.E1205, [err.toString()])));
   }
 
   count(query: object): Promise<number> {
+    console.log("count:", JSON.stringify(query));
     return this.db.count(query)
       .then((count) => {
-        console.log("count:", count, JSON.stringify(query));
         return count;
       })
       .catch((err) => Promise.reject(new DadgetError(ERROR.E1208, [err.toString()])));

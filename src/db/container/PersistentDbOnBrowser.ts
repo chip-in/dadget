@@ -121,7 +121,7 @@ export class PersistentDb implements IDb {
           request.onsuccess = (event) => {
             console.log("open: " + storageName);
             this.db = (event.target as IDBRequest).result;
-            console.log(this.logAll());
+//            console.log(this.logAll());
 
             const transaction = this.db.transaction(OBJECT_STORE_NAME);
             transaction.onerror = (event) => {
@@ -365,7 +365,6 @@ export class PersistentDb implements IDb {
             list = list.slice(0, limit);
           }
         }
-        console.log("PersistentDbOnBrowser find:" + JSON.stringify(list));
         resolve(list);
       };
       transaction.onerror = (event) => {

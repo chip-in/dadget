@@ -181,6 +181,11 @@ export const ERROR = {
   E2005: { code: 2005, message: 'A bad "before" object caused failing to execute a transaction. for request = %1' },
 
   /**
+   * Too large new object Error
+   */
+  E2006: { code: 2006, message: "Too large new object Error: An object must be less than %1 bytes" },
+
+  /**
    * Dadget Config Error
    */
   E2101: { code: 2101, message: "Dadget Config Error: %1" },
@@ -194,6 +199,11 @@ export const ERROR = {
    * Dadget Undefined Exec Error
    */
   E2103: { code: 2103, message: "Dadget Undefined Exec Error: %1" },
+
+  /**
+   * Dadget unsupported TransactionType
+   */
+  E2104: { code: 2104, message: "The TransactionType is not supported." },
 
   /**
    * DatabaseRegistry Config Error

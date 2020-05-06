@@ -38,8 +38,8 @@ class UpdateProcessor extends Subscriber {
   }
 
   onReceive(msg: string) {
-    console.log("UpdateProcessor received: ", this.storage.getOption().subset, msg.toString());
     const transaction = EJSON.parse(msg) as TransactionObject;
+    console.log("UpdateProcessor received: ", this.storage.getOption().subset, transaction.csn);
     this.procTransaction(transaction);
   }
 
@@ -175,7 +175,6 @@ class UpdateProcessor extends Subscriber {
     return this.storage.getJournalDb().findByCsnRange(csn, Number.MAX_VALUE)
       .then((transactions) => {
         transactions.sort((a, b) => b.csn - a.csn);
-        console.log("ROLLBACK transactions:" + JSON.stringify(transactions));
         if (transactions.length === 0 || transactions[transactions.length - 1].csn !== csn) {
           throw new Error("Lack of transactions");
         }
@@ -778,7 +777,6 @@ export class SubsetStorage extends ServiceEngine implements Proxy {
         const projection = request.projection ? EJSON.parse(request.projection) : undefined;
         return this.query(csn, query, sort, limit, request.csnMode, projection)
           .then((result) => {
-            console.dir(result);
             return { status: "OK", result };
           });
       });
@@ -789,7 +787,6 @@ export class SubsetStorage extends ServiceEngine implements Proxy {
         const query = EJSON.parse(request.query);
         return this.count(csn, query, request.csnMode)
           .then((result) => {
-            console.dir(result);
             return { status: "OK", result };
           });
       });
@@ -948,7 +945,7 @@ export class SubsetStorage extends ServiceEngine implements Proxy {
 
   static rollbackAndFind(orgList: any[], transactions: TransactionObject[], query: object, sort?: object, limit?: number): any[] {
     transactions.sort((a, b) => b.csn - a.csn);
-    console.log("rollbackAndFind transactions:" + JSON.stringify(transactions));
+    console.log("rollbackAndFind");
 
     const dataMap: any = {};
     orgList.forEach((val) => {
@@ -971,7 +968,6 @@ export class SubsetStorage extends ServiceEngine implements Proxy {
     if (limit) {
       list = list.slice(0, limit);
     }
-    console.log("rollbackAndFind:" + JSON.stringify(list));
     return list;
   }
 }

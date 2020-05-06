@@ -70,20 +70,6 @@ export class SystemDb {
   }
 
   /**
-   * increment csn
-   */
-  incrementCsn(): Promise<number> {
-    return this.prepareCsn()
-      .then(() => this.db.increment(CSN_ID, "seq"))
-      .then((result) => {
-        this.isNewDb = false;
-        console.log("increment csn value:", result);
-        return result;
-      })
-      .catch((err) => Promise.reject(new DadgetError(ERROR.E1002, [err.toString()])));
-  }
-
-  /**
    * get current CSN
    */
   getCsn(): Promise<number> {
