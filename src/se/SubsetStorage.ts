@@ -687,23 +687,23 @@ export class SubsetStorage extends ServiceEngine implements Proxy {
     this.node.mount(CORE_NODE.PATH_SUBSET_UPDATOR
       .replace(/:database\b/g, this.database)
       .replace(/:subset\b/g, this.subsetName), "singletonMaster", new SubsetUpdatorProxy(this), {
-        onDisconnect: () => {
-          this.logger.info("updator is disconnected");
-          this.subscribeUpdateProcessor()
-            .then(() => {
-              if (this.updateListenerKey) { this.node.unsubscribe(this.updateListenerKey); }
-              this.updateListenerKey = undefined;
-            });
-        },
-        onRemount: (mountHandle: string) => {
-          this.logger.info("updator is remounted");
-          this.updateListenerMountHandle = mountHandle;
-          this.subscribeUpdateListener()
-            .then(() => {
-              if (this.subscriberKey) { this.node.unsubscribe(this.subscriberKey); }
-            });
-        },
-      })
+      onDisconnect: () => {
+        this.logger.info("updator is disconnected");
+        this.subscribeUpdateProcessor()
+          .then(() => {
+            if (this.updateListenerKey) { this.node.unsubscribe(this.updateListenerKey); }
+            this.updateListenerKey = undefined;
+          });
+      },
+      onRemount: (mountHandle: string) => {
+        this.logger.info("updator is remounted");
+        this.updateListenerMountHandle = mountHandle;
+        this.subscribeUpdateListener()
+          .then(() => {
+            if (this.subscriberKey) { this.node.unsubscribe(this.subscriberKey); }
+          });
+      },
+    })
       .then((mountHandle) => {
         // マスターを取得した場合のみ実行される
         this.logger.info("updator is connected");
@@ -774,8 +774,9 @@ export class SubsetStorage extends ServiceEngine implements Proxy {
         const query = EJSON.parse(request.query);
         const sort = request.sort ? EJSON.parse(request.sort) : undefined;
         const limit = ProxyHelper.validateNumber(request.limit, "limit");
+        const offset = ProxyHelper.validateNumber(request.offset, "offset");
         const projection = request.projection ? EJSON.parse(request.projection) : undefined;
-        return this.query(csn, query, sort, limit, request.csnMode, projection)
+        return this.query(csn, query, sort, limit, request.csnMode, projection, offset)
           .then((result) => {
             return { status: "OK", result };
           });
@@ -869,7 +870,7 @@ export class SubsetStorage extends ServiceEngine implements Proxy {
       });
   }
 
-  query(csn: number, query: object, sort?: object, limit?: number, csnMode?: CsnMode, projection?: object): Promise<QueryResult> {
+  query(csn: number, query: object, sort?: object, limit?: number, csnMode?: CsnMode, projection?: object, offset?: number): Promise<QueryResult> {
     if (!this.readyFlag) {
       return Promise.resolve({ csn, resultSet: [], restQuery: query, csnMode });
     }
@@ -878,6 +879,9 @@ export class SubsetStorage extends ServiceEngine implements Proxy {
       return Promise.resolve({ csn, resultSet: [], restQuery: query, csnMode });
     }
     const restQuery = LogicalOperator.getOutsideOfCache(query, this.subsetDefinition.query);
+    if (restQuery && offset) {
+      return Promise.resolve({ csn, resultSet: [], restQuery: query, csnMode });
+    }
     let release: () => void;
     const promise = new Promise<void>((resolve, reject) => {
       this.getLock().readLock((unlock) => {
@@ -896,7 +900,7 @@ export class SubsetStorage extends ServiceEngine implements Proxy {
       .then(() => this.getSystemDb().getCsn())
       .then((currentCsn) => {
         if (csn === 0 || csn === currentCsn || (csn < currentCsn && csnMode === "latest")) {
-          return this.getSubsetDb().find(innerQuery, sort, limit, projection)
+          return this.getSubsetDb().find(innerQuery, sort, limit, projection, offset)
             .then((result) => {
               release();
               return { csn: currentCsn, resultSet: result, restQuery };
@@ -913,11 +917,13 @@ export class SubsetStorage extends ServiceEngine implements Proxy {
                 this.logger.info("not enough rollback transactions");
                 return { csn, resultSet: [], restQuery: query };
               }
-              const possibleLimit = limit ? limit + transactions.length : undefined;
+              const _offset = offset ? offset : 0;
+              const maxLimit = limit ? limit + _offset : undefined;
+              const possibleLimit = maxLimit ? maxLimit + transactions.length : undefined;
               return this.getSubsetDb().find(innerQuery, sort, possibleLimit)
                 .then((result) => {
                   release();
-                  const resultSet = SubsetStorage.rollbackAndFind(result, transactions, innerQuery, sort, limit)
+                  const resultSet = SubsetStorage.rollbackAndFind(result, transactions, innerQuery, sort, limit, offset)
                     .map((val) => Util.project(val, projection));
                   return { csn, resultSet, restQuery };
                 });
@@ -928,7 +934,7 @@ export class SubsetStorage extends ServiceEngine implements Proxy {
           return new Promise<QueryResult>((resolve, reject) => {
             if (!this.queryWaitingList[csn]) { this.queryWaitingList[csn] = []; }
             this.queryWaitingList[csn].push(() => {
-              return this.getSubsetDb().find(innerQuery, sort, limit, projection)
+              return this.getSubsetDb().find(innerQuery, sort, limit, projection, offset)
                 .then((result) => {
                   resolve({ csn, resultSet: result, restQuery });
                 });
@@ -943,7 +949,7 @@ export class SubsetStorage extends ServiceEngine implements Proxy {
       });
   }
 
-  static rollbackAndFind(orgList: any[], transactions: TransactionObject[], query: object, sort?: object, limit?: number): any[] {
+  static rollbackAndFind(orgList: any[], transactions: TransactionObject[], query: object, sort?: object, limit?: number, offset?: number): any[] {
     transactions.sort((a, b) => b.csn - a.csn);
     console.log("rollbackAndFind");
 
@@ -965,8 +971,16 @@ export class SubsetStorage extends ServiceEngine implements Proxy {
       dataList.push(dataMap[_id]);
     }
     let list = Util.mongoSearch(dataList, query, sort) as object[];
-    if (limit) {
-      list = list.slice(0, limit);
+    if (offset) {
+      if (limit) {
+        list = list.slice(offset, offset + limit);
+      } else {
+        list = list.slice(offset);
+      }
+    } else {
+      if (limit) {
+        list = list.slice(0, limit);
+      }
     }
     return list;
   }

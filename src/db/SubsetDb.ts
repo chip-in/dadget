@@ -55,9 +55,9 @@ export class SubsetDb {
       .catch((err) => Promise.reject(new DadgetError(ERROR.E1207, [err.toString()])));
   }
 
-  find(query: object, sort?: object, limit?: number, projection?: object): Promise<any[]> {
+  find(query: object, sort?: object, limit?: number, projection?: object, offset?: number): Promise<any[]> {
     console.log("find:", JSON.stringify(query));
-    return this.db.find(query, sort, limit, undefined, projection)
+    return this.db.find(query, sort, limit, offset, projection)
       .then((result) => {
         return result;
       })

@@ -190,8 +190,6 @@ export default class Dadget extends ServiceEngine {
     if (queryHandlers.length === 0) { throw new Error("QueryHandlers required"); }
     queryHandlers = Dadget.sortQueryHandlers(queryHandlers);
     if (!csn) { csn = 0; }
-    const _offset = offset ? offset : 0;
-    const maxLimit = limit ? limit + _offset : undefined;
     const resultSet: object[] = [];
     return Promise.resolve({ csn, resultSet, restQuery: query, queryHandlers, csnMode } as QueryResult)
       .then(function queryFallback(request): Promise<QueryResult> {
@@ -201,7 +199,7 @@ export default class Dadget extends ServiceEngine {
         }
         const qh = request.queryHandlers.shift();
         if (qh == null) { throw new Error("never happen"); }
-        return qh.query(request.csn, request.restQuery, sort, maxLimit, csnMode, projection)
+        return qh.query(request.csn, request.restQuery, sort, limit, csnMode, projection, offset)
           .then((result) => queryFallback({
             csn: result.csn,
             resultSet: [...request.resultSet, ...result.resultSet],
@@ -231,16 +229,8 @@ export default class Dadget extends ServiceEngine {
         }
         if (sort) {
           list = Util.mongoSearch(list, {}, sort) as object[];
-          if (_offset) {
-            if (limit) {
-              list = list.slice(_offset, _offset + limit);
-            } else {
-              list = list.slice(_offset);
-            }
-          } else {
-            if (limit) {
-              list = list.slice(0, limit);
-            }
+          if (limit) {
+            list = list.slice(0, limit);
           }
         }
         return { ...result, resultSet: list };
