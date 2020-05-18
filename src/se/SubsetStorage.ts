@@ -30,6 +30,7 @@ class UpdateProcessor extends Subscriber {
   constructor(
     protected storage: SubsetStorage,
     protected database: string,
+    protected subsetName: string,
     protected subsetDefinition: SubsetDef) {
 
     super();
@@ -149,8 +150,18 @@ class UpdateProcessor extends Subscriber {
     if (transaction.csn > 1) {
       promise = promise.then(() => this.storage.getJournalDb().findByCsn(transaction.csn - 1))
         .then((journal) => {
-          if (!journal) { throw new Error("journal not found: " + (transaction.csn - 1)); }
-          if (journal.digest !== transaction.beforeDigest) { throw new Error("beforeDigest mismatch:" + transaction.csn); }
+          if (!journal) {
+            throw new Error("journal not found, csn:" + (transaction.csn - 1)
+              + ", database:" + this.database
+              + ", subset:" + this.subsetName);
+          }
+          if (journal.digest !== transaction.beforeDigest) {
+            throw new Error("beforeDigest mismatch, csn:" + transaction.csn
+              + ", database:" + this.database
+              + ", subset:" + this.subsetName
+              + ", journal digest:" + journal.digest
+              + ", transaction beforeDigest:" + transaction.beforeDigest);
+          }
         });
     }
 
@@ -657,7 +668,7 @@ export class SubsetStorage extends ServiceEngine implements Proxy {
       this.systemDb = new SystemDb(new PersistentDb(dbName));
     }
 
-    this.updateProcessor = new UpdateProcessor(this, this.database, this.subsetDefinition);
+    this.updateProcessor = new UpdateProcessor(this, this.database, this.subsetName, this.subsetDefinition);
     this.updateListener = new UpdateListener(this, this.database, this.subsetDefinition, this.updateProcessor, !!this.option.exported);
     let promise = this.subsetDb.start();
     promise = promise.then(() => { this.logger.debug("SubsetStorage is starting"); });
