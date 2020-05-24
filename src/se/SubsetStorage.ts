@@ -123,10 +123,17 @@ class UpdateProcessor extends Subscriber {
                 return promise;
               };
               let promise = Promise.resolve();
+              const journals = new Map<number, TransactionObject>();
+              if (csn + 1 < transaction.csn) {
+                promise = promise.then(() => this.fetchJournals(csn, transaction.csn - 1, (fetchJournal) => {
+                  journals.set(fetchJournal.csn, fetchJournal);
+                  return Promise.resolve();
+                }));
+              }
               for (let i = csn + 1; i < transaction.csn; i++) {
                 // csnが飛んでいた場合はジャーナル取得を行い、そちらから更新
                 const _csn = i;
-                promise = promise.then(() => this.adjustData(_csn));
+                promise = promise.then(() => this.adjustData(_csn, journals));
                 promise = promise.then(() => doQueuedQuery(_csn));
               }
               promise = this.updateSubsetDb(promise, transaction);
@@ -206,7 +213,13 @@ class UpdateProcessor extends Subscriber {
       });
   }
 
-  fetchJournal(csn: number): Promise<TransactionObject | null> {
+  fetchJournal(csn: number, journals?: Map<number, TransactionObject>): Promise<TransactionObject | null> {
+    if (journals) {
+      const journal = journals.get(csn);
+      if (journal) {
+        return Promise.resolve(journal);
+      }
+    }
     return Util.fetchJournal(csn, this.database, this.storage.getNode(), this.storage.getOption().subscribe);
   }
 
@@ -218,7 +231,7 @@ class UpdateProcessor extends Subscriber {
     return Util.fetchJournals(fromCsn, toCsn, this.database, this.storage.getNode(), callback, this.storage.getOption().subscribe);
   }
 
-  private adjustData(csn: number): Promise<void> {
+  private adjustData(csn: number, journals?: Map<number, TransactionObject>): Promise<void> {
     this.logger.warn("adjustData:" + csn);
     return Promise.resolve()
       .then(() => {
@@ -227,7 +240,7 @@ class UpdateProcessor extends Subscriber {
         } else {
           return this.storage.getJournalDb().getLastJournal()
             .then((journal) => {
-              return this.fetchJournal(journal.csn)
+              return this.fetchJournal(journal.csn, journals)
                 .then((fetchJournal) => {
                   if (!fetchJournal || fetchJournal.digest !== journal.digest) {
                     // rollback incorrect journals
@@ -245,7 +258,7 @@ class UpdateProcessor extends Subscriber {
                           .then(() => this.storage.getJournalDb().findByCsn(nextCsn))
                           .then((journal) => {
                             if (!journal) { throw new Error("journal not found: " + nextCsn); }
-                            return this.fetchJournal(journal.csn)
+                            return this.fetchJournal(journal.csn, journals)
                               .then((fetchJournal) => {
                                 if (fetchJournal && fetchJournal.digest === journal.digest) {
                                   return { ...loopData, csn: 0 };
@@ -260,11 +273,18 @@ class UpdateProcessor extends Subscriber {
                         return this.adjustData(csn);
                       });
                   } else {
-                    return this.fetchJournals(journal.csn + 1, csn, (fetchJournal) => {
+                    const callback = (fetchJournal: TransactionObject) => {
                       const subsetTransaction = UpdateListener.convertTransactionForSubset(this.subsetDefinition, fetchJournal);
                       return this.updateSubsetDb(Promise.resolve(), subsetTransaction);
-                    })
-                      .then(() => { this.storage.setReady(); });
+                    };
+                    if (journal.csn + 1 === csn) {
+                      return this.fetchJournal(csn, journals)
+                        .then(callback)
+                        .then(() => { this.storage.setReady(); });
+                    } else {
+                      return this.fetchJournals(journal.csn + 1, csn, callback)
+                        .then(() => { this.storage.setReady(); });
+                    }
                   }
                 });
             })
