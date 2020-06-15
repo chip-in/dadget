@@ -6,6 +6,7 @@ import { CORE_NODE, setAccessControlAllowOrigin } from "../Config";
 import { PersistentDb } from "../db/container/PersistentDb";
 import { TransactionObject, TransactionRequest, TransactionType } from "../db/Transaction";
 import { ERROR } from "../Errors";
+import { Maintenance } from "../Maintenance";
 import { DadgetError } from "../util/DadgetError";
 import * as EJSON from "../util/Ejson";
 import { Util } from "../util/Util";
@@ -90,6 +91,8 @@ const PREQUERY_CSN = -1;
  */
 export default class Dadget extends ServiceEngine {
 
+  public static enableDeleteSubset = true;
+
   public bootOrder = 60;
   private option: DadgetConfigDef;
   private node: ResourceNode;
@@ -144,7 +147,7 @@ export default class Dadget extends ServiceEngine {
         for (const storageName of storageList) {
           if (!storageName.startsWith(database + "--")) { continue; }
           const [dbName] = storageName.split("__");
-          if (subsetNames.indexOf(dbName) < 0) {
+          if (subsetNames.indexOf(dbName) < 0 && Dadget.enableDeleteSubset) {
             this.logger.warn("Delete storage", storageName);
             PersistentDb.deleteStorage(storageName);
           }
@@ -213,7 +216,7 @@ export default class Dadget extends ServiceEngine {
         let hasDupulicate = false;
         for (const item of result.resultSet as Array<{ _id: string }>) {
           if (itemMap[item._id]) {
-            console.log("hasDupulicate:" + item._id);
+            console.warn("hasDupulicate:" + item._id);
             hasDupulicate = true;
           }
           itemMap[item._id] = item;
@@ -315,7 +318,6 @@ export default class Dadget extends ServiceEngine {
         return result;
       })
       .catch((reason) => {
-        console.dir(reason);
         const cause = reason instanceof DadgetError ? reason :
           (reason.code ? DadgetError.from(reason) : new DadgetError(ERROR.E2102, [reason.toString()]));
         return Promise.reject(cause);
@@ -365,7 +367,6 @@ export default class Dadget extends ServiceEngine {
         return result.resultCount;
       })
       .catch((reason) => {
-        console.dir(reason);
         const cause = reason instanceof DadgetError ? reason :
           (reason.code ? DadgetError.from(reason) : new DadgetError(ERROR.E2102, [reason.toString()]));
         return Promise.reject(cause);
@@ -388,7 +389,12 @@ export default class Dadget extends ServiceEngine {
    */
   exec(csn: number, request: TransactionRequest): Promise<object> {
     request.type = request.type.toLowerCase() as TransactionType;
-    if (request.type !== TransactionType.INSERT && request.type !== TransactionType.UPDATE && request.type !== TransactionType.DELETE) {
+    if (request.type !== TransactionType.INSERT &&
+      request.type !== TransactionType.IMPORT &&
+      request.type !== TransactionType.UPDATE &&
+      request.type !== TransactionType.DELETE &&
+      request.type !== TransactionType.TRUNCATE &&
+      request.type !== TransactionType.FINISH_IMPORT) {
       return Promise.reject(new DadgetError(ERROR.E2104));
     }
     const sendData = { csn, request };
@@ -449,7 +455,9 @@ export default class Dadget extends ServiceEngine {
   }
 
   procNotify(transaction: TransactionObject) {
-    if (transaction.type === TransactionType.ROLLBACK) {
+    if (transaction.type === TransactionType.IMPORT || transaction.type === TransactionType.TRUNCATE) {
+      return;
+    } else if (transaction.type === TransactionType.ROLLBACK) {
       this.notifyCsn = transaction.csn;
       this.notifyRollback(transaction.csn);
     } else if (transaction.csn > this.notifyCsn) {
@@ -530,5 +538,9 @@ export default class Dadget extends ServiceEngine {
    */
   static setServerAccessControlAllowOrigin(origin: string) {
     setAccessControlAllowOrigin(origin);
+  }
+
+  exportDb(fileName: string): Promise<void> {
+    return Maintenance.export(this, fileName);
   }
 }

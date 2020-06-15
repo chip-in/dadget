@@ -8,6 +8,9 @@ export const enum TransactionType {
   DELETE = "delete",
   NONE = "none",
   ROLLBACK = "rollback",
+  TRUNCATE = "truncate",
+  IMPORT = "import",
+  FINISH_IMPORT = "finish_import",
 }
 
 /**

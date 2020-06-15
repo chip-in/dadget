@@ -173,15 +173,19 @@ class UpdateProcessor extends Subscriber {
     }
 
     this.logger.info("update subset db csn:", transaction.csn);
-    if (transaction.type === TransactionType.INSERT && transaction.new) {
-      const obj = Object.assign({ _id: transaction.target, csn: transaction.csn }, transaction.new);
+    if ((transaction.type === TransactionType.INSERT || transaction.type === TransactionType.IMPORT) && transaction.new) {
+      const obj = { ...transaction.new, _id: transaction.target, csn: transaction.csn };
       promise = promise.then(() => this.storage.getSubsetDb().insert(obj));
     } else if (transaction.type === TransactionType.UPDATE && transaction.before) {
       const updateObj = TransactionRequest.applyOperator(transaction);
       promise = promise.then(() => this.storage.getSubsetDb().update(transaction.target, updateObj));
     } else if (transaction.type === TransactionType.DELETE && transaction.before) {
       promise = promise.then(() => this.storage.getSubsetDb().deleteById(transaction.target));
-    } else if (transaction.type === TransactionType.NONE) {
+    } else if (transaction.type === TransactionType.TRUNCATE) {
+      promise = promise.then(() => this.storage.getSubsetDb().deleteAll());
+    } else if (transaction.type === TransactionType.FINISH_IMPORT) {
+    } else if (transaction.type !== TransactionType.NONE) {
+      throw new Error("Unsupported type: " + transaction.type);
     }
     promise = promise.then(() => this.storage.getJournalDb().insert(transaction));
     promise = promise.then(() => this.storage.getSystemDb().updateCsn(transaction.csn));
@@ -197,17 +201,22 @@ class UpdateProcessor extends Subscriber {
           throw new Error("Lack of transactions");
         }
         let promise = Promise.resolve();
-        transactions.forEach((trans) => {
-          if (trans.csn === csn) { return; }
-          if (trans.type === TransactionType.INSERT) {
-            promise = promise.then(() => this.storage.getSubsetDb().deleteById(trans.target));
-          } else if (trans.type === TransactionType.UPDATE && trans.before) {
-            promise = promise.then(() => this.storage.getSubsetDb().update(trans.target, trans.before as object));
-          } else if (trans.type === TransactionType.DELETE && trans.before) {
-            promise = promise.then(() => this.storage.getSubsetDb().insert(trans.before as object));
+        transactions.forEach((transaction) => {
+          if (transaction.csn === csn) { return; }
+          if (transaction.type === TransactionType.INSERT || transaction.type === TransactionType.IMPORT) {
+            promise = promise.then(() => this.storage.getSubsetDb().deleteById(transaction.target));
+          } else if (transaction.type === TransactionType.UPDATE && transaction.before) {
+            promise = promise.then(() => this.storage.getSubsetDb().update(transaction.target, transaction.before as object));
+          } else if (transaction.type === TransactionType.DELETE && transaction.before) {
+            promise = promise.then(() => this.storage.getSubsetDb().insert(transaction.before as object));
+          } else if (transaction.type === TransactionType.TRUNCATE) {
+            throw new Error("Cannot roll back TRUNCATE");
+          } else if (transaction.type === TransactionType.FINISH_IMPORT) {
+          } else if (transaction.type !== TransactionType.NONE && transaction.type !== TransactionType.ROLLBACK) {
+            throw new Error("Unsupported type: " + transaction.type);
           }
-          promise = promise.then(() => this.storage.getJournalDb().deleteAfterCsn(trans.csn - 1));
-          promise = promise.then(() => this.storage.getSystemDb().updateCsn(trans.csn - 1));
+          promise = promise.then(() => this.storage.getJournalDb().deleteAfterCsn(transaction.csn - 1));
+          promise = promise.then(() => this.storage.getSystemDb().updateCsn(transaction.csn - 1));
         });
         return promise;
       });
@@ -376,13 +385,16 @@ class UpdateListener extends Subscriber {
   static convertTransactionForSubset(subsetDefinition: SubsetDef, transaction: TransactionObject): TransactionObject {
     // サブセット用のトランザクション内容に変換
 
-    if (transaction.type === TransactionType.ROLLBACK || transaction.type === TransactionType.NONE) {
+    if (transaction.type === TransactionType.ROLLBACK ||
+      transaction.type === TransactionType.TRUNCATE ||
+      transaction.type === TransactionType.FINISH_IMPORT ||
+      transaction.type === TransactionType.NONE) {
       return transaction;
     }
     if (!subsetDefinition.query) { return transaction; }
     const query = parser.parse(subsetDefinition.query);
 
-    if (transaction.type === TransactionType.INSERT && transaction.new) {
+    if ((transaction.type === TransactionType.INSERT || transaction.type === TransactionType.IMPORT) && transaction.new) {
       if (query.matches(transaction.new, false)) {
         // insert to inner -> INSERT
         return transaction;
@@ -992,7 +1004,7 @@ export class SubsetStorage extends ServiceEngine implements Proxy {
     transactions.forEach((trans) => {
       if (trans.before) {
         dataMap[trans.target] = trans.before;
-      } else if (trans.type === TransactionType.INSERT) {
+      } else if (trans.type === TransactionType.INSERT || trans.type === TransactionType.IMPORT) {
         delete dataMap[trans.target];
       }
     });

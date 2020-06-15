@@ -18,7 +18,7 @@
   "scripts": {
     "prepare": "npm run clean && npm run release_build",
     "clean": "rm -rf lib dest",
-    "release_build": "tsc && babel --plugins transform-remove-console dest --out-dir lib",
+    "release_build": "tsc && babel dest --out-dir lib",
     "build": "tsc && babel dest --out-dir lib",
     "start": "node lib/command.js",
     "makedoc": "typedoc --excludeExternals --module commonjs --out ./docs/ ./src/",
@@ -30,6 +30,9 @@
     "@chip-in/resource-node": "*",
     "async-lock": "^1.1.1",
     "bson": "^4.0.4",
+    "byline": "^5.0.0",
+    "command-line-args": "^5.1.1",
+    "command-line-usage": "^6.1.0",
     "deep-diff": "^0.3.8",
     "deep-equal": "^1.0.1",
     "mongo-parse": "^2.0.3",
@@ -41,6 +44,9 @@
   "devDependencies": {
     "@types/async-lock": "0.0.20",
     "@types/bson": "^4.0.2",
+    "@types/byline": "^4.2.32",
+    "@types/command-line-args": "^5.0.0",
+    "@types/command-line-usage": "^5.0.1",
     "@types/deep-diff": "0.0.31",
     "@types/deep-equal": "^1.0.1",
     "@types/mongodb": "^2.2.19",

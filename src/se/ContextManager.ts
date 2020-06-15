@@ -203,14 +203,12 @@ class ContextManagementServer extends Proxy {
 
   exec(postulatedCsn: number, request: TransactionRequest): Promise<object> {
     let err: string | null = null;
-    if (!request.target) {
-      err = "target required in a transaction";
-    }
-    if (request.type === TransactionType.INSERT) {
-      if (request.before) { err = "before not required on INSERT"; }
-      if (request.operator) { err = "operator not required on INSERT"; }
+    if (request.type === TransactionType.INSERT || request.type === TransactionType.IMPORT) {
+      if (!request.target) { err = "target required in a transaction"; }
+      if (request.before) { err = "before not required for INSERT"; }
+      if (request.operator) { err = "operator not required for INSERT"; }
       if (!request.new) {
-        err = "new required on INSERT";
+        err = "new required for INSERT";
       } else {
         const keys = Object.keys(request.new);
         if (keys.indexOf("_id") >= 0 || keys.indexOf("csn") >= 0) {
@@ -218,13 +216,19 @@ class ContextManagementServer extends Proxy {
         }
       }
     } else if (request.type === TransactionType.UPDATE) {
-      if (!request.before) { err = "before required on UPDATE"; }
-      if (!request.operator) { err = "operator required on UPDATE"; }
-      if (request.new) { err = "new not required on UPDATE"; }
+      if (!request.target) { err = "target required in a transaction"; }
+      if (!request.before) { err = "before required for UPDATE"; }
+      if (!request.operator) { err = "operator required for UPDATE"; }
+      if (request.new) { err = "new not required for UPDATE"; }
     } else if (request.type === TransactionType.DELETE) {
-      if (!request.before) { err = "before required on DELETE"; }
-      if (request.operator) { err = "operator not required on DELETE"; }
-      if (request.new) { err = "new not required on DELETE"; }
+      if (!request.target) { err = "target required in a transaction"; }
+      if (!request.before) { err = "before required for DELETE"; }
+      if (request.operator) { err = "operator not required for DELETE"; }
+      if (request.new) { err = "new not required for DELETE"; }
+    } else if (request.type === TransactionType.TRUNCATE) {
+      this.logger.warn("TRUNCATE");
+    } else if (request.type === TransactionType.FINISH_IMPORT) {
+      this.logger.warn("FINISH_IMPORT");
     } else {
       err = "type not found in a transaction";
     }
@@ -538,6 +542,9 @@ export class ContextManager extends ServiceEngine {
   }
 
   checkUniqueConstraint(csn: number, request: TransactionRequest): Promise<object> {
+    if (request.type === TransactionType.TRUNCATE) { return Promise.resolve({}); }
+    if (request.type === TransactionType.FINISH_IMPORT) { return Promise.resolve({}); }
+    if (request.type === TransactionType.IMPORT && request.new) { return Promise.resolve(request.new); }
     if (request.type === TransactionType.INSERT && request.new) {
       const newObj = request.new;
       if (serialize(newObj).length >= MAX_OBJECT_SIZE) {
