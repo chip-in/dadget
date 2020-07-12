@@ -50,8 +50,12 @@ export class JournalDb {
       throw new DadgetError(ERROR.E1113, [postulatedCsn, this.protectedCsn]);
     }
     if (request.type === TransactionType.TRUNCATE) { return Promise.resolve(); }
-    if (request.type === TransactionType.FINISH_IMPORT) { return Promise.resolve(); }
-    if (request.type === TransactionType.IMPORT) { return Promise.resolve(); }
+    if (request.type === TransactionType.BEGIN_IMPORT) { return Promise.resolve(); }
+    if (request.type === TransactionType.END_IMPORT) { return Promise.resolve(); }
+    if (request.type === TransactionType.ABORT_IMPORT) { return Promise.resolve(); }
+    if (request.type === TransactionType.BEGIN_RESTORE) { return Promise.resolve(); }
+    if (request.type === TransactionType.END_RESTORE) { return Promise.resolve(); }
+    if (request.type === TransactionType.RESTORE) { return Promise.resolve(); }
     return this.db.findOneBySort({ target: request.target }, { csn: -1 })
       .then((result) => {
         if (request.type === TransactionType.INSERT && request.new) {

@@ -186,6 +186,11 @@ export const ERROR = {
   E2006: { code: 2006, message: "Too large new object Error: An object must be less than %1 bytes" },
 
   /**
+   * Operation locked Error
+   */
+  E2007: { code: 2007, message: "Operation currently locked" },
+
+  /**
    * Dadget Config Error
    */
   E2101: { code: 2101, message: "Dadget Config Error: %1" },

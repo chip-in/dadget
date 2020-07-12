@@ -12,6 +12,8 @@ const usage = () => {
         { name: "reset", summary: "Reset local DB data." },
         { name: "export", summary: "Export DB data." },
         { name: "import", summary: "Import DB data." },
+        { name: "backup", summary: "Backup DB data." },
+        { name: "restore", summary: "Restore DB data." },
       ],
     },
     {
@@ -60,6 +62,52 @@ const usage = () => {
           typeLabel: "{underline database name}",
         },
         {
+          name: "id",
+          typeLabel: "{underline id column name}",
+        },
+        {
+          name: "file",
+          typeLabel: "{underline input file}",
+        },
+      ],
+    },
+    {
+      header: "backup option",
+      optionList: [
+        {
+          name: "server",
+          typeLabel: "{underline core server}",
+        },
+        {
+          name: "rn",
+          typeLabel: "{underline Resource Node name}",
+        },
+        {
+          name: "name",
+          typeLabel: "{underline database name}",
+        },
+        {
+          name: "file",
+          typeLabel: "{underline output file}",
+        },
+      ],
+    },
+    {
+      header: "restore option",
+      optionList: [
+        {
+          name: "server",
+          typeLabel: "{underline core server}",
+        },
+        {
+          name: "rn",
+          typeLabel: "{underline Resource Node name}",
+        },
+        {
+          name: "name",
+          typeLabel: "{underline database name}",
+        },
+        {
           name: "file",
           typeLabel: "{underline input file}",
         },
@@ -89,15 +137,20 @@ if (mainOptions.command === "reset") {
   }
   Maintenance.reset(target);
 
-} else if (mainOptions.command === "export" || mainOptions.command === "import") {
+} else if (mainOptions.command === "export" || mainOptions.command === "import" ||
+  mainOptions.command === "backup" || mainOptions.command === "restore") {
   const argsDefinitions = [
     { name: "server" },
     { name: "rn" },
     { name: "name" },
     { name: "file" },
+    { name: "id" },
   ];
   const options = commandLineArgs(argsDefinitions, { argv });
   if (!options.server || !options.rn || !options.name || !options.file) {
+    usage();
+  }
+  if (mainOptions.command === "import" && !options.id) {
     usage();
   }
   Dadget.enableDeleteSubset = false;
@@ -111,13 +164,17 @@ if (mainOptions.command === "reset") {
     const dadget = seList[0] as Dadget;
     if (mainOptions.command === "export") {
       return Maintenance.export(dadget, options.file);
-    } else {
-      return Maintenance.import(dadget, options.file);
+    } else if (mainOptions.command === "import") {
+      return Maintenance.import(dadget, options.file, options.id);
+    } else if (mainOptions.command === "backup") {
+      return Maintenance.export(dadget, options.file);
+    } else if (mainOptions.command === "restore") {
+      return Maintenance.restore(dadget, options.file);
     }
   })
     .then(() => node.stop().then(() => process.exit()))
     .catch((msg) => {
-      console.error(msg);
+      console.error(msg.toString ? msg.toString() : msg);
       node.stop()
         .then(() => process.exit());
     });

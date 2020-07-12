@@ -9,8 +9,13 @@ export const enum TransactionType {
   NONE = "none",
   ROLLBACK = "rollback",
   TRUNCATE = "truncate",
-  IMPORT = "import",
-  FINISH_IMPORT = "finish_import",
+  BEGIN_IMPORT = "begin_import",
+  END_IMPORT = "end_import",
+  ABORT_IMPORT = "abort_import",
+  BEGIN_RESTORE = "begin_restore",
+  END_RESTORE = "end_restore",
+  ABORT_RESTORE = "abort_restore",
+  RESTORE = "restore",
 }
 
 /**
@@ -48,6 +53,8 @@ export class TransactionRequest {
    * 更新内容を記述するオペレータ。意味はmongoDB に準ずる。
    */
   operator?: { [op: string]: any };
+
+  atomicId?: string;
 
   /**
    * 更新operator適用

@@ -21,6 +21,7 @@ const KEEP_TIME_AFTER_SENDING_ROLLBACK_MS = 1000; // 1000ms
 const CHECK_POINT_CHECK_PERIOD_MS = 10 * 60 * 1000;  // 10 minutes
 const CHECK_POINT_DELETE_PERIOD_MS = 72 * 60 * 60 * 1000; // 72 hours
 const MAX_RESPONSE_SIZE_OF_JOURNALS = 10485760;
+const ATOMIC_OPERATION_MAX_LOCK_TIME = 10 * 60 * 1000;  // 10 minutes
 
 /**
  * コンテキストマネージャコンフィグレーションパラメータ
@@ -60,7 +61,14 @@ class TransactionJournalSubscriber extends Subscriber {
     }
 
     this.context.getLock().acquire("transaction", () => {
-      if (transaction.type === TransactionType.ROLLBACK) {
+      if (transaction.type === TransactionType.ABORT_IMPORT) {
+        this.logger.warn("ABORT_IMPORT:", transaction.csn);
+        return this.context.getJournalDb().deleteAfterCsn(transaction.csn)
+          .then(() => this.context.getSystemDb().updateCsn(transaction.csn))
+          .catch((err) => {
+            this.logger.error(err.toString());
+          });
+      } else if (transaction.type === TransactionType.ROLLBACK) {
         this.logger.warn("ROLLBACK:", transaction.csn);
         const protectedCsn = this.context.getJournalDb().getProtectedCsn();
         this.context.getJournalDb().setProtectedCsn(Math.min(protectedCsn, transaction.csn));
@@ -79,7 +87,7 @@ class TransactionJournalSubscriber extends Subscriber {
             this.logger.error(err.toString());
           });
       } else {
-        // Assume this node is a slave.
+        // Assume this node is a replication.
         return this.context.getSystemDb().getCsn()
           .then((csn) => {
             if (csn < transaction.csn - 1) {
@@ -156,6 +164,9 @@ class TransactionJournalSubscriber extends Subscriber {
 class ContextManagementServer extends Proxy {
   private lastBeforeObj?: { _id?: string, csn?: number };
   private lastCheckPointTime: number = 0;
+  private atomicLockId?: string = undefined;
+  private atomicLockTime: number = 0;
+  private atomicLockCsn: number = 0;
 
   constructor(protected context: ContextManager) {
     super();
@@ -203,7 +214,7 @@ class ContextManagementServer extends Proxy {
 
   exec(postulatedCsn: number, request: TransactionRequest): Promise<object> {
     let err: string | null = null;
-    if (request.type === TransactionType.INSERT || request.type === TransactionType.IMPORT) {
+    if (request.type === TransactionType.INSERT || request.type === TransactionType.RESTORE) {
       if (!request.target) { err = "target required in a transaction"; }
       if (request.before) { err = "before not required for INSERT"; }
       if (request.operator) { err = "operator not required for INSERT"; }
@@ -227,8 +238,18 @@ class ContextManagementServer extends Proxy {
       if (request.new) { err = "new not required for DELETE"; }
     } else if (request.type === TransactionType.TRUNCATE) {
       this.logger.warn("TRUNCATE");
-    } else if (request.type === TransactionType.FINISH_IMPORT) {
-      this.logger.warn("FINISH_IMPORT");
+    } else if (request.type === TransactionType.BEGIN_IMPORT) {
+      this.logger.warn("BEGIN_IMPORT");
+    } else if (request.type === TransactionType.END_IMPORT) {
+      this.logger.warn("END_IMPORT");
+    } else if (request.type === TransactionType.ABORT_IMPORT) {
+      this.logger.warn("ABORT_IMPORT");
+    } else if (request.type === TransactionType.BEGIN_RESTORE) {
+      this.logger.warn("BEGIN_RESTORE");
+    } else if (request.type === TransactionType.END_RESTORE) {
+      this.logger.warn("END_RESTORE");
+    } else if (request.type === TransactionType.ABORT_RESTORE) {
+      this.logger.warn("ABORT_RESTORE");
     } else {
       err = "type not found in a transaction";
     }
@@ -237,6 +258,50 @@ class ContextManagementServer extends Proxy {
         status: "NG",
         reason: new DadgetError(ERROR.E2002, [err]),
       });
+    }
+
+    if (this.atomicLockId) {
+      if (this.atomicLockTime + ATOMIC_OPERATION_MAX_LOCK_TIME < Date.now()) {
+        // over the time limit
+        this.atomicLockId = undefined;
+        this.atomicLockCsn = 0;
+      } else if (this.atomicLockId !== request.atomicId) {
+        return Promise.resolve({
+          status: "NG",
+          reason: new DadgetError(ERROR.E2007, []),
+        });
+      } else {
+        this.atomicLockTime = Date.now();
+      }
+    }
+
+    if (request.type === TransactionType.BEGIN_IMPORT || request.type === TransactionType.BEGIN_RESTORE) {
+      this.atomicLockId = request.atomicId;
+      this.atomicLockTime = Date.now();
+      this.atomicLockCsn = 0;
+    }
+
+    if (request.type === TransactionType.END_IMPORT ||
+      request.type === TransactionType.END_RESTORE ||
+      request.type === TransactionType.ABORT_RESTORE) {
+      this.atomicLockId = undefined;
+      this.atomicLockCsn = 0;
+    }
+
+    if (request.type === TransactionType.ABORT_IMPORT) {
+      const newCsn = this.atomicLockCsn;
+      this.atomicLockId = undefined;
+      this.atomicLockCsn = 0;
+      const transaction = new TransactionObject();
+      transaction.csn = newCsn;
+      transaction.type = TransactionType.ABORT_IMPORT;
+      return this.context.getNode().publish(
+        CORE_NODE.PATH_TRANSACTION.replace(/:database\b/g, this.context.getDatabase())
+        , EJSON.stringify(transaction))
+        .then(() => ({
+          status: "OK",
+          csn: newCsn,
+        }));
     }
 
     let transaction: TransactionObject;
@@ -266,10 +331,7 @@ class ContextManagementServer extends Proxy {
                   newCsn = values[0] + 1;
                   this.logger.info("exec newCsn:", newCsn);
                   const lastDigest = values[1];
-                  transaction = Object.assign({
-                    csn: newCsn,
-                    beforeDigest: lastDigest,
-                  }, _request);
+                  transaction = { ..._request, csn: newCsn, beforeDigest: lastDigest };
                   transaction.digest = TransactionObject.calcDigest(transaction);
                   transaction.protectedCsn = this.context.getJournalDb().getProtectedCsn();
                   return this.context.getJournalDb().insert(transaction);
@@ -285,6 +347,9 @@ class ContextManagementServer extends Proxy {
           if (!updateObject._id) { updateObject._id = transaction.target; }
           updateObject.csn = newCsn;
           this.lastBeforeObj = updateObject;
+          if (request.type === TransactionType.BEGIN_IMPORT) {
+            this.atomicLockCsn = newCsn - 1;
+          }
           resolve({
             status: "OK",
             csn: newCsn,
@@ -522,7 +587,7 @@ export class ContextManager extends ServiceEngine {
                   }
                   transaction.csn = csn;
                   transaction.type = TransactionType.ROLLBACK;
-                  // As this is a master, other slaves must be rollback.
+                  // As this is a master, other replications must be rollback.
                   return this.getNode().publish(
                     CORE_NODE.PATH_TRANSACTION.replace(/:database\b/g, this.getDatabase())
                     , EJSON.stringify(transaction));
@@ -543,8 +608,13 @@ export class ContextManager extends ServiceEngine {
 
   checkUniqueConstraint(csn: number, request: TransactionRequest): Promise<object> {
     if (request.type === TransactionType.TRUNCATE) { return Promise.resolve({}); }
-    if (request.type === TransactionType.FINISH_IMPORT) { return Promise.resolve({}); }
-    if (request.type === TransactionType.IMPORT && request.new) { return Promise.resolve(request.new); }
+    if (request.type === TransactionType.BEGIN_IMPORT) { return Promise.resolve({}); }
+    if (request.type === TransactionType.END_IMPORT) { return Promise.resolve({}); }
+    if (request.type === TransactionType.ABORT_IMPORT) { return Promise.resolve({}); }
+    if (request.type === TransactionType.BEGIN_RESTORE) { return Promise.resolve({}); }
+    if (request.type === TransactionType.END_RESTORE) { return Promise.resolve({}); }
+    if (request.type === TransactionType.ABORT_RESTORE) { return Promise.resolve({}); }
+    if (request.type === TransactionType.RESTORE && request.new) { return Promise.resolve(request.new); }
     if (request.type === TransactionType.INSERT && request.new) {
       const newObj = request.new;
       if (serialize(newObj).length >= MAX_OBJECT_SIZE) {

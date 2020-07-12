@@ -103,6 +103,7 @@ export default class Dadget extends ServiceEngine {
   private updateListenerKey: string | null;
   private latestCsn: number;
   private hasSubset = false;
+  private lockNotify = false;
 
   constructor(option: DadgetConfigDef) {
     super(option);
@@ -390,13 +391,14 @@ export default class Dadget extends ServiceEngine {
   exec(csn: number, request: TransactionRequest): Promise<object> {
     request.type = request.type.toLowerCase() as TransactionType;
     if (request.type !== TransactionType.INSERT &&
-      request.type !== TransactionType.IMPORT &&
       request.type !== TransactionType.UPDATE &&
-      request.type !== TransactionType.DELETE &&
-      request.type !== TransactionType.TRUNCATE &&
-      request.type !== TransactionType.FINISH_IMPORT) {
+      request.type !== TransactionType.DELETE) {
       return Promise.reject(new DadgetError(ERROR.E2104));
     }
+    return this._exec(csn, request);
+  }
+
+  _exec(csn: number, request: TransactionRequest): Promise<object> {
     const sendData = { csn, request };
     return this.node.fetch(CORE_NODE.PATH_CONTEXT.replace(/:database\b/g, this.database) + CORE_NODE.PATH_EXEC, {
       method: "POST",
@@ -455,9 +457,19 @@ export default class Dadget extends ServiceEngine {
   }
 
   procNotify(transaction: TransactionObject) {
-    if (transaction.type === TransactionType.IMPORT || transaction.type === TransactionType.TRUNCATE) {
+    if (transaction.type === TransactionType.BEGIN_IMPORT || transaction.type === TransactionType.BEGIN_RESTORE) {
+      this.lockNotify = true;
       return;
-    } else if (transaction.type === TransactionType.ROLLBACK) {
+    }
+    if (transaction.type === TransactionType.ABORT_IMPORT || transaction.type === TransactionType.ABORT_RESTORE) {
+      this.lockNotify = false;
+      return;
+    }
+    if (transaction.type === TransactionType.END_IMPORT || transaction.type === TransactionType.END_RESTORE) {
+      this.lockNotify = false;
+    }
+    if (this.lockNotify) { return; }
+    if (transaction.type === TransactionType.ROLLBACK) {
       this.notifyCsn = transaction.csn;
       this.notifyRollback(transaction.csn);
     } else if (transaction.csn > this.notifyCsn) {
