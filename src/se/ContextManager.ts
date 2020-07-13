@@ -280,6 +280,7 @@ class ContextManagementServer extends Proxy {
       this.atomicLockTime = Date.now();
       this.atomicLockCsn = 0;
     }
+    delete request.atomicId;
 
     if (request.type === TransactionType.END_IMPORT ||
       request.type === TransactionType.END_RESTORE ||
