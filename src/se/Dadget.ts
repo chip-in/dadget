@@ -28,6 +28,11 @@ export class DadgetConfigDef {
    * データベース名
    */
   database: string;
+
+  /**
+   * 未使用サブセット自動削除フラグ
+   */
+  autoDeleteSubset?: boolean;
 }
 
 export type CsnMode = "strict" | "latest";
@@ -149,8 +154,12 @@ export default class Dadget extends ServiceEngine {
           if (!storageName.startsWith(database + "--")) { continue; }
           const [dbName] = storageName.split("__");
           if (subsetNames.indexOf(dbName) < 0 && Dadget.enableDeleteSubset) {
-            this.logger.warn("Delete storage", storageName);
-            PersistentDb.deleteStorage(storageName);
+            if (this.option.autoDeleteSubset) {
+              this.logger.warn("Delete storage", storageName);
+              PersistentDb.deleteStorage(storageName);
+            } else {
+              this.logger.debug("Skip deleting storage", storageName);
+            }
           }
         }
       })
