@@ -22,6 +22,7 @@ import { CountResult, CsnMode, default as Dadget, QueryResult } from "./Dadget";
 import { DatabaseRegistry, SubsetDef } from "./DatabaseRegistry";
 
 const MAX_RESPONSE_SIZE_OF_JOURNALS = 10485760;
+const MAX_EXPORT_NUM = 100;
 
 class UpdateProcessor extends Subscriber {
 
@@ -325,19 +326,48 @@ class UpdateProcessor extends Subscriber {
       .then((fetchJournal) => {
         if (!fetchJournal) { throw new Error("journal not found: " + csn); }
         const subsetTransaction = UpdateListener.convertTransactionForSubset(this.subsetDefinition, fetchJournal);
-        return Dadget._query(this.storage.getNode(), this.database, query, undefined, undefined, undefined, csn, "strict")
+        return Dadget._query(this.storage.getNode(), this.database, query, undefined, undefined, undefined, csn, "strict", { _id: 1 })
           .then((result) => {
             if (result.restQuery) { throw new Error("The queryHandlers has been empty before completing queries."); }
-            return Promise.resolve()
-              .then(() => this.storage.getJournalDb().deleteAll())
-              .then(() => this.storage.getJournalDb().insert(subsetTransaction))
-              .then(() => this.storage.getSubsetDb().deleteAll())
-              .then(() => this.storage.getSubsetDb().insertMany(result.resultSet))
-              .then(() => this.storage.getSystemDb().updateCsn(result.csn))
-              .then(() => this.storage.getSystemDb().updateQueryHash())
-              .then(() => {
-                this.storage.setReady();
+            return this.storage.getSubsetDb().deleteAll().then(() => result);
+          })
+          .then((result) => {
+            return Util.promiseWhile<{ ids: object[] }>(
+              { ids: [...result.resultSet] },
+              (whileData) => {
+                return whileData.ids.length !== 0;
+              },
+              (whileData) => {
+                const idMap = new Map();
+                const ids = [];
+                for (let i = 0; i < MAX_EXPORT_NUM; i++) {
+                  const row = whileData.ids.shift();
+                  if (row) {
+                    const id = (row as any)._id;
+                    idMap.set(id, id);
+                    ids.push(id);
+                  }
+                }
+                return Dadget._query(this.storage.getNode(), this.database, { _id: { $in: ids } }, undefined, -1, undefined, csn, "strict")
+                  .then((rowData) => {
+                    if (rowData.restQuery) { throw new Error("The queryHandlers has been empty before completing queries."); }
+                    if (rowData.resultSet.length === 0) { return whileData; }
+                    for (const data of rowData.resultSet) {
+                      idMap.delete((data as any)._id);
+                    }
+                    for (const id of idMap.keys()) {
+                      whileData.ids.push({ _id: id });
+                    }
+                    return this.storage.getSubsetDb().insertMany(rowData.resultSet).then(() => whileData);
+                  });
               });
+          })
+          .then(() => this.storage.getJournalDb().deleteAll())
+          .then(() => this.storage.getJournalDb().insert(subsetTransaction))
+          .then(() => this.storage.getSystemDb().updateCsn(csn))
+          .then(() => this.storage.getSystemDb().updateQueryHash())
+          .then(() => {
+            this.storage.setReady();
           });
       })
       .catch((e) => {
@@ -1049,13 +1079,13 @@ export class SubsetStorage extends ServiceEngine implements Proxy {
     }
     let list = Util.mongoSearch(dataList, query, sort) as object[];
     if (offset) {
-      if (limit) {
+      if (limit && limit > 0) {
         list = list.slice(offset, offset + limit);
       } else {
         list = list.slice(offset);
       }
     } else {
-      if (limit) {
+      if (limit && limit > 0) {
         list = list.slice(0, limit);
       }
     }

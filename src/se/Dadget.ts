@@ -242,7 +242,7 @@ export default class Dadget extends ServiceEngine {
         }
         if (sort) {
           list = Util.mongoSearch(list, {}, sort) as object[];
-          if (limit) {
+          if (limit && limit > 0) {
             list = list.slice(0, limit);
           }
         }

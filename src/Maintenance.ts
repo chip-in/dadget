@@ -39,14 +39,14 @@ export class Maintenance {
             const csn = result.csn;
             return Util.promiseWhile<{ ids: object[] }>(
               { ids: [...result.resultSet] },
-              (result) => {
-                return result.ids.length !== 0;
+              (whileData) => {
+                return whileData.ids.length !== 0;
               },
-              (result) => {
+              (whileData) => {
                 const idMap = new Map();
                 const ids = [];
                 for (let i = 0; i < MAX_EXPORT_NUM; i++) {
-                  const row = result.ids.shift();
+                  const row = whileData.ids.shift();
                   if (row) {
                     const id = (row as any)._id;
                     idMap.set(id, id);
@@ -55,16 +55,16 @@ export class Maintenance {
                 }
                 return dadget.query({ _id: { $in: ids } }, undefined, -1, undefined, csn, "strict")
                   .then((rowData) => {
-                    if (rowData.resultSet.length === 0) { return result; }
+                    if (rowData.resultSet.length === 0) { return whileData; }
                     let out = "";
                     for (const data of rowData.resultSet) {
                       out += JSON.stringify(data) + "\n";
                       idMap.delete((data as any)._id);
                     }
                     for (const id of idMap.keys()) {
-                      result.ids.push({ _id: id });
+                      whileData.ids.push({ _id: id });
                     }
-                    return promisify(fs.write)(fd, out).then(() => result);
+                    return promisify(fs.write)(fd, out).then(() => whileData);
                   });
               });
           })
