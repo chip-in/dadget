@@ -10,7 +10,9 @@
   },
   "license": "MIT",
   "main": "./lib/se/Dadget.js",
-  "bin": "lib/command.js",
+  "bin": {
+    "dadget": "bin/command"
+  },
   "types": "./lib/se/Dadget.d.ts",
   "browser": {
     "./lib/db/container/PersistentDb.js": "./lib/db/container/PersistentDbOnBrowser.js",
