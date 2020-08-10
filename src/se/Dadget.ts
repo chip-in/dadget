@@ -6,6 +6,7 @@ import { CORE_NODE, setAccessControlAllowOrigin } from "../Config";
 import { PersistentDb } from "../db/container/PersistentDb";
 import { TransactionObject, TransactionRequest, TransactionType } from "../db/Transaction";
 import { ERROR } from "../Errors";
+import { Maintenance } from "../Maintenance";
 import { DadgetError } from "../util/DadgetError";
 import * as EJSON from "../util/Ejson";
 import { Util } from "../util/Util";
@@ -27,6 +28,11 @@ export class DadgetConfigDef {
    * データベース名
    */
   database: string;
+
+  /**
+   * 未使用サブセット自動削除フラグ
+   */
+  autoDeleteSubset?: boolean;
 }
 
 export type CsnMode = "strict" | "latest";
@@ -90,6 +96,8 @@ const PREQUERY_CSN = -1;
  */
 export default class Dadget extends ServiceEngine {
 
+  public static enableDeleteSubset = true;
+
   public bootOrder = 60;
   private option: DadgetConfigDef;
   private node: ResourceNode;
@@ -100,6 +108,7 @@ export default class Dadget extends ServiceEngine {
   private updateListenerKey: string | null;
   private latestCsn: number;
   private hasSubset = false;
+  private lockNotify = false;
 
   constructor(option: DadgetConfigDef) {
     super(option);
@@ -144,9 +153,13 @@ export default class Dadget extends ServiceEngine {
         for (const storageName of storageList) {
           if (!storageName.startsWith(database + "--")) { continue; }
           const [dbName] = storageName.split("__");
-          if (subsetNames.indexOf(dbName) < 0) {
-            this.logger.warn("Delete storage", storageName);
-            PersistentDb.deleteStorage(storageName);
+          if (subsetNames.indexOf(dbName) < 0 && Dadget.enableDeleteSubset) {
+            if (this.option.autoDeleteSubset) {
+              this.logger.warn("Delete storage", storageName);
+              PersistentDb.deleteStorage(storageName);
+            } else {
+              this.logger.debug("Skip deleting storage", storageName);
+            }
           }
         }
       })
@@ -190,8 +203,6 @@ export default class Dadget extends ServiceEngine {
     if (queryHandlers.length === 0) { throw new Error("QueryHandlers required"); }
     queryHandlers = Dadget.sortQueryHandlers(queryHandlers);
     if (!csn) { csn = 0; }
-    const _offset = offset ? offset : 0;
-    const maxLimit = limit ? limit + _offset : undefined;
     const resultSet: object[] = [];
     return Promise.resolve({ csn, resultSet, restQuery: query, queryHandlers, csnMode } as QueryResult)
       .then(function queryFallback(request): Promise<QueryResult> {
@@ -201,7 +212,7 @@ export default class Dadget extends ServiceEngine {
         }
         const qh = request.queryHandlers.shift();
         if (qh == null) { throw new Error("never happen"); }
-        return qh.query(request.csn, request.restQuery, sort, maxLimit, csnMode, projection)
+        return qh.query(request.csn, request.restQuery, sort, limit, csnMode, projection, offset)
           .then((result) => queryFallback({
             csn: result.csn,
             resultSet: [...request.resultSet, ...result.resultSet],
@@ -215,7 +226,7 @@ export default class Dadget extends ServiceEngine {
         let hasDupulicate = false;
         for (const item of result.resultSet as Array<{ _id: string }>) {
           if (itemMap[item._id]) {
-            console.log("hasDupulicate:" + item._id);
+            console.warn("hasDupulicate:" + item._id);
             hasDupulicate = true;
           }
           itemMap[item._id] = item;
@@ -231,16 +242,8 @@ export default class Dadget extends ServiceEngine {
         }
         if (sort) {
           list = Util.mongoSearch(list, {}, sort) as object[];
-          if (_offset) {
-            if (limit) {
-              list = list.slice(_offset, _offset + limit);
-            } else {
-              list = list.slice(_offset);
-            }
-          } else {
-            if (limit) {
-              list = list.slice(0, limit);
-            }
+          if (limit && limit > 0) {
+            list = list.slice(0, limit);
           }
         }
         return { ...result, resultSet: list };
@@ -325,7 +328,6 @@ export default class Dadget extends ServiceEngine {
         return result;
       })
       .catch((reason) => {
-        console.dir(reason);
         const cause = reason instanceof DadgetError ? reason :
           (reason.code ? DadgetError.from(reason) : new DadgetError(ERROR.E2102, [reason.toString()]));
         return Promise.reject(cause);
@@ -375,7 +377,6 @@ export default class Dadget extends ServiceEngine {
         return result.resultCount;
       })
       .catch((reason) => {
-        console.dir(reason);
         const cause = reason instanceof DadgetError ? reason :
           (reason.code ? DadgetError.from(reason) : new DadgetError(ERROR.E2102, [reason.toString()]));
         return Promise.reject(cause);
@@ -398,9 +399,15 @@ export default class Dadget extends ServiceEngine {
    */
   exec(csn: number, request: TransactionRequest): Promise<object> {
     request.type = request.type.toLowerCase() as TransactionType;
-    if (request.type !== TransactionType.INSERT && request.type !== TransactionType.UPDATE && request.type !== TransactionType.DELETE) {
-      throw new Error("The TransactionType is not supported.");
+    if (request.type !== TransactionType.INSERT &&
+      request.type !== TransactionType.UPDATE &&
+      request.type !== TransactionType.DELETE) {
+      return Promise.reject(new DadgetError(ERROR.E2104));
     }
+    return this._exec(csn, request);
+  }
+
+  _exec(csn: number, request: TransactionRequest): Promise<object> {
     const sendData = { csn, request };
     return this.node.fetch(CORE_NODE.PATH_CONTEXT.replace(/:database\b/g, this.database) + CORE_NODE.PATH_EXEC, {
       method: "POST",
@@ -415,7 +422,6 @@ export default class Dadget extends ServiceEngine {
       })
       .then((_) => {
         const result = EJSON.deserialize(_);
-        console.log("Dadget exec result: " + JSON.stringify(result));
         if (result.status === "OK") {
           this.latestCsn = result.csn;
           return result.updateObject;
@@ -460,6 +466,18 @@ export default class Dadget extends ServiceEngine {
   }
 
   procNotify(transaction: TransactionObject) {
+    if (transaction.type === TransactionType.BEGIN_IMPORT || transaction.type === TransactionType.BEGIN_RESTORE) {
+      this.lockNotify = true;
+      return;
+    }
+    if (transaction.type === TransactionType.ABORT_IMPORT || transaction.type === TransactionType.ABORT_RESTORE) {
+      this.lockNotify = false;
+      return;
+    }
+    if (transaction.type === TransactionType.END_IMPORT || transaction.type === TransactionType.END_RESTORE) {
+      this.lockNotify = false;
+    }
+    if (this.lockNotify) { return; }
     if (transaction.type === TransactionType.ROLLBACK) {
       this.notifyCsn = transaction.csn;
       this.notifyRollback(transaction.csn);
@@ -541,5 +559,9 @@ export default class Dadget extends ServiceEngine {
    */
   static setServerAccessControlAllowOrigin(origin: string) {
     setAccessControlAllowOrigin(origin);
+  }
+
+  exportDb(fileName: string): Promise<void> {
+    return Maintenance.export(this, fileName);
   }
 }

@@ -22,6 +22,7 @@ import { CountResult, CsnMode, default as Dadget, QueryResult } from "./Dadget";
 import { DatabaseRegistry, SubsetDef } from "./DatabaseRegistry";
 
 const MAX_RESPONSE_SIZE_OF_JOURNALS = 10485760;
+const MAX_EXPORT_NUM = 100;
 
 class UpdateProcessor extends Subscriber {
 
@@ -30,6 +31,7 @@ class UpdateProcessor extends Subscriber {
   constructor(
     protected storage: SubsetStorage,
     protected database: string,
+    protected subsetName: string,
     protected subsetDefinition: SubsetDef) {
 
     super();
@@ -38,8 +40,8 @@ class UpdateProcessor extends Subscriber {
   }
 
   onReceive(msg: string) {
-    console.log("UpdateProcessor received: ", this.storage.getOption().subset, msg.toString());
     const transaction = EJSON.parse(msg) as TransactionObject;
+    console.log("UpdateProcessor received: ", this.storage.getOption().subset, transaction.csn);
     this.procTransaction(transaction);
   }
 
@@ -96,7 +98,8 @@ class UpdateProcessor extends Subscriber {
                   .then(() => { release2(); })
                   .then(() => { release1(); });
               }
-            } else if (csn > transaction.csn && transaction.type === TransactionType.ROLLBACK) {
+            } else if (csn > transaction.csn &&
+              (transaction.type === TransactionType.ROLLBACK || transaction.type === TransactionType.ABORT_IMPORT)) {
               return this.fetchJournal(transaction.csn)
                 .then((fetchJournal) => {
                   if (!fetchJournal) { throw new Error("can not rollback because journal isn't found: " + transaction.csn); }
@@ -122,10 +125,17 @@ class UpdateProcessor extends Subscriber {
                 return promise;
               };
               let promise = Promise.resolve();
+              const journals = new Map<number, TransactionObject>();
+              if (csn + 1 < transaction.csn) {
+                promise = promise.then(() => this.fetchJournals(csn, transaction.csn - 1, (fetchJournal) => {
+                  journals.set(fetchJournal.csn, fetchJournal);
+                  return Promise.resolve();
+                }));
+              }
               for (let i = csn + 1; i < transaction.csn; i++) {
                 // csnが飛んでいた場合はジャーナル取得を行い、そちらから更新
                 const _csn = i;
-                promise = promise.then(() => this.adjustData(_csn));
+                promise = promise.then(() => this.adjustData(_csn, journals));
                 promise = promise.then(() => doQueuedQuery(_csn));
               }
               promise = this.updateSubsetDb(promise, transaction);
@@ -149,21 +159,41 @@ class UpdateProcessor extends Subscriber {
     if (transaction.csn > 1) {
       promise = promise.then(() => this.storage.getJournalDb().findByCsn(transaction.csn - 1))
         .then((journal) => {
-          if (!journal) { throw new Error("journal not found: " + (transaction.csn - 1)); }
-          if (journal.digest !== transaction.beforeDigest) { throw new Error("beforeDigest mismatch:" + transaction.csn); }
+          if (!journal) {
+            throw new Error("journal not found, csn:" + (transaction.csn - 1)
+              + ", database:" + this.database
+              + ", subset:" + this.subsetName);
+          }
+          if (journal.digest !== transaction.beforeDigest) {
+            throw new Error("beforeDigest mismatch, csn:" + transaction.csn
+              + ", database:" + this.database
+              + ", subset:" + this.subsetName
+              + ", journal digest:" + journal.digest
+              + ", transaction beforeDigest:" + transaction.beforeDigest);
+          }
         });
     }
 
     this.logger.info("update subset db csn:", transaction.csn);
-    if (transaction.type === TransactionType.INSERT && transaction.new) {
-      const obj = Object.assign({ _id: transaction.target, csn: transaction.csn }, transaction.new);
+    if ((transaction.type === TransactionType.INSERT || transaction.type === TransactionType.RESTORE) && transaction.new) {
+      const obj = { ...transaction.new, _id: transaction.target, csn: transaction.csn };
       promise = promise.then(() => this.storage.getSubsetDb().insert(obj));
     } else if (transaction.type === TransactionType.UPDATE && transaction.before) {
       const updateObj = TransactionRequest.applyOperator(transaction);
       promise = promise.then(() => this.storage.getSubsetDb().update(transaction.target, updateObj));
     } else if (transaction.type === TransactionType.DELETE && transaction.before) {
       promise = promise.then(() => this.storage.getSubsetDb().deleteById(transaction.target));
-    } else if (transaction.type === TransactionType.NONE) {
+    } else if (transaction.type === TransactionType.TRUNCATE) {
+      promise = promise.then(() => this.storage.getSubsetDb().deleteAll());
+    } else if (transaction.type === TransactionType.BEGIN_IMPORT) {
+    } else if (transaction.type === TransactionType.END_IMPORT) {
+    } else if (transaction.type === TransactionType.ABORT_IMPORT) {
+    } else if (transaction.type === TransactionType.BEGIN_RESTORE) {
+      promise = promise.then(() => this.storage.getJournalDb().setProtectedCsn(transaction.csn));
+    } else if (transaction.type === TransactionType.END_RESTORE) {
+    } else if (transaction.type === TransactionType.ABORT_RESTORE) {
+    } else if (transaction.type !== TransactionType.NONE) {
+      throw new Error("Unsupported type: " + transaction.type);
     }
     promise = promise.then(() => this.storage.getJournalDb().insert(transaction));
     promise = promise.then(() => this.storage.getSystemDb().updateCsn(transaction.csn));
@@ -175,28 +205,43 @@ class UpdateProcessor extends Subscriber {
     return this.storage.getJournalDb().findByCsnRange(csn, Number.MAX_VALUE)
       .then((transactions) => {
         transactions.sort((a, b) => b.csn - a.csn);
-        console.log("ROLLBACK transactions:" + JSON.stringify(transactions));
         if (transactions.length === 0 || transactions[transactions.length - 1].csn !== csn) {
           throw new Error("Lack of transactions");
         }
         let promise = Promise.resolve();
-        transactions.forEach((trans) => {
-          if (trans.csn === csn) { return; }
-          if (trans.type === TransactionType.INSERT) {
-            promise = promise.then(() => this.storage.getSubsetDb().deleteById(trans.target));
-          } else if (trans.type === TransactionType.UPDATE && trans.before) {
-            promise = promise.then(() => this.storage.getSubsetDb().update(trans.target, trans.before as object));
-          } else if (trans.type === TransactionType.DELETE && trans.before) {
-            promise = promise.then(() => this.storage.getSubsetDb().insert(trans.before as object));
+        transactions.forEach((transaction) => {
+          if (transaction.csn === csn) { return; }
+          if (transaction.type === TransactionType.INSERT || transaction.type === TransactionType.RESTORE) {
+            promise = promise.then(() => this.storage.getSubsetDb().deleteById(transaction.target));
+          } else if (transaction.type === TransactionType.UPDATE && transaction.before) {
+            promise = promise.then(() => this.storage.getSubsetDb().update(transaction.target, transaction.before as object));
+          } else if (transaction.type === TransactionType.DELETE && transaction.before) {
+            promise = promise.then(() => this.storage.getSubsetDb().insert(transaction.before as object));
+          } else if (transaction.type === TransactionType.TRUNCATE) {
+            throw new Error("Cannot roll back TRUNCATE");
+          } else if (transaction.type === TransactionType.BEGIN_IMPORT) {
+          } else if (transaction.type === TransactionType.END_IMPORT) {
+          } else if (transaction.type === TransactionType.ABORT_IMPORT) {
+          } else if (transaction.type === TransactionType.BEGIN_RESTORE) {
+          } else if (transaction.type === TransactionType.END_RESTORE) {
+          } else if (transaction.type === TransactionType.ABORT_RESTORE) {
+          } else if (transaction.type !== TransactionType.NONE && transaction.type !== TransactionType.ROLLBACK) {
+            throw new Error("Unsupported type: " + transaction.type);
           }
-          promise = promise.then(() => this.storage.getJournalDb().deleteAfterCsn(trans.csn - 1));
-          promise = promise.then(() => this.storage.getSystemDb().updateCsn(trans.csn - 1));
+          promise = promise.then(() => this.storage.getJournalDb().deleteAfterCsn(transaction.csn - 1));
+          promise = promise.then(() => this.storage.getSystemDb().updateCsn(transaction.csn - 1));
         });
         return promise;
       });
   }
 
-  fetchJournal(csn: number): Promise<TransactionObject | null> {
+  fetchJournal(csn: number, journals?: Map<number, TransactionObject>): Promise<TransactionObject | null> {
+    if (journals) {
+      const journal = journals.get(csn);
+      if (journal) {
+        return Promise.resolve(journal);
+      }
+    }
     return Util.fetchJournal(csn, this.database, this.storage.getNode(), this.storage.getOption().subscribe);
   }
 
@@ -208,7 +253,7 @@ class UpdateProcessor extends Subscriber {
     return Util.fetchJournals(fromCsn, toCsn, this.database, this.storage.getNode(), callback, this.storage.getOption().subscribe);
   }
 
-  private adjustData(csn: number): Promise<void> {
+  private adjustData(csn: number, journals?: Map<number, TransactionObject>): Promise<void> {
     this.logger.warn("adjustData:" + csn);
     return Promise.resolve()
       .then(() => {
@@ -217,7 +262,7 @@ class UpdateProcessor extends Subscriber {
         } else {
           return this.storage.getJournalDb().getLastJournal()
             .then((journal) => {
-              return this.fetchJournal(journal.csn)
+              return this.fetchJournal(journal.csn, journals)
                 .then((fetchJournal) => {
                   if (!fetchJournal || fetchJournal.digest !== journal.digest) {
                     // rollback incorrect journals
@@ -235,7 +280,7 @@ class UpdateProcessor extends Subscriber {
                           .then(() => this.storage.getJournalDb().findByCsn(nextCsn))
                           .then((journal) => {
                             if (!journal) { throw new Error("journal not found: " + nextCsn); }
-                            return this.fetchJournal(journal.csn)
+                            return this.fetchJournal(journal.csn, journals)
                               .then((fetchJournal) => {
                                 if (fetchJournal && fetchJournal.digest === journal.digest) {
                                   return { ...loopData, csn: 0 };
@@ -250,11 +295,18 @@ class UpdateProcessor extends Subscriber {
                         return this.adjustData(csn);
                       });
                   } else {
-                    return this.fetchJournals(journal.csn + 1, csn, (fetchJournal) => {
+                    const callback = (fetchJournal: TransactionObject) => {
                       const subsetTransaction = UpdateListener.convertTransactionForSubset(this.subsetDefinition, fetchJournal);
                       return this.updateSubsetDb(Promise.resolve(), subsetTransaction);
-                    })
-                      .then(() => { this.storage.setReady(); });
+                    };
+                    if (journal.csn + 1 === csn) {
+                      return this.fetchJournal(csn, journals)
+                        .then(callback)
+                        .then(() => { this.storage.setReady(); });
+                    } else {
+                      return this.fetchJournals(journal.csn + 1, csn, callback)
+                        .then(() => { this.storage.setReady(); });
+                    }
                   }
                 });
             })
@@ -274,19 +326,48 @@ class UpdateProcessor extends Subscriber {
       .then((fetchJournal) => {
         if (!fetchJournal) { throw new Error("journal not found: " + csn); }
         const subsetTransaction = UpdateListener.convertTransactionForSubset(this.subsetDefinition, fetchJournal);
-        return Dadget._query(this.storage.getNode(), this.database, query, undefined, undefined, undefined, csn, "strict")
+        return Dadget._query(this.storage.getNode(), this.database, query, undefined, undefined, undefined, csn, "strict", { _id: 1 })
           .then((result) => {
             if (result.restQuery) { throw new Error("The queryHandlers has been empty before completing queries."); }
-            return Promise.resolve()
-              .then(() => this.storage.getJournalDb().deleteAll())
-              .then(() => this.storage.getJournalDb().insert(subsetTransaction))
-              .then(() => this.storage.getSubsetDb().deleteAll())
-              .then(() => this.storage.getSubsetDb().insertMany(result.resultSet))
-              .then(() => this.storage.getSystemDb().updateCsn(result.csn))
-              .then(() => this.storage.getSystemDb().updateQueryHash())
-              .then(() => {
-                this.storage.setReady();
+            return this.storage.getSubsetDb().deleteAll().then(() => result);
+          })
+          .then((result) => {
+            return Util.promiseWhile<{ ids: object[] }>(
+              { ids: [...result.resultSet] },
+              (whileData) => {
+                return whileData.ids.length !== 0;
+              },
+              (whileData) => {
+                const idMap = new Map();
+                const ids = [];
+                for (let i = 0; i < MAX_EXPORT_NUM; i++) {
+                  const row = whileData.ids.shift();
+                  if (row) {
+                    const id = (row as any)._id;
+                    idMap.set(id, id);
+                    ids.push(id);
+                  }
+                }
+                return Dadget._query(this.storage.getNode(), this.database, { _id: { $in: ids } }, undefined, -1, undefined, csn, "strict")
+                  .then((rowData) => {
+                    if (rowData.restQuery) { throw new Error("The queryHandlers has been empty before completing queries."); }
+                    if (rowData.resultSet.length === 0) { return whileData; }
+                    for (const data of rowData.resultSet) {
+                      idMap.delete((data as any)._id);
+                    }
+                    for (const id of idMap.keys()) {
+                      whileData.ids.push({ _id: id });
+                    }
+                    return this.storage.getSubsetDb().insertMany(rowData.resultSet).then(() => whileData);
+                  });
               });
+          })
+          .then(() => this.storage.getJournalDb().deleteAll())
+          .then(() => this.storage.getJournalDb().insert(subsetTransaction))
+          .then(() => this.storage.getSystemDb().updateCsn(csn))
+          .then(() => this.storage.getSystemDb().updateQueryHash())
+          .then(() => {
+            this.storage.setReady();
           });
       })
       .catch((e) => {
@@ -346,13 +427,21 @@ class UpdateListener extends Subscriber {
   static convertTransactionForSubset(subsetDefinition: SubsetDef, transaction: TransactionObject): TransactionObject {
     // サブセット用のトランザクション内容に変換
 
-    if (transaction.type === TransactionType.ROLLBACK || transaction.type === TransactionType.NONE) {
+    if (transaction.type === TransactionType.ROLLBACK ||
+      transaction.type === TransactionType.TRUNCATE ||
+      transaction.type === TransactionType.BEGIN_IMPORT ||
+      transaction.type === TransactionType.END_IMPORT ||
+      transaction.type === TransactionType.ABORT_IMPORT ||
+      transaction.type === TransactionType.BEGIN_RESTORE ||
+      transaction.type === TransactionType.END_RESTORE ||
+      transaction.type === TransactionType.ABORT_RESTORE ||
+      transaction.type === TransactionType.NONE) {
       return transaction;
     }
     if (!subsetDefinition.query) { return transaction; }
     const query = parser.parse(subsetDefinition.query);
 
-    if (transaction.type === TransactionType.INSERT && transaction.new) {
+    if ((transaction.type === TransactionType.INSERT || transaction.type === TransactionType.RESTORE) && transaction.new) {
       if (query.matches(transaction.new, false)) {
         // insert to inner -> INSERT
         return transaction;
@@ -507,6 +596,11 @@ export class SubsetStorageConfigDef {
    * サブセットストレージのタイプで persistent か cache のいずれかである
    */
   readonly type: "persistent" | "cache";
+
+  /**
+   * エクスポート処理での一回あたりの最大処理数
+   */
+  readonly exportMaxLines?: number;
 }
 
 /**
@@ -529,6 +623,7 @@ export class SubsetStorage extends ServiceEngine implements Proxy {
   private mountHandle: string;
   private lock: ReadWriteLock;
   private queryWaitingList: { [csn: number]: Array<() => Promise<any>> } = {};
+  private atomicWaitingList: { [csn: number]: Array<() => Promise<any>> } = {};
   private subscriberKey: string | null;
   private readyFlag: boolean = false;
   private updateProcessor: UpdateProcessor;
@@ -609,6 +704,15 @@ export class SubsetStorage extends ServiceEngine implements Proxy {
     return [];
   }
 
+  pullAtomicWaitingList(csn: number): Array<() => Promise<any>> {
+    const list = this.atomicWaitingList[csn];
+    if (list) {
+      delete this.atomicWaitingList[csn];
+      return list;
+    }
+    return [];
+  }
+
   start(node: ResourceNode): Promise<void> {
     this.node = node;
     this.logger.debug("SubsetStorage is starting");
@@ -658,7 +762,7 @@ export class SubsetStorage extends ServiceEngine implements Proxy {
       this.systemDb = new SystemDb(new PersistentDb(dbName));
     }
 
-    this.updateProcessor = new UpdateProcessor(this, this.database, this.subsetDefinition);
+    this.updateProcessor = new UpdateProcessor(this, this.database, this.subsetName, this.subsetDefinition);
     this.updateListener = new UpdateListener(this, this.database, this.subsetDefinition, this.updateProcessor, !!this.option.exported);
     let promise = this.subsetDb.start();
     promise = promise.then(() => { this.logger.debug("SubsetStorage is starting"); });
@@ -688,23 +792,23 @@ export class SubsetStorage extends ServiceEngine implements Proxy {
     this.node.mount(CORE_NODE.PATH_SUBSET_UPDATOR
       .replace(/:database\b/g, this.database)
       .replace(/:subset\b/g, this.subsetName), "singletonMaster", new SubsetUpdatorProxy(this), {
-        onDisconnect: () => {
-          this.logger.info("updator is disconnected");
-          this.subscribeUpdateProcessor()
-            .then(() => {
-              if (this.updateListenerKey) { this.node.unsubscribe(this.updateListenerKey); }
-              this.updateListenerKey = undefined;
-            });
-        },
-        onRemount: (mountHandle: string) => {
-          this.logger.info("updator is remounted");
-          this.updateListenerMountHandle = mountHandle;
-          this.subscribeUpdateListener()
-            .then(() => {
-              if (this.subscriberKey) { this.node.unsubscribe(this.subscriberKey); }
-            });
-        },
-      })
+      onDisconnect: () => {
+        this.logger.info("updator is disconnected");
+        this.subscribeUpdateProcessor()
+          .then(() => {
+            if (this.updateListenerKey) { this.node.unsubscribe(this.updateListenerKey); }
+            this.updateListenerKey = undefined;
+          });
+      },
+      onRemount: (mountHandle: string) => {
+        this.logger.info("updator is remounted");
+        this.updateListenerMountHandle = mountHandle;
+        this.subscribeUpdateListener()
+          .then(() => {
+            if (this.subscriberKey) { this.node.unsubscribe(this.subscriberKey); }
+          });
+      },
+    })
       .then((mountHandle) => {
         // マスターを取得した場合のみ実行される
         this.logger.info("updator is connected");
@@ -775,10 +879,10 @@ export class SubsetStorage extends ServiceEngine implements Proxy {
         const query = EJSON.parse(request.query);
         const sort = request.sort ? EJSON.parse(request.sort) : undefined;
         const limit = ProxyHelper.validateNumber(request.limit, "limit");
+        const offset = ProxyHelper.validateNumber(request.offset, "offset");
         const projection = request.projection ? EJSON.parse(request.projection) : undefined;
-        return this.query(csn, query, sort, limit, request.csnMode, projection)
+        return this.query(csn, query, sort, limit, request.csnMode, projection, offset)
           .then((result) => {
-            console.dir(result);
             return { status: "OK", result };
           });
       });
@@ -789,7 +893,6 @@ export class SubsetStorage extends ServiceEngine implements Proxy {
         const query = EJSON.parse(request.query);
         return this.count(csn, query, request.csnMode)
           .then((result) => {
-            console.dir(result);
             return { status: "OK", result };
           });
       });
@@ -872,7 +975,7 @@ export class SubsetStorage extends ServiceEngine implements Proxy {
       });
   }
 
-  query(csn: number, query: object, sort?: object, limit?: number, csnMode?: CsnMode, projection?: object): Promise<QueryResult> {
+  query(csn: number, query: object, sort?: object, limit?: number, csnMode?: CsnMode, projection?: object, offset?: number): Promise<QueryResult> {
     if (!this.readyFlag) {
       return Promise.resolve({ csn, resultSet: [], restQuery: query, csnMode });
     }
@@ -881,6 +984,11 @@ export class SubsetStorage extends ServiceEngine implements Proxy {
       return Promise.resolve({ csn, resultSet: [], restQuery: query, csnMode });
     }
     const restQuery = LogicalOperator.getOutsideOfCache(query, this.subsetDefinition.query);
+    if (restQuery && offset) {
+      return Promise.resolve({ csn, resultSet: [], restQuery: query, csnMode });
+    }
+    if (limit && limit < 0) { limit = this.option.exportMaxLines; }
+    this.logger.debug("query:" + JSON.stringify(query));
     let release: () => void;
     const promise = new Promise<void>((resolve, reject) => {
       this.getLock().readLock((unlock) => {
@@ -899,7 +1007,7 @@ export class SubsetStorage extends ServiceEngine implements Proxy {
       .then(() => this.getSystemDb().getCsn())
       .then((currentCsn) => {
         if (csn === 0 || csn === currentCsn || (csn < currentCsn && csnMode === "latest")) {
-          return this.getSubsetDb().find(innerQuery, sort, limit, projection)
+          return this.getSubsetDb().find(innerQuery, sort, limit, projection, offset)
             .then((result) => {
               release();
               return { csn: currentCsn, resultSet: result, restQuery };
@@ -916,11 +1024,13 @@ export class SubsetStorage extends ServiceEngine implements Proxy {
                 this.logger.info("not enough rollback transactions");
                 return { csn, resultSet: [], restQuery: query };
               }
-              const possibleLimit = limit ? limit + transactions.length : undefined;
+              const _offset = offset ? offset : 0;
+              const maxLimit = limit ? limit + _offset : undefined;
+              const possibleLimit = maxLimit ? maxLimit + transactions.length : undefined;
               return this.getSubsetDb().find(innerQuery, sort, possibleLimit)
                 .then((result) => {
                   release();
-                  const resultSet = SubsetStorage.rollbackAndFind(result, transactions, innerQuery, sort, limit)
+                  const resultSet = SubsetStorage.rollbackAndFind(result, transactions, innerQuery, sort, limit, offset)
                     .map((val) => Util.project(val, projection));
                   return { csn, resultSet, restQuery };
                 });
@@ -931,7 +1041,7 @@ export class SubsetStorage extends ServiceEngine implements Proxy {
           return new Promise<QueryResult>((resolve, reject) => {
             if (!this.queryWaitingList[csn]) { this.queryWaitingList[csn] = []; }
             this.queryWaitingList[csn].push(() => {
-              return this.getSubsetDb().find(innerQuery, sort, limit, projection)
+              return this.getSubsetDb().find(innerQuery, sort, limit, projection, offset)
                 .then((result) => {
                   resolve({ csn, resultSet: result, restQuery });
                 });
@@ -946,9 +1056,9 @@ export class SubsetStorage extends ServiceEngine implements Proxy {
       });
   }
 
-  static rollbackAndFind(orgList: any[], transactions: TransactionObject[], query: object, sort?: object, limit?: number): any[] {
+  static rollbackAndFind(orgList: any[], transactions: TransactionObject[], query: object, sort?: object, limit?: number, offset?: number): any[] {
     transactions.sort((a, b) => b.csn - a.csn);
-    console.log("rollbackAndFind transactions:" + JSON.stringify(transactions));
+    console.log("rollbackAndFind");
 
     const dataMap: any = {};
     orgList.forEach((val) => {
@@ -958,7 +1068,7 @@ export class SubsetStorage extends ServiceEngine implements Proxy {
     transactions.forEach((trans) => {
       if (trans.before) {
         dataMap[trans.target] = trans.before;
-      } else if (trans.type === TransactionType.INSERT) {
+      } else if (trans.type === TransactionType.INSERT || trans.type === TransactionType.RESTORE) {
         delete dataMap[trans.target];
       }
     });
@@ -968,10 +1078,17 @@ export class SubsetStorage extends ServiceEngine implements Proxy {
       dataList.push(dataMap[_id]);
     }
     let list = Util.mongoSearch(dataList, query, sort) as object[];
-    if (limit) {
-      list = list.slice(0, limit);
+    if (offset) {
+      if (limit && limit > 0) {
+        list = list.slice(offset, offset + limit);
+      } else {
+        list = list.slice(offset);
+      }
+    } else {
+      if (limit && limit > 0) {
+        list = list.slice(0, limit);
+      }
     }
-    console.log("rollbackAndFind:" + JSON.stringify(list));
     return list;
   }
 }

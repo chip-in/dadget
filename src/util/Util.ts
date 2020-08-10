@@ -77,7 +77,7 @@ export class Util {
       })
       .then((_) => {
         const result = EJSON.deserialize(_);
-        console.log("fetchJournal: ", JSON.stringify(result));
+        console.log("fetchJournal: ", csn);
         if (result.status === "OK") {
           return result.journal as TransactionObject;
         } else if (result.status === "NG") {
@@ -119,7 +119,7 @@ export class Util {
             return fetchResult.json();
           })
           .then((result) => {
-            console.log("fetchJournals: ", JSON.stringify(result));
+            console.log("fetchJournals: ", fromCsn, toCsn);
             if (result.status === "OK") {
               const loopData = {
                 csn: mainLoop.csn,

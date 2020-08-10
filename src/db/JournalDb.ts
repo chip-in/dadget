@@ -49,9 +49,15 @@ export class JournalDb {
     if (postulatedCsn && postulatedCsn < this.protectedCsn) {
       throw new DadgetError(ERROR.E1113, [postulatedCsn, this.protectedCsn]);
     }
+    if (request.type === TransactionType.TRUNCATE) { return Promise.resolve(); }
+    if (request.type === TransactionType.BEGIN_IMPORT) { return Promise.resolve(); }
+    if (request.type === TransactionType.END_IMPORT) { return Promise.resolve(); }
+    if (request.type === TransactionType.ABORT_IMPORT) { return Promise.resolve(); }
+    if (request.type === TransactionType.BEGIN_RESTORE) { return Promise.resolve(); }
+    if (request.type === TransactionType.END_RESTORE) { return Promise.resolve(); }
+    if (request.type === TransactionType.RESTORE) { return Promise.resolve(); }
     return this.db.findOneBySort({ target: request.target }, { csn: -1 })
       .then((result) => {
-        console.log("checkConsistent", JSON.stringify(result));
         if (request.type === TransactionType.INSERT && request.new) {
           if (!result || result.type === TransactionType.DELETE) { return; }
           throw new DadgetError(ERROR.E1102, [request.target]);
@@ -72,9 +78,7 @@ export class JournalDb {
   getLastDigest(): Promise<string> {
     return this.db.findOneBySort({}, { csn: -1 })
       .then((result) => {
-        console.log("getLastDigest", JSON.stringify(result));
         if (result) {
-          console.log("getLastDigest:", result._id, result.digest);
           return result.digest;
         } else {
           return "";
@@ -86,7 +90,6 @@ export class JournalDb {
   getLastJournal(): Promise<TransactionObject> {
     return this.db.findOneBySort({}, { csn: -1 })
       .then((result) => {
-        console.log("getLastJournal", JSON.stringify(result));
         if (result) {
           return result;
         } else {
@@ -114,7 +117,6 @@ export class JournalDb {
   }
 
   insert(transaction: TransactionObject): Promise<void> {
-    console.log("insert:", JSON.stringify(transaction));
     return this.db.insertOne(JournalDb.serializeTrans(transaction))
       .catch((err) => Promise.reject(new DadgetError(ERROR.E1108, [err.toString()])));
   }
@@ -125,7 +127,6 @@ export class JournalDb {
       .then((result) => {
         if (result) {
           const transaction = JournalDb.deserializeTrans(result);
-          console.log(JSON.stringify(transaction));
           console.log("findByCsn digest:", transaction.digest);
           return transaction;
         } else {
@@ -177,7 +178,7 @@ export class JournalDb {
   }
 
   replace(oldTransaction: TransactionObject, newTransaction: TransactionObject): Promise<void> {
-    console.log("replace:", (oldTransaction as any)._id, JSON.stringify(newTransaction));
+    console.log("replace:", (oldTransaction as any)._id);
     return this.db.replaceOneById((oldTransaction as any)._id, JournalDb.serializeTrans(newTransaction))
       .catch((err) => Promise.reject(new DadgetError(ERROR.E1117, [err.toString()])));
   }
@@ -187,7 +188,6 @@ export class JournalDb {
     return this.db.findOneBySort({ datetime: { $lt: time } }, { csn: -1 })
       .then((result) => {
         if (!result) { return null; }
-        console.log("getBeforeCheckPointTime:", JSON.stringify(result));
         return JournalDb.deserializeTrans(result);
       })
       .catch((err) => Promise.reject(new DadgetError(ERROR.E1114, [err.toString()])));
@@ -198,7 +198,6 @@ export class JournalDb {
     return this.db.findOneBySort({ csn: { $gt: csn } }, { csn: 1 })
       .then((result) => {
         if (!result) { return null; }
-        console.log("getOneAfterCsn:", JSON.stringify(result));
         return JournalDb.deserializeTrans(result);
       })
       .catch((err) => Promise.reject(new DadgetError(ERROR.E1115, [err.toString()])));

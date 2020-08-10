@@ -36,7 +36,6 @@ export class CacheDb implements IDb {
     }
     const list = Util.mongoSearch(dataList, query);
     if (list && list instanceof Array && list.length > 0) {
-      console.log("CacheDb findOne:" + JSON.stringify(list[0]));
       return Promise.resolve(list[0]);
     }
     return Promise.resolve(null);
@@ -53,7 +52,6 @@ export class CacheDb implements IDb {
     }
     const list = Util.mongoSearch(dataList, query, sort);
     if (list && list instanceof Array && list.length > 0) {
-      console.log("CacheDb findOneBySort:" + JSON.stringify(list[0]));
       return Promise.resolve(list[0]);
     }
     return Promise.resolve(null);
@@ -76,7 +74,6 @@ export class CacheDb implements IDb {
         list = list.slice(0, limit);
       }
     }
-    console.log("CacheDb find:" + JSON.stringify(list));
     return Promise.resolve(list);
   }
 
@@ -87,7 +84,6 @@ export class CacheDb implements IDb {
     }
     const list = Util.mongoSearch(dataList, query) as object[];
     const count = list.length;
-    console.log("CacheDb count:" + count);
     return Promise.resolve(count);
   }
 

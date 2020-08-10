@@ -86,7 +86,7 @@ export class QueryHandler extends ServiceEngine {
     return Promise.resolve();
   }
 
-  query(csn: number, query: object, sort?: object, limit?: number, csnMode?: CsnMode, projection?: object): Promise<QueryResult> {
+  query(csn: number, query: object, sort?: object, limit?: number, csnMode?: CsnMode, projection?: object, offset?: number): Promise<QueryResult> {
     this.logger.debug("query:" + JSON.stringify(query));
     const request = {
       csn,
@@ -95,6 +95,7 @@ export class QueryHandler extends ServiceEngine {
       limit,
       csnMode,
       projection: projection ? EJSON.stringify(projection) : undefined,
+      offset,
     };
     const reqUrl = URL.format({
       pathname: CORE_NODE.PATH_SUBSET

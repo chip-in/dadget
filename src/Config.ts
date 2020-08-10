@@ -43,3 +43,5 @@ export const CORE_NODE = {
   PATH_QUERY: "/query",
   PATH_COUNT: "/count",
 };
+
+export const MAX_OBJECT_SIZE = 8 * 1024 * 1024;
