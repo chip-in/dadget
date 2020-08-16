@@ -7,9 +7,12 @@ import Dadget from "./se/Dadget";
 const usage = () => {
   const sections = [
     {
+      header: "Synopsis",
+      content: "$ dadget <command>　<options>",
+    },
+    {
       header: "Command List",
       content: [
-        { name: "reset", summary: "Reset local DB data." },
         { name: "export", summary: "Export DB data." },
         { name: "import", summary: "Import DB data." },
         { name: "backup", summary: "Backup DB data." },
@@ -17,99 +20,52 @@ const usage = () => {
       ],
     },
     {
-      header: "reset option",
-      optionList: [
-        {
-          name: "name",
-          typeLabel: "{underline DB name}",
-        },
-      ],
-    },
-    {
-      header: "export option",
+      header: "Option List",
       optionList: [
         {
           name: "server",
-          typeLabel: "{underline core server}",
+          typeLabel: "{underline url}",
+          description: "Core server",
         },
         {
           name: "rn",
-          typeLabel: "{underline Resource Node name}",
+          typeLabel: "{underline name}",
+          description: "Resource Node name",
         },
         {
           name: "name",
-          typeLabel: "{underline database name}",
+          typeLabel: "{underline name}",
+          description: "Database name",
         },
         {
           name: "file",
-          typeLabel: "{underline output file}",
-        },
-      ],
-    },
-    {
-      header: "import option",
-      optionList: [
-        {
-          name: "server",
-          typeLabel: "{underline core server}",
-        },
-        {
-          name: "rn",
-          typeLabel: "{underline Resource Node name}",
-        },
-        {
-          name: "name",
-          typeLabel: "{underline database name}",
+          typeLabel: "{underline filename}",
+          description: "Output or input file",
         },
         {
           name: "id",
-          typeLabel: "{underline id column name}",
+          typeLabel: "{underline id}",
+          description: "Id column name for import command",
         },
         {
-          name: "file",
-          typeLabel: "{underline input file}",
-        },
-      ],
-    },
-    {
-      header: "backup option",
-      optionList: [
-        {
-          name: "server",
-          typeLabel: "{underline core server}",
+          name: "user",
+          typeLabel: "{underline username}",
+          description: "Username for basic authorization",
         },
         {
-          name: "rn",
-          typeLabel: "{underline Resource Node name}",
+          name: "password",
+          typeLabel: "{underline password}",
+          description: "Password for basic authorization",
         },
         {
-          name: "name",
-          typeLabel: "{underline database name}",
+          name: "jwtToken",
+          typeLabel: "{underline token}",
+          description: "Token for JWT authorization",
         },
         {
-          name: "file",
-          typeLabel: "{underline output file}",
-        },
-      ],
-    },
-    {
-      header: "restore option",
-      optionList: [
-        {
-          name: "server",
-          typeLabel: "{underline core server}",
-        },
-        {
-          name: "rn",
-          typeLabel: "{underline Resource Node name}",
-        },
-        {
-          name: "name",
-          typeLabel: "{underline database name}",
-        },
-        {
-          name: "file",
-          typeLabel: "{underline input file}",
+          name: "jwtRefreshPath",
+          typeLabel: "{underline path}",
+          description: "Refresh path for JWT authorization",
         },
       ],
     },
@@ -145,6 +101,10 @@ if (mainOptions.command === "reset") {
     { name: "name" },
     { name: "file" },
     { name: "id" },
+    { name: "user" },
+    { name: "password" },
+    { name: "jwtToken" },
+    { name: "jwtRefreshPath" },
   ];
   const options = commandLineArgs(argsDefinitions, { argv });
   if (!options.server || !options.rn || !options.name || !options.file) {
@@ -156,10 +116,16 @@ if (mainOptions.command === "reset") {
   Dadget.enableDeleteSubset = false;
   const node = new ResourceNode(options.server, options.rn);
   Dadget.registerServiceClasses(node);
+  if (options.user) {
+    node.setBasicAuthorization(options.user, options.password);
+  }
+  if (options.jwtToken) {
+    node.setJWTAuthorization(options.jwtToken, options.jwtRefreshPath);
+  }
   node.start().then(() => {
     const seList = node.searchServiceEngine("Dadget", { database: options.name });
     if (seList.length === 0) {
-      return Promise.reject("RNの構成にDadgetがないか、データベース名を間違っています。");
+      return Promise.reject("Dadget is missing from the RN configuration or the database name is incorrect.");
     }
     const dadget = seList[0] as Dadget;
     if (mainOptions.command === "export") {
