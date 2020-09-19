@@ -145,27 +145,29 @@ export default class Dadget extends ServiceEngine {
 
     const subsetStorages = node.searchServiceEngine("SubsetStorage", { database }) as SubsetStorage[];
     // Delete unused persistent databases
-    PersistentDb.getAllStorage()
-      .then((storageList) => {
-        const subsetNames = subsetStorages
-          .filter((subset) => subset.getType() === "persistent")
-          .map((subset) => subset.getDbName());
-        for (const storageName of storageList) {
-          if (!storageName.startsWith(database + "--")) { continue; }
-          const [dbName] = storageName.split("__");
-          if (subsetNames.indexOf(dbName) < 0 && Dadget.enableDeleteSubset) {
-            if (this.option.autoDeleteSubset) {
-              this.logger.warn("Delete storage", storageName);
-              PersistentDb.deleteStorage(storageName);
-            } else {
-              this.logger.debug("Skip deleting storage", storageName);
+    if (Dadget.enableDeleteSubset) {
+      PersistentDb.getAllStorage()
+        .then((storageList) => {
+          const subsetNames = subsetStorages
+            .filter((subset) => subset.getType() === "persistent")
+            .map((subset) => subset.getDbName());
+          for (const storageName of storageList) {
+            if (!storageName.startsWith(database + "--")) { continue; }
+            const [dbName] = storageName.split("__");
+            if (subsetNames.indexOf(dbName) < 0) {
+              if (this.option.autoDeleteSubset) {
+                this.logger.warn("Delete storage", storageName);
+                PersistentDb.deleteStorage(storageName);
+              } else {
+                this.logger.debug("Skip deleting storage", storageName);
+              }
             }
           }
-        }
-      })
-      .catch((reason) => {
-        this.logger.warn("Sweep storage:", reason.toString());
-      });
+        })
+        .catch((reason) => {
+          this.logger.warn("Sweep storage:", reason.toString());
+        });
+    }
 
     if (subsetStorages.length > 0) {
       this.hasSubset = true;
