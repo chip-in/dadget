@@ -1,14 +1,17 @@
 import * as parser from "mongo-parse";
 import { v1 as uuidv1 } from "uuid";
 
+import { Logger as ChipInLogger } from "@chip-in/logger";
 import { ResourceNode, ServiceEngine, Subscriber } from "@chip-in/resource-node";
 import { CORE_NODE, setAccessControlAllowOrigin } from "../Config";
 import { PersistentDb } from "../db/container/PersistentDb";
 import { TransactionObject, TransactionRequest, TransactionType } from "../db/Transaction";
 import { ERROR } from "../Errors";
+import { LOG_MESSAGES } from "../LogMessages";
 import { Maintenance } from "../Maintenance";
 import { DadgetError } from "../util/DadgetError";
 import * as EJSON from "../util/Ejson";
+import { Logger } from "../util/Logger";
 import { Util } from "../util/Util";
 import { ContextManager } from "./ContextManager";
 import { DatabaseRegistry } from "./DatabaseRegistry";
@@ -99,6 +102,7 @@ export default class Dadget extends ServiceEngine {
   public static enableDeleteSubset = true;
 
   public bootOrder = 60;
+  private logger: Logger;
   private option: DadgetConfigDef;
   private node: ResourceNode;
   private database: string;
@@ -112,7 +116,8 @@ export default class Dadget extends ServiceEngine {
 
   constructor(option: DadgetConfigDef) {
     super(option);
-    this.logger.debug(JSON.stringify(option));
+    this.logger = Logger.getLogger("Dadget", option.database);
+    this.logger.debug(LOG_MESSAGES.CREATED, ["Dadget"]);
     this.option = option;
   }
 
@@ -133,7 +138,7 @@ export default class Dadget extends ServiceEngine {
 
   start(node: ResourceNode): Promise<void> {
     this.node = node;
-    this.logger.debug("Dadget is starting");
+    this.logger.debug(LOG_MESSAGES.STARTING, ["Dadget"]);
     if (!this.option.database) {
       throw new DadgetError(ERROR.E2101, ["Database name is missing."]);
     }
@@ -141,7 +146,6 @@ export default class Dadget extends ServiceEngine {
       throw new DadgetError(ERROR.E2101, ["Database name can not contain '--'."]);
     }
     const database = this.database = this.option.database;
-    this.logger.debug("Dadget is started");
 
     const subsetStorages = node.searchServiceEngine("SubsetStorage", { database }) as SubsetStorage[];
     // Delete unused persistent databases
@@ -156,16 +160,16 @@ export default class Dadget extends ServiceEngine {
             const [dbName] = storageName.split("__");
             if (subsetNames.indexOf(dbName) < 0) {
               if (this.option.autoDeleteSubset) {
-                this.logger.warn("Delete storage", storageName);
+                this.logger.warn(LOG_MESSAGES.DELETE_STORAGE, [storageName]);
                 PersistentDb.deleteStorage(storageName);
               } else {
-                this.logger.debug("Skip deleting storage", storageName);
+                this.logger.debug(LOG_MESSAGES.SKIP_DELETING_STORAGE, [storageName]);
               }
             }
           }
         })
         .catch((reason) => {
-          this.logger.warn("Sweep storage:", reason.toString());
+          this.logger.warn(LOG_MESSAGES.FAILED_SWEEP_STORAGE, [reason.toString()]);
         });
     }
 
@@ -174,6 +178,7 @@ export default class Dadget extends ServiceEngine {
       subsetStorages[0].notifyListener = this;
     }
 
+    this.logger.debug(LOG_MESSAGES.STARTED, ["Dadget"]);
     return Promise.resolve();
   }
 
@@ -501,16 +506,17 @@ export default class Dadget extends ServiceEngine {
     const parent = this;
     if (Object.keys(this.updateListeners).length === 0 && !this.hasSubset) {
       class NotifyListener extends Subscriber {
+        private logger: Logger;
 
         constructor() {
           super();
-          this.logger.category = "NotifyListener";
-          this.logger.debug("NotifyListener is created");
+          this.logger = Logger.getLogger("NotifyListener", parent.option.database);
+          this.logger.debug(LOG_MESSAGES.CREATED, ["NotifyListener"]);
         }
 
         onReceive(transctionJSON: string) {
           const transaction = EJSON.parse(transctionJSON) as TransactionObject;
-          this.logger.info("received:", transaction.type, transaction.csn);
+          this.logger.info(LOG_MESSAGES.RECEIVED_TYPE_CSN, [transaction.type], [transaction.csn]);
           parent.procNotify(transaction);
         }
       }
@@ -565,5 +571,9 @@ export default class Dadget extends ServiceEngine {
 
   exportDb(fileName: string): Promise<void> {
     return Maintenance.export(this, fileName);
+  }
+
+  static getLogger() {
+    return ChipInLogger;
   }
 }

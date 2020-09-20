@@ -16,6 +16,7 @@ const CORE_SERVER = process.env.CORE_SERVER ? process.env.CORE_SERVER : env.CORE
 const RN_NAME = process.env.RN_NAME ? process.env.RN_NAME : env.RN_NAME ? env.RN_NAME : "db-server";
 
 let node = new ResourceNode(CORE_SERVER, RN_NAME);
+Dadget.getLogger().setLogLevel('debug');
 Dadget.registerServiceClasses(node);
 node.start().then(() => {
   function sigHandle() {

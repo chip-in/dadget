@@ -9,8 +9,10 @@ import { JournalDb } from "../db/JournalDb";
 import { SystemDb } from "../db/SystemDb";
 import { TransactionObject, TransactionRequest, TransactionType } from "../db/Transaction";
 import { ERROR } from "../Errors";
+import { LOG_MESSAGES } from "../LogMessages";
 import { DadgetError } from "../util/DadgetError";
 import * as EJSON from "../util/Ejson";
+import { Logger } from "../util/Logger";
 import { ProxyHelper } from "../util/ProxyHelper";
 import { Util } from "../util/Util";
 import Dadget from "./Dadget";
@@ -35,26 +37,27 @@ export class ContextManagerConfigDef {
 }
 
 class TransactionJournalSubscriber extends Subscriber {
+  private logger: Logger;
 
   constructor(protected context: ContextManager) {
     super();
-    this.logger.category = "TransJournalSubscriber";
-    this.logger.debug("TransactionJournalSubscriber is created");
+    this.logger = Logger.getLogger("TransJournalSubscriber", context.getDatabase());
+    this.logger.debug(LOG_MESSAGES.CREATED, ["TransactionJournalSubscriber"]);
   }
 
   onReceive(msg: string) {
     const transaction: TransactionObject = EJSON.parse(msg);
-    this.logger.info("received:", transaction.type, transaction.csn);
+    this.logger.info(LOG_MESSAGES.MSG_RECEIVED, [transaction.type], [transaction.csn]);
 
     if (transaction.protectedCsn) {
       const protectedCsn = transaction.protectedCsn;
       if (this.context.getJournalDb().getProtectedCsn() < protectedCsn) {
-        this.logger.info("CHECKPOINT protectedCsn: " + protectedCsn);
+        this.logger.info(LOG_MESSAGES.CHECKPOINT_RECEIVED, [], [protectedCsn]);
         this.context.getJournalDb().setProtectedCsn(protectedCsn);
         setTimeout(() => {
           this.context.getJournalDb().deleteBeforeCsn(protectedCsn)
             .catch((err) => {
-              this.logger.error(err.toString());
+              this.logger.error(LOG_MESSAGES.ERROR_MSG, [err.toString()]);
             });
         });
       }
@@ -62,14 +65,14 @@ class TransactionJournalSubscriber extends Subscriber {
 
     this.context.getLock().acquire("transaction", () => {
       if (transaction.type === TransactionType.ABORT_IMPORT) {
-        this.logger.warn("ABORT_IMPORT:", transaction.csn);
+        this.logger.warn(LOG_MESSAGES.ABORT_IMPORT, [], [transaction.csn]);
         return this.context.getJournalDb().deleteAfterCsn(transaction.csn)
           .then(() => this.context.getSystemDb().updateCsn(transaction.csn))
           .catch((err) => {
-            this.logger.error(err.toString());
+            this.logger.error(LOG_MESSAGES.ERROR_MSG, [err.toString()]);
           });
       } else if (transaction.type === TransactionType.ROLLBACK) {
-        this.logger.warn("ROLLBACK:", transaction.csn);
+        this.logger.warn(LOG_MESSAGES.ROLLBACK, [], [transaction.csn]);
         const protectedCsn = this.context.getJournalDb().getProtectedCsn();
         this.context.getJournalDb().setProtectedCsn(Math.min(protectedCsn, transaction.csn));
         return this.context.getJournalDb().findByCsn(transaction.csn)
@@ -84,14 +87,13 @@ class TransactionJournalSubscriber extends Subscriber {
               });
           })
           .catch((err) => {
-            this.logger.error(err.toString());
+            this.logger.error(LOG_MESSAGES.ERROR_MSG, [err.toString()]);
           });
       } else {
         // Assume this node is a replication.
         return this.context.getSystemDb().getCsn()
           .then((csn) => {
             if (csn < transaction.csn - 1) {
-              this.logger.info("forward csn:", transaction.csn - 1);
               return this.adjustData(transaction.csn - 1);
             }
           })
@@ -102,14 +104,13 @@ class TransactionJournalSubscriber extends Subscriber {
           .then(([savedTransaction, preTransaction]) => {
             if (!savedTransaction) {
               if (preTransaction && preTransaction.digest === transaction.beforeDigest) {
-                this.logger.info("insert transaction:", transaction.csn);
                 return this.context.getJournalDb().insert(transaction)
                   .then(() => this.context.getSystemDb().updateCsn(transaction.csn));
               }
             }
           })
           .catch((err) => {
-            this.logger.error(err.toString());
+            this.logger.error(LOG_MESSAGES.ERROR_MSG, [err.toString()]);
           });
       }
     });
@@ -120,7 +121,7 @@ class TransactionJournalSubscriber extends Subscriber {
   }
 
   adjustData(csn: number): Promise<any> {
-    this.logger.warn("adjustData:" + csn);
+    this.logger.warn(LOG_MESSAGES.ADJUST_DATA, [], [csn]);
     let csnUpdated = false;
     const loopData = { csn };
     return Util.promiseWhile<{ csn: number }>(
@@ -156,12 +157,13 @@ class TransactionJournalSubscriber extends Subscriber {
       },
     )
       .catch((err) => {
-        this.logger.error(err.toString());
+        this.logger.error(LOG_MESSAGES.ERROR_MSG, [err.toString()]);
       });
   }
 }
 
 class ContextManagementServer extends Proxy {
+  private logger: Logger;
   private lastBeforeObj?: { _id?: string, csn?: number };
   private lastCheckPointTime: number = 0;
   private atomicLockId?: string = undefined;
@@ -170,8 +172,8 @@ class ContextManagementServer extends Proxy {
 
   constructor(protected context: ContextManager) {
     super();
-    this.logger.category = "ContextManagementServer";
-    this.logger.debug("ContextManagementServer is created");
+    this.logger = Logger.getLogger("ContextManagementServer", context.getDatabase());
+    this.logger.debug(LOG_MESSAGES.CREATED, ["ContextManagementServer"]);
   }
 
   resetLastBeforeObj() {
@@ -184,30 +186,30 @@ class ContextManagementServer extends Proxy {
     const url = URL.parse(req.url);
     if (url.pathname == null) { throw new Error("pathname is required."); }
     const method = req.method.toUpperCase();
-    this.logger.debug(method, url.pathname);
+    this.logger.debug(LOG_MESSAGES.ON_RECEIVE, [method, url.pathname]);
     if (method === "OPTIONS") {
       return ProxyHelper.procOption(req, res);
     } else if (url.pathname.endsWith(CORE_NODE.PATH_EXEC) && method === "POST") {
       return ProxyHelper.procPost(req, res, this.logger, (request) => {
         const csn = ProxyHelper.validateNumberRequired(request.csn, "csn");
-        this.logger.info(CORE_NODE.PATH_EXEC, "postulatedCsn:", csn);
+        this.logger.info(LOG_MESSAGES.ON_RECEIVE_EXEC, [], [csn]);
         return this.exec(csn, request.request);
       });
     } else if (url.pathname.endsWith(CORE_NODE.PATH_GET_TRANSACTION) && method === "GET") {
       return ProxyHelper.procGet(req, res, this.logger, (request) => {
         const csn = ProxyHelper.validateNumberRequired(request.csn, "csn");
-        this.logger.info(CORE_NODE.PATH_GET_TRANSACTION, "csn:", csn);
+        this.logger.info(LOG_MESSAGES.ON_RECEIVE_GET_TRANSACTION, [], [csn]);
         return this.getTransactionJournal(csn);
       });
     } else if (url.pathname.endsWith(CORE_NODE.PATH_GET_TRANSACTIONS) && method === "GET") {
       return ProxyHelper.procGet(req, res, this.logger, (request) => {
         const fromCsn = ProxyHelper.validateNumberRequired(request.fromCsn, "fromCsn");
         const toCsn = ProxyHelper.validateNumberRequired(request.toCsn, "toCsn");
-        this.logger.info(CORE_NODE.PATH_GET_TRANSACTIONS, "from:", fromCsn, "to:", toCsn);
+        this.logger.info(LOG_MESSAGES.ON_RECEIVE_GET_TRANSACTIONS, [], [fromCsn, toCsn]);
         return this.getTransactionJournals(fromCsn, toCsn);
       });
     } else {
-      this.logger.warn("server command not found!:", method, url.pathname);
+      this.logger.warn(LOG_MESSAGES.SERVER_COMMAND_NOT_FOUND, [method, url.pathname]);
       return ProxyHelper.procError(req, res);
     }
   }
@@ -237,19 +239,19 @@ class ContextManagementServer extends Proxy {
       if (request.operator) { err = "operator not required for DELETE"; }
       if (request.new) { err = "new not required for DELETE"; }
     } else if (request.type === TransactionType.TRUNCATE) {
-      this.logger.warn("TRUNCATE");
+      this.logger.warn(LOG_MESSAGES.EXEC_TRUNCATE);
     } else if (request.type === TransactionType.BEGIN_IMPORT) {
-      this.logger.warn("BEGIN_IMPORT");
+      this.logger.warn(LOG_MESSAGES.EXEC_BEGIN_IMPORT);
     } else if (request.type === TransactionType.END_IMPORT) {
-      this.logger.warn("END_IMPORT");
+      this.logger.warn(LOG_MESSAGES.EXEC_END_IMPORT);
     } else if (request.type === TransactionType.ABORT_IMPORT) {
-      this.logger.warn("ABORT_IMPORT");
+      this.logger.warn(LOG_MESSAGES.EXEC_ABORT_IMPORT);
     } else if (request.type === TransactionType.BEGIN_RESTORE) {
-      this.logger.warn("BEGIN_RESTORE");
+      this.logger.warn(LOG_MESSAGES.EXEC_BEGIN_RESTORE);
     } else if (request.type === TransactionType.END_RESTORE) {
-      this.logger.warn("END_RESTORE");
+      this.logger.warn(LOG_MESSAGES.EXEC_END_RESTORE);
     } else if (request.type === TransactionType.ABORT_RESTORE) {
-      this.logger.warn("ABORT_RESTORE");
+      this.logger.warn(LOG_MESSAGES.EXEC_ABORT_RESTORE);
     } else {
       err = "type not found in a transaction";
     }
@@ -316,10 +318,10 @@ class ContextManagementServer extends Proxy {
             && (!request.before._id || this.lastBeforeObj._id === request.before._id)) {
             const objDiff = Util.diff(this.lastBeforeObj, request.before);
             if (objDiff) {
-              this.logger.error("a mismatch of request.before", JSON.stringify(objDiff));
+              this.logger.error(LOG_MESSAGES.REQUEST_BEFORE_HAS_MISMATCH, [JSON.stringify(objDiff)]);
               throw new DadgetError(ERROR.E2005, [JSON.stringify(request)]);
             } else {
-              this.logger.debug("lastBeforeObj check passed");
+              this.logger.debug(LOG_MESSAGES.LASTBEFOREOBJ_CHECK_PASSED);
             }
           }
           return this.context.getJournalDb().checkConsistent(postulatedCsn, _request)
@@ -330,7 +332,7 @@ class ContextManagementServer extends Proxy {
               return Promise.all([this.context.getSystemDb().getCsn(), this.context.getJournalDb().getLastDigest()])
                 .then((values) => {
                   newCsn = values[0] + 1;
-                  this.logger.info("exec newCsn:", newCsn);
+                  this.logger.info(LOG_MESSAGES.EXEC_NEWCSN, [], [newCsn]);
                   const lastDigest = values[1];
                   transaction = { ..._request, csn: newCsn, beforeDigest: lastDigest };
                   transaction.digest = TransactionObject.calcDigest(transaction);
@@ -360,7 +362,7 @@ class ContextManagementServer extends Proxy {
           let cause = reason instanceof DadgetError ? reason : new DadgetError(ERROR.E2003, [reason]);
           if (cause.code === ERROR.E1105.code) { cause = new DadgetError(ERROR.E2004, [cause]); }
           cause.convertInsertsToString();
-          this.logger.warn(cause.toString());
+          this.logger.warn(LOG_MESSAGES.ERROR_CAUSE, [cause.toString()]);
           resolve({
             status: "NG",
             reason: cause,
@@ -389,11 +391,11 @@ class ContextManagementServer extends Proxy {
             });
         })
         .then((protectedCsn) => {
-          this.logger.info("CHECKPOINT protectedCsn: " + protectedCsn);
+          this.logger.info(LOG_MESSAGES.CHECKPOINT_PROTECTEDCSN, [], [protectedCsn]);
           this.context.getJournalDb().setProtectedCsn(protectedCsn);
           this.context.getJournalDb().deleteBeforeCsn(protectedCsn)
             .catch((err) => {
-              this.logger.error(err.toString());
+              this.logger.error(LOG_MESSAGES.ERROR_MSG, [err.toString()]);
             });
         });
     }, 0);
@@ -453,6 +455,7 @@ class ContextManagementServer extends Proxy {
 export class ContextManager extends ServiceEngine {
 
   public bootOrder = 20;
+  private logger: Logger;
   private option: ContextManagerConfigDef;
   private node: ResourceNode;
   private database: string;
@@ -467,7 +470,8 @@ export class ContextManager extends ServiceEngine {
 
   constructor(option: ContextManagerConfigDef) {
     super(option);
-    this.logger.debug(JSON.stringify(option));
+    this.logger = Logger.getLogger("ContextManager", option.database);
+    this.logger.debug(LOG_MESSAGES.CREATED, ["ContextManager"]);
     this.option = option;
     this.lock = new AsyncLock();
   }
@@ -498,7 +502,7 @@ export class ContextManager extends ServiceEngine {
 
   start(node: ResourceNode): Promise<void> {
     this.node = node;
-    this.logger.debug("ContextManager is starting");
+    this.logger.debug(LOG_MESSAGES.STARTING, ["ContextManager"]);
 
     if (!this.option.database) {
       throw new DadgetError(ERROR.E2001, ["Database name is missing."]);
@@ -534,7 +538,9 @@ export class ContextManager extends ServiceEngine {
       this.connect();
     });
 
-    promise = promise.then(() => { this.logger.debug("ContextManager is started"); });
+    promise = promise.then(() => {
+      this.logger.debug(LOG_MESSAGES.STARTED, ["ContextManager"]);
+    });
     return promise;
   }
 
@@ -551,19 +557,19 @@ export class ContextManager extends ServiceEngine {
   connect() {
     this.node.mount(CORE_NODE.PATH_CONTEXT.replace(/:database\b/g, this.database), "singletonMaster", this.server, {
       onDisconnect: () => {
-        this.logger.info("ContextManagementServer is disconnected");
+        this.logger.info(LOG_MESSAGES.DISCONNECTED, ["ContextManagementServer"]);
         this.mountHandle = undefined;
         this.server.resetLastBeforeObj();
       },
       onRemount: (mountHandle: string) => {
-        this.logger.info("ContextManagementServer is remounted");
+        this.logger.info(LOG_MESSAGES.REMOUNTED, ["ContextManagementServer"]);
         this.server.resetLastBeforeObj();
         this.procAfterContextManagementServerConnect(mountHandle);
       },
     })
       .then((mountHandle) => {
         // マスターを取得した場合のみ実行される
-        this.logger.info("ContextManagementServer is connected");
+        this.logger.info(LOG_MESSAGES.CONNECTED, ["ContextManagementServer"]);
         this.procAfterContextManagementServerConnect(mountHandle);
       });
   }
@@ -601,7 +607,7 @@ export class ContextManager extends ServiceEngine {
             });
         })
         .catch((err) => {
-          this.logger.error(err.toString());
+          this.logger.error(LOG_MESSAGES.ERROR_MSG, [err.toString()]);
           throw err;
         });
     });
