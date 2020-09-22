@@ -137,16 +137,16 @@ export class JournalDb {
       .catch((err) => Promise.reject(new DadgetError(ERROR.E1109, [err.toString()])));
   }
 
-  findByCsnRange(from: number, to: number): Promise<TransactionObject[]> {
+  findByCsnRange(from: number, to: number, projection?: object): Promise<TransactionObject[]> {
     console.log("findByCsnRange:", from, to);
-    return this.db.findByRange("csn", from, to, -1)
+    return this.db.findByRange("csn", from, to, -1, projection)
       .then((list) => list.map(JournalDb.deserializeTrans))
       .catch((err) => Promise.reject(new DadgetError(ERROR.E1110, [err.toString()])));
   }
 
   deleteAfterCsn(csn: number): Promise<void> {
     console.log("deleteAfterCsn:", csn);
-    return this.findByCsnRange(csn + 1, Number.MAX_VALUE)
+    return this.findByCsnRange(csn + 1, Number.MAX_VALUE, { _id: 1, csn: 1 })
       .then((transactions) => {
         let promise = Promise.resolve();
         for (const transaction of transactions) {
@@ -160,8 +160,9 @@ export class JournalDb {
   deleteBeforeCsn(csn: number): Promise<void> {
     console.log("deleteBeforeCsn:", csn);
     if (!csn || csn <= 1) { return Promise.resolve(); }
-    return this.findByCsnRange(1, csn - 1)
+    return this.findByCsnRange(1, csn - 1, { _id: 1, csn: 1 })
       .then((transactions) => {
+        console.error(JSON.stringify(transactions));
         let promise = Promise.resolve();
         for (const transaction of transactions) {
           promise = promise.then(() => this.db.deleteOneById((transaction as any)._id));

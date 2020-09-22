@@ -9,7 +9,7 @@ export interface IDb {
 
   findOne(query: object): Promise<object | null>;
 
-  findByRange(field: string, from: any, to: any, dir: number): Promise<any[]>;
+  findByRange(field: string, from: any, to: any, dir: number, projection?: object): Promise<any[]>;
 
   findOneBySort(query: object, sort: object): Promise<any>;
 

@@ -74,8 +74,8 @@ export class PersistentDb implements IDb {
     return this.db.collection(this.collection).findOne(PersistentDb.convertQuery(query));
   }
 
-  findByRange(field: string, from: any, to: any, dir: number): Promise<any[]> {
-    return this.find({ $and: [{ [field]: { $gte: from } }, { [field]: { $lte: to } }] }, { [field]: dir });
+  findByRange(field: string, from: any, to: any, dir: number, projection?: object): Promise<any[]> {
+    return this.find({ $and: [{ [field]: { $gte: from } }, { [field]: { $lte: to } }] }, { [field]: dir }, undefined, undefined, projection);
   }
 
   findOneBySort(query: object, sort: object): Promise<any> {

@@ -121,7 +121,7 @@ export class PersistentDb implements IDb {
           request.onsuccess = (event) => {
             console.log("open: " + storageName);
             this.db = (event.target as IDBRequest).result;
-//            console.log(this.logAll());
+            // console.log(this.logAll());
 
             const transaction = this.db.transaction(OBJECT_STORE_NAME);
             transaction.onerror = (event) => {
@@ -232,7 +232,7 @@ export class PersistentDb implements IDb {
     });
   }
 
-  findByRange(field: string, from: any, to: any, dir: number): Promise<any[]> {
+  findByRange(field: string, from: any, to: any, dir: number, projection?: object): Promise<any[]> {
     const indexName = this.indexRevMap[field];
     if (!indexName) { return Promise.reject("Index is not defined for key: " + field); }
 
@@ -246,7 +246,7 @@ export class PersistentDb implements IDb {
       request.onsuccess = (event) => {
         const cursor = (event.target as IDBRequest).result;
         if (cursor) {
-          dataList.push(cursor.value);
+          dataList.push(Util.project(cursor.value, projection));
           cursor.continue();
         }
       };
