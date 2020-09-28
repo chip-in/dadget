@@ -146,29 +146,14 @@ export class JournalDb {
 
   deleteAfterCsn(csn: number): Promise<void> {
     console.log("deleteAfterCsn:", csn);
-    return this.findByCsnRange(csn + 1, Number.MAX_VALUE, { _id: 1, csn: 1 })
-      .then((transactions) => {
-        let promise = Promise.resolve();
-        for (const transaction of transactions) {
-          promise = promise.then(() => this.db.deleteOneById((transaction as any)._id));
-        }
-        return promise;
-      })
+    return this.db.deleteByRange("csn", csn + 1, Number.MAX_VALUE)
       .catch((err) => Promise.reject(new DadgetError(ERROR.E1112, [err.toString()])));
   }
 
   deleteBeforeCsn(csn: number): Promise<void> {
     console.log("deleteBeforeCsn:", csn);
     if (!csn || csn <= 1) { return Promise.resolve(); }
-    return this.findByCsnRange(1, csn - 1, { _id: 1, csn: 1 })
-      .then((transactions) => {
-        console.error(JSON.stringify(transactions));
-        let promise = Promise.resolve();
-        for (const transaction of transactions) {
-          promise = promise.then(() => this.db.deleteOneById((transaction as any)._id));
-        }
-        return promise;
-      })
+    return this.db.deleteByRange("csn", 1, csn - 1)
       .catch((err) => Promise.reject(new DadgetError(ERROR.E1112, [err.toString()])));
   }
 

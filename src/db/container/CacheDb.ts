@@ -135,6 +135,16 @@ export class CacheDb implements IDb {
     return Promise.resolve();
   }
 
+  deleteByRange(field: string, from: any, to: any): Promise<void> {
+    for (const id of Object.keys(this.data)) {
+      const val = (this.data[id] as any)[field];
+      if (from <= val && val <= to) {
+        delete this.data[id];
+      }
+    }
+    return Promise.resolve();
+  }
+
   deleteAll(): Promise<void> {
     for (const id of Object.keys(this.data)) {
       delete this.data[id];

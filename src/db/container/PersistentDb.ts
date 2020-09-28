@@ -142,6 +142,14 @@ export class PersistentDb implements IDb {
       });
   }
 
+  deleteByRange(field: string, from: any, to: any): Promise<void> {
+    const query = { $and: [{ [field]: { $gte: from } }, { [field]: { $lte: to } }] };
+    return this.db.collection(this.collection).deleteMany(PersistentDb.convertQuery(query))
+      .then((result) => {
+        if (!result.result.ok) { throw new Error("failed to delete: " + JSON.stringify(result)); }
+      });
+  }
+
   deleteAll(): Promise<void> {
     const newName = this.collection + "-" + new Date().toISOString();
     return this.db.collection(this.collection).count({})

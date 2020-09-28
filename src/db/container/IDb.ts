@@ -31,5 +31,7 @@ export interface IDb {
 
   deleteOneById(id: string): Promise<void>;
 
+  deleteByRange(field: string, from: any, to: any): Promise<void>;
+
   deleteAll(): Promise<void>;
 }
