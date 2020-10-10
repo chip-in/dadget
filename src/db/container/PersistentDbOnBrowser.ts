@@ -522,7 +522,7 @@ export class PersistentDb implements IDb {
   }
 
   deleteByRange(field: string, from: any, to: any): Promise<void> {
-    return this.findByRange(field, from, to, -1, { _id: 1, [field]: 1 })
+    return this.findByRange(field, from, to, -1, { _id: 1 })
       .then((transactions) => {
         let promise = Promise.resolve();
         for (const transaction of transactions) {

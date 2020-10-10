@@ -55,6 +55,13 @@ export const LOG_MESSAGES = {
   WAIT_FOR_TRANSACTIONS: { code: 53, msg: "wait for transactions, csn: %d1, currentCsn: %d2" },
   PROCGET_ERROR: { code: 54, msg: "procGet error: %1" },
   PROCPOST_ERROR: { code: 55, msg: "procPost error: %1" },
+  ON_RECEIVE_EXEC_MANY: { code: 56, msg: "/execMany postulatedCsn %d1" },
+  EXEC_BEGIN: { code: 57, msg: "BEGIN_TRANSACTION" },
+  EXEC_END: { code: 58, msg: "END_TRANSACTION" },
+  EXEC_ABORT: { code: 59, msg: "ABORT_TRANSACTION" },
+  ON_RECEIVE_UPDATE_MANY: { code: 60, msg: "/updateMany, query: %1, operator: %2" },
+  ROLLFORWARD_TRANSACTIONS: { code: 61, msg: "ROLLFORWARD transactions, from: %d1, to: %d2" },
+  TRANSACTION_TIMEOUT: { code: 62, msg: "Transaction timeout" },
 };
 
 Logger.checkLogType(LOG_MESSAGES);

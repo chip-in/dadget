@@ -7,8 +7,12 @@ export const enum TransactionType {
   UPDATE = "update",
   DELETE = "delete",
   NONE = "none",
-  ROLLBACK = "rollback",
+  CHECK = "check",
+  FORCE_ROLLBACK = "rollback",
   TRUNCATE = "truncate",
+  BEGIN = "begin",
+  END = "end",
+  ABORT = "abort",
   BEGIN_IMPORT = "begin_import",
   END_IMPORT = "end_import",
   ABORT_IMPORT = "abort_import",
@@ -53,8 +57,6 @@ export class TransactionRequest {
    * 更新内容を記述するオペレータ。意味はmongoDB に準ずる。
    */
   operator?: { [op: string]: any };
-
-  atomicId?: string;
 
   /**
    * 更新operator適用
@@ -352,4 +354,9 @@ export class TransactionObject extends TransactionRequest {
    * 保護CSN
    */
   protectedCsn?: number;
+
+  /**
+   * コミット済みCSN
+   */
+  committedCsn?: number;
 }

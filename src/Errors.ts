@@ -191,6 +191,26 @@ export const ERROR = {
   E2007: { code: 2007, message: "Operation currently locked" },
 
   /**
+   * Not supported transaction type for execMany
+   */
+  E2008: { code: 2008, message: "Not supported transaction type for execMany: %1" },
+
+  /**
+   * There are no transactions currently running.
+   */
+  E2009: { code: 2009, message: "There are no transactions currently running." },
+
+  /**
+   * It is not a currently running transaction.
+   */
+  E2010: { code: 2010, message: "It is not a currently running transaction." },
+
+  /**
+   * Parameter is required.
+   */
+  E2011: { code: 2011, message: "%1 is required." },
+
+  /**
    * Dadget Config Error
    */
   E2101: { code: 2101, message: "Dadget Config Error: %1" },
@@ -209,6 +229,21 @@ export const ERROR = {
    * Dadget unsupported TransactionType
    */
   E2104: { code: 2104, message: "The TransactionType is not supported." },
+
+  /**
+   * Dadget Undefined ExecMany Error
+   */
+  E2105: { code: 2105, message: "Dadget Undefined ExecMany Error: %1" },
+
+  /**
+   * Dadget Undefined UpdateMany Error
+   */
+  E2106: { code: 2106, message: "Dadget Undefined UpdateMany Error: %1" },
+
+  /**
+   * transaction is not running
+   */
+  E2107: { code: 2107, message: "transaction is not running" },
 
   /**
    * DatabaseRegistry Config Error

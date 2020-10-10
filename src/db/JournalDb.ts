@@ -50,6 +50,9 @@ export class JournalDb {
       throw new DadgetError(ERROR.E1113, [postulatedCsn, this.protectedCsn]);
     }
     if (request.type === TransactionType.TRUNCATE) { return Promise.resolve(); }
+    if (request.type === TransactionType.BEGIN) { return Promise.resolve(); }
+    if (request.type === TransactionType.END) { return Promise.resolve(); }
+    if (request.type === TransactionType.ABORT) { return Promise.resolve(); }
     if (request.type === TransactionType.BEGIN_IMPORT) { return Promise.resolve(); }
     if (request.type === TransactionType.END_IMPORT) { return Promise.resolve(); }
     if (request.type === TransactionType.ABORT_IMPORT) { return Promise.resolve(); }

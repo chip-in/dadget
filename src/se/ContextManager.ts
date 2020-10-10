@@ -23,7 +23,9 @@ const KEEP_TIME_AFTER_SENDING_ROLLBACK_MS = 1000; // 1000ms
 const CHECK_POINT_CHECK_PERIOD_MS = 10 * 60 * 1000;  // 10 minutes
 const CHECK_POINT_DELETE_PERIOD_MS = 72 * 60 * 60 * 1000; // 72 hours
 const MAX_RESPONSE_SIZE_OF_JOURNALS = 10485760;
-const ATOMIC_OPERATION_MAX_LOCK_TIME = 10 * 60 * 1000;  // 10 minutes
+export const ATOMIC_OPERATION_MAX_LOCK_TIME = 10 * 60 * 1000;  // 10 minutes
+const MASTER_LOCK = "master";
+const TRANSACTION_LOCK = "transaction";
 
 /**
  * コンテキストマネージャコンフィグレーションパラメータ
@@ -63,15 +65,8 @@ class TransactionJournalSubscriber extends Subscriber {
       }
     }
 
-    this.context.getLock().acquire("transaction", () => {
-      if (transaction.type === TransactionType.ABORT_IMPORT) {
-        this.logger.warn(LOG_MESSAGES.ABORT_IMPORT, [], [transaction.csn]);
-        return this.context.getJournalDb().deleteAfterCsn(transaction.csn)
-          .then(() => this.context.getSystemDb().updateCsn(transaction.csn))
-          .catch((err) => {
-            this.logger.error(LOG_MESSAGES.ERROR_MSG, [err.toString()]);
-          });
-      } else if (transaction.type === TransactionType.ROLLBACK) {
+    this.context.getLock().acquire(TRANSACTION_LOCK, () => {
+      if (transaction.type === TransactionType.FORCE_ROLLBACK) {
         this.logger.warn(LOG_MESSAGES.ROLLBACK, [], [transaction.csn]);
         const protectedCsn = this.context.getJournalDb().getProtectedCsn();
         this.context.getJournalDb().setProtectedCsn(Math.min(protectedCsn, transaction.csn));
@@ -98,8 +93,10 @@ class TransactionJournalSubscriber extends Subscriber {
             }
           })
           .then(() => {
-            return Promise.all([this.context.getJournalDb().findByCsn(transaction.csn),
-            this.context.getJournalDb().findByCsn(transaction.csn - 1)]);
+            return Promise.all([
+              this.context.getJournalDb().findByCsn(transaction.csn),
+              this.context.getJournalDb().findByCsn(transaction.csn - 1),
+            ]);
           })
           .then(([savedTransaction, preTransaction]) => {
             if (!savedTransaction) {
@@ -167,8 +164,8 @@ class ContextManagementServer extends Proxy {
   private lastBeforeObj?: { _id?: string, csn?: number };
   private lastCheckPointTime: number = 0;
   private atomicLockId?: string = undefined;
-  private atomicLockTime: number = 0;
-  private atomicLockCsn: number = 0;
+  private atomicTimer?: any;
+  private queueWaitingList: Array<() => void> = [];
 
   constructor(protected context: ContextManager) {
     super();
@@ -178,6 +175,12 @@ class ContextManagementServer extends Proxy {
 
   resetLastBeforeObj() {
     this.lastBeforeObj = undefined;
+  }
+
+  private notifyAllWaitingList() {
+    const queue = this.queueWaitingList;
+    this.queueWaitingList = [];
+    for (const task of queue) { task(); }
   }
 
   onReceive(req: http.IncomingMessage, res: http.ServerResponse): Promise<http.ServerResponse> {
@@ -190,21 +193,32 @@ class ContextManagementServer extends Proxy {
     if (method === "OPTIONS") {
       return ProxyHelper.procOption(req, res);
     } else if (url.pathname.endsWith(CORE_NODE.PATH_EXEC) && method === "POST") {
-      return ProxyHelper.procPost(req, res, this.logger, (request) => {
-        const csn = ProxyHelper.validateNumberRequired(request.csn, "csn");
+      return ProxyHelper.procPost(req, res, this.logger, (data) => {
+        const csn = ProxyHelper.validateNumberRequired(data.csn, "csn");
         this.logger.info(LOG_MESSAGES.ON_RECEIVE_EXEC, [], [csn]);
-        return this.exec(csn, request.request);
+        return this.exec(csn, data.request, data.atomicId);
+      });
+    } else if (url.pathname.endsWith(CORE_NODE.PATH_EXEC_MANY) && method === "POST") {
+      return ProxyHelper.procPost(req, res, this.logger, (data) => {
+        const csn = ProxyHelper.validateNumberRequired(data.csn, "csn");
+        this.logger.info(LOG_MESSAGES.ON_RECEIVE_EXEC_MANY, [], [csn]);
+        return this.execMany(csn, data.requests, data.atomicId);
+      });
+    } else if (url.pathname.endsWith(CORE_NODE.PATH_UPDATE_MANY) && method === "POST") {
+      return ProxyHelper.procPost(req, res, this.logger, (data) => {
+        this.logger.info(LOG_MESSAGES.ON_RECEIVE_UPDATE_MANY, [JSON.stringify(data.query), JSON.stringify(data.operator)], []);
+        return this.updateMany(data.query, data.operator, data.atomicId);
       });
     } else if (url.pathname.endsWith(CORE_NODE.PATH_GET_TRANSACTION) && method === "GET") {
-      return ProxyHelper.procGet(req, res, this.logger, (request) => {
-        const csn = ProxyHelper.validateNumberRequired(request.csn, "csn");
+      return ProxyHelper.procGet(req, res, this.logger, (data) => {
+        const csn = ProxyHelper.validateNumberRequired(data.csn, "csn");
         this.logger.info(LOG_MESSAGES.ON_RECEIVE_GET_TRANSACTION, [], [csn]);
         return this.getTransactionJournal(csn);
       });
     } else if (url.pathname.endsWith(CORE_NODE.PATH_GET_TRANSACTIONS) && method === "GET") {
-      return ProxyHelper.procGet(req, res, this.logger, (request) => {
-        const fromCsn = ProxyHelper.validateNumberRequired(request.fromCsn, "fromCsn");
-        const toCsn = ProxyHelper.validateNumberRequired(request.toCsn, "toCsn");
+      return ProxyHelper.procGet(req, res, this.logger, (data) => {
+        const fromCsn = ProxyHelper.validateNumberRequired(data.fromCsn, "fromCsn");
+        const toCsn = ProxyHelper.validateNumberRequired(data.toCsn, "toCsn");
         this.logger.info(LOG_MESSAGES.ON_RECEIVE_GET_TRANSACTIONS, [], [fromCsn, toCsn]);
         return this.getTransactionJournals(fromCsn, toCsn);
       });
@@ -214,7 +228,383 @@ class ContextManagementServer extends Proxy {
     }
   }
 
-  exec(postulatedCsn: number, request: TransactionRequest): Promise<object> {
+  exec(postulatedCsn: number, request: TransactionRequest, atomicId?: string): Promise<object> {
+    const err = this.checkTransactionRequest(request);
+    if (err) {
+      return Promise.resolve({
+        status: "NG",
+        reason: new DadgetError(ERROR.E2002, [err]),
+      });
+    }
+
+    return new Promise((resolve, reject) => {
+      this.context.getLock().acquire(MASTER_LOCK, () => {
+
+        if (this.atomicLockId ? this.atomicLockId !== atomicId : atomicId) {
+          if (request.type !== TransactionType.BEGIN &&
+            request.type !== TransactionType.BEGIN_IMPORT &&
+            request.type !== TransactionType.BEGIN_RESTORE) {
+            throw new DadgetError(ERROR.E2009);
+          }
+        }
+        if (request.type === TransactionType.CHECK) {
+          if (this.atomicLockId === atomicId) {
+            this.setTransactionTimeout();
+            resolve({
+              status: "OK",
+            });
+          } else {
+            resolve({
+              status: "NG",
+              reason: "transaction mismatch",
+            });
+          }
+          return;
+        }
+        if (this.atomicLockId && this.atomicLockId !== atomicId) {
+          return new Promise<object>((resolve, reject) => {
+            this.queueWaitingList.push(() => {
+              this.exec(postulatedCsn, request, atomicId)
+                .then((result) => resolve(result)).catch((reason) => reject(reason));
+            });
+          });
+        }
+
+        return this.context.getLock().acquire(TRANSACTION_LOCK, () => {
+          return this.procTransaction(postulatedCsn, request, atomicId);
+        }).then(({ transaction, newCsn, updateObject }) => {
+          if (updateObject) {
+            if (!updateObject._id) { updateObject._id = transaction.target; }
+            updateObject.csn = newCsn;
+          }
+          this.lastBeforeObj = updateObject;
+          this.notifyAllWaitingList();
+          resolve({
+            status: "OK",
+            csn: newCsn,
+            updateObject,
+          });
+        }, (reason) => {
+          let cause = reason instanceof DadgetError ? reason : new DadgetError(ERROR.E2003, [reason]);
+          if (cause.code === ERROR.E1105.code) { cause = new DadgetError(ERROR.E2004, [cause]); }
+          cause.convertInsertsToString();
+          this.logger.warn(LOG_MESSAGES.ERROR_CAUSE, [cause.toString()]);
+          resolve({
+            status: "NG",
+            reason: cause,
+          });
+        });
+      });
+    });
+  }
+
+  execMany(postulatedCsn: number, requests: TransactionRequest[], atomicId?: string): Promise<object> {
+    for (const request of requests) {
+      const err = this.checkTransactionRequest(request);
+      if (err) {
+        return Promise.resolve({
+          status: "NG",
+          reason: new DadgetError(ERROR.E2002, [err]),
+        });
+      }
+    }
+
+    for (const request of requests) {
+      if (request.type === TransactionType.BEGIN ||
+        request.type === TransactionType.BEGIN_IMPORT ||
+        request.type === TransactionType.BEGIN_RESTORE ||
+        request.type === TransactionType.END ||
+        request.type === TransactionType.END_IMPORT ||
+        request.type === TransactionType.END_RESTORE ||
+        request.type === TransactionType.ABORT ||
+        request.type === TransactionType.ABORT_RESTORE ||
+        request.type === TransactionType.ABORT_IMPORT) {
+        return Promise.resolve({
+          status: "NG",
+          reason: new DadgetError(ERROR.E2008, [request.type]),
+        });
+      }
+    }
+
+    return new Promise((resolve, reject) => {
+      this.context.getLock().acquire(MASTER_LOCK, () => {
+
+        if (this.atomicLockId && this.atomicLockId !== atomicId) {
+          return new Promise<object>((resolve, reject) => {
+            this.queueWaitingList.push(() => {
+              this.execMany(postulatedCsn, requests, atomicId)
+                .then((result) => resolve(result)).catch((reason) => reject(reason));
+            });
+          });
+        }
+
+        let _newCsn: number;
+        return this.context.getLock().acquire(TRANSACTION_LOCK, () => {
+          if (this.atomicLockId) {
+            return Util.promiseEach<TransactionRequest>(
+              requests,
+              (request) => {
+                return this.procTransaction(0, request, atomicId)
+                  .then(({ newCsn }) => {
+                    _newCsn = newCsn;
+                  });
+              },
+            );
+          } else {
+            atomicId = Dadget.uuidGen();
+            return this.procTransaction(postulatedCsn, { type: TransactionType.BEGIN, target: "" }, atomicId)
+              .then(({ newCsn }) => {
+                _newCsn = newCsn;
+                return Util.promiseEach<TransactionRequest>(
+                  requests,
+                  (request) => {
+                    return this.procTransaction(postulatedCsn, request, atomicId)
+                      .then(({ newCsn }) => {
+                        _newCsn = newCsn;
+                      });
+                  },
+                );
+              })
+              .catch((reason) => {
+                return this.procTransaction(0, { type: TransactionType.ABORT, target: "" }, atomicId)
+                  .then(() => { throw reason; });
+              })
+              .then(() => {
+                this.procTransaction(0, { type: TransactionType.END, target: "" }, atomicId);
+              });
+          }
+        }).then(() => {
+          this.lastBeforeObj = undefined;
+          this.notifyAllWaitingList();
+          resolve({
+            status: "OK",
+            csn: _newCsn,
+          });
+        }, (reason) => {
+          let cause = reason instanceof DadgetError ? reason : new DadgetError(ERROR.E2003, [reason]);
+          if (cause.code === ERROR.E1105.code) { cause = new DadgetError(ERROR.E2004, [cause]); }
+          cause.convertInsertsToString();
+          this.logger.warn(LOG_MESSAGES.ERROR_CAUSE, [cause.toString()]);
+          resolve({
+            status: "NG",
+            reason: cause,
+          });
+        });
+      });
+    });
+  }
+
+  updateMany(query: object, operator: object, atomicId?: string): Promise<object> {
+    return new Promise((resolve, reject) => {
+      this.context.getLock().acquire(MASTER_LOCK, () => {
+
+        if (this.atomicLockId && this.atomicLockId !== atomicId) {
+          return new Promise<object>((resolve, reject) => {
+            this.queueWaitingList.push(() => {
+              this.updateMany(query, operator, atomicId)
+                .then((result) => resolve(result)).catch((reason) => reject(reason));
+            });
+          });
+        }
+
+        let _newCsn: number;
+        return this.context.getLock().acquire(TRANSACTION_LOCK, () => {
+          return this.context.getSystemDb().getCsn()
+            .then((currentCsn) => {
+              return Dadget._query(this.context.getNode(), this.context.getDatabase(), query,
+                undefined, undefined, undefined, currentCsn, "strict", { _id: 1 })
+                .then((result) => {
+                  if (result.restQuery) { throw new Error("The queryHandlers has been empty before completing queries."); }
+                  if (this.atomicLockId) {
+                    return Util.promiseEach<object>(
+                      result.resultSet,
+                      (row) => {
+                        return Dadget._query(this.context.getNode(), this.context.getDatabase(),
+                          { _id: (row as any)._id }, undefined, 1, undefined, currentCsn, "strict")
+                          .then((result2) => {
+                            if (result2.restQuery) { throw new Error("The queryHandlers has been empty before completing queries."); }
+                            if (result2.resultSet.length === 0) { throw new Error("Update object not found"); }
+                            const obj = result2.resultSet[0];
+                            const request = new TransactionRequest();
+                            request.type = TransactionType.UPDATE;
+                            request.target = (obj as any)._id;
+                            request.before = obj;
+                            request.operator = operator;
+                            return this.procTransaction(0, request, atomicId)
+                              .then(({ newCsn }) => {
+                                _newCsn = newCsn;
+                              });
+                          });
+                      },
+                    );
+                  } else {
+                    atomicId = Dadget.uuidGen();
+                    return this.procTransaction(0, { type: TransactionType.BEGIN, target: "" }, atomicId)
+                      .then(({ newCsn }) => {
+                        return Util.promiseEach<object>(
+                          result.resultSet,
+                          (row) => {
+                            return Dadget._query(this.context.getNode(), this.context.getDatabase(),
+                              { _id: (row as any)._id }, undefined, 1, undefined, currentCsn, "strict")
+                              .then((result2) => {
+                                if (result2.restQuery) { throw new Error("The queryHandlers has been empty before completing queries."); }
+                                if (result2.resultSet.length === 0) { throw new Error("Update object not found"); }
+                                const obj = result2.resultSet[0];
+                                const request = new TransactionRequest();
+                                request.type = TransactionType.UPDATE;
+                                request.target = (obj as any)._id;
+                                request.before = obj;
+                                request.operator = operator;
+                                return this.procTransaction(0, request, atomicId)
+                                  .then(({ newCsn }) => {
+                                    _newCsn = newCsn;
+                                  });
+                              });
+                          },
+                        );
+                      })
+                      .catch((reason) => {
+                        return this.procTransaction(0, { type: TransactionType.ABORT, target: "" }, atomicId)
+                          .then(() => { throw reason; });
+                      })
+                      .then(() => {
+                        this.procTransaction(0, { type: TransactionType.END, target: "" }, atomicId);
+                      });
+                  }
+                });
+            });
+        }).then(() => {
+          this.lastBeforeObj = undefined;
+          this.notifyAllWaitingList();
+          resolve({
+            status: "OK",
+            csn: _newCsn,
+          });
+        }, (reason) => {
+          let cause = reason instanceof DadgetError ? reason : new DadgetError(ERROR.E2003, [reason]);
+          if (cause.code === ERROR.E1105.code) { cause = new DadgetError(ERROR.E2004, [cause]); }
+          cause.convertInsertsToString();
+          this.logger.warn(LOG_MESSAGES.ERROR_CAUSE, [cause.toString()]);
+          resolve({
+            status: "NG",
+            reason: cause,
+          });
+        });
+      });
+    });
+  }
+
+  private procTransaction(postulatedCsn: number, request: TransactionRequest, atomicId?: string) {
+    let transaction: TransactionObject;
+    let newCsn: number;
+    let updateObject: { _id?: string, csn?: number } | undefined;
+    const _request = { ...request, datetime: new Date() };
+    if (this.lastBeforeObj && request.before
+      && (!request.before._id || this.lastBeforeObj._id === request.before._id)) {
+      const objDiff = Util.diff(this.lastBeforeObj, request.before);
+      if (objDiff) {
+        this.logger.error(LOG_MESSAGES.REQUEST_BEFORE_HAS_MISMATCH, [JSON.stringify(objDiff)]);
+        throw new DadgetError(ERROR.E2005, [JSON.stringify(request)]);
+      } else {
+        this.logger.debug(LOG_MESSAGES.LASTBEFOREOBJ_CHECK_PASSED);
+      }
+    }
+    return this.context.getJournalDb().checkConsistent(postulatedCsn, _request)
+      .then(() => this.context.getSystemDb().getCsn())
+      .then((currentCsn) => this.context.checkUniqueConstraint(currentCsn, _request))
+      .then((_) => {
+        updateObject = _;
+        return Promise.all([this.context.getSystemDb().getCsn(), this.context.getJournalDb().getLastDigest()])
+          .then((values) => {
+            newCsn = values[0] + 1;
+            this.logger.info(LOG_MESSAGES.EXEC_NEWCSN, [], [newCsn]);
+            const lastDigest = values[1];
+            transaction = { ..._request, csn: newCsn, beforeDigest: lastDigest };
+            transaction.digest = TransactionObject.calcDigest(transaction);
+            transaction.protectedCsn = this.context.getJournalDb().getProtectedCsn();
+            return this.procTransactionCtrl(transaction, newCsn, atomicId);
+          })
+          .then(() => this.context.getJournalDb().insert(transaction))
+          .then(() => this.context.getSystemDb().updateCsn(newCsn));
+      })
+      .then(() => {
+        return this.context.getNode().publish(
+          CORE_NODE.PATH_TRANSACTION.replace(/:database\b/g, this.context.getDatabase())
+          , EJSON.stringify(transaction));
+      }).then(() => {
+        return this.checkProtectedCsn();
+      }).then(() => {
+        return { transaction, newCsn, updateObject };
+      });
+  }
+
+  private setTransactionTimeout() {
+    if (this.atomicTimer) { clearTimeout(this.atomicTimer); }
+    this.atomicTimer = setTimeout(() => {
+      this.atomicTimer = undefined;
+      this.logger.warn(LOG_MESSAGES.TRANSACTION_TIMEOUT);
+      this.procTransaction(0, { type: TransactionType.ABORT, target: "" }, this.atomicLockId);
+    }, ATOMIC_OPERATION_MAX_LOCK_TIME);
+  }
+  private resetTransactionTimeout() {
+    if (this.atomicTimer) { clearTimeout(this.atomicTimer); }
+    this.atomicTimer = undefined;
+  }
+
+  private procTransactionCtrl(transaction: TransactionObject, newCsn: number, atomicId?: string) {
+    if (this.atomicLockId) {
+      if (this.atomicLockId !== atomicId) {
+        throw new DadgetError(ERROR.E2007);
+      } else {
+        this.setTransactionTimeout();
+      }
+    }
+
+    if (this.context.committedCsn !== undefined) {
+      transaction.committedCsn = this.context.committedCsn;
+    }
+
+    if (transaction.type === TransactionType.BEGIN ||
+      transaction.type === TransactionType.BEGIN_IMPORT ||
+      transaction.type === TransactionType.BEGIN_RESTORE) {
+      if (!atomicId) { throw new DadgetError(ERROR.E2011, ["atomicId"]); }
+      this.atomicLockId = atomicId;
+      this.context.committedCsn = undefined;
+      delete transaction.committedCsn;
+      this.setTransactionTimeout();
+    } else if (atomicId && this.atomicLockId !== atomicId) {
+      throw new DadgetError(ERROR.E2010);
+    }
+
+    if (transaction.type === TransactionType.BEGIN || transaction.type === TransactionType.BEGIN_IMPORT) {
+      this.context.committedCsn = newCsn - 1;
+      transaction.committedCsn = this.context.committedCsn;
+    }
+
+    if (transaction.type === TransactionType.END ||
+      transaction.type === TransactionType.END_IMPORT ||
+      transaction.type === TransactionType.END_RESTORE ||
+      transaction.type === TransactionType.ABORT_RESTORE) {
+      if (!atomicId) { throw new DadgetError(ERROR.E2011, ["atomicId"]); }
+      this.atomicLockId = undefined;
+      this.context.committedCsn = undefined;
+      delete transaction.committedCsn;
+      this.resetTransactionTimeout();
+    }
+
+    if (transaction.type === TransactionType.ABORT || transaction.type === TransactionType.ABORT_IMPORT) {
+      if (!atomicId) { throw new DadgetError(ERROR.E2011, ["atomicId"]); }
+      if (this.context.committedCsn === undefined) {
+        throw new DadgetError(ERROR.E2009);
+      }
+      transaction.committedCsn = this.context.committedCsn;
+      this.atomicLockId = undefined;
+      this.context.committedCsn = undefined;
+      this.resetTransactionTimeout();
+    }
+  }
+
+  private checkTransactionRequest(request: TransactionRequest) {
     let err: string | null = null;
     if (request.type === TransactionType.INSERT || request.type === TransactionType.RESTORE) {
       if (!request.target) { err = "target required in a transaction"; }
@@ -240,6 +630,12 @@ class ContextManagementServer extends Proxy {
       if (request.new) { err = "new not required for DELETE"; }
     } else if (request.type === TransactionType.TRUNCATE) {
       this.logger.warn(LOG_MESSAGES.EXEC_TRUNCATE);
+    } else if (request.type === TransactionType.BEGIN) {
+      this.logger.warn(LOG_MESSAGES.EXEC_BEGIN);
+    } else if (request.type === TransactionType.END) {
+      this.logger.warn(LOG_MESSAGES.EXEC_END);
+    } else if (request.type === TransactionType.ABORT) {
+      this.logger.warn(LOG_MESSAGES.EXEC_ABORT);
     } else if (request.type === TransactionType.BEGIN_IMPORT) {
       this.logger.warn(LOG_MESSAGES.EXEC_BEGIN_IMPORT);
     } else if (request.type === TransactionType.END_IMPORT) {
@@ -252,124 +648,11 @@ class ContextManagementServer extends Proxy {
       this.logger.warn(LOG_MESSAGES.EXEC_END_RESTORE);
     } else if (request.type === TransactionType.ABORT_RESTORE) {
       this.logger.warn(LOG_MESSAGES.EXEC_ABORT_RESTORE);
+    } else if (request.type === TransactionType.CHECK) {
     } else {
-      err = "type not found in a transaction";
+      err = "type not found in a transaction: " + request.type;
     }
-    if (err) {
-      return Promise.resolve({
-        status: "NG",
-        reason: new DadgetError(ERROR.E2002, [err]),
-      });
-    }
-
-    if (this.atomicLockId) {
-      if (this.atomicLockTime + ATOMIC_OPERATION_MAX_LOCK_TIME < Date.now()) {
-        // over the time limit
-        this.atomicLockId = undefined;
-        this.atomicLockCsn = 0;
-      } else if (this.atomicLockId !== request.atomicId) {
-        return Promise.resolve({
-          status: "NG",
-          reason: new DadgetError(ERROR.E2007, []),
-        });
-      } else {
-        this.atomicLockTime = Date.now();
-      }
-    }
-
-    if (request.type === TransactionType.BEGIN_IMPORT || request.type === TransactionType.BEGIN_RESTORE) {
-      this.atomicLockId = request.atomicId;
-      this.atomicLockTime = Date.now();
-      this.atomicLockCsn = 0;
-    }
-    delete request.atomicId;
-
-    if (request.type === TransactionType.END_IMPORT ||
-      request.type === TransactionType.END_RESTORE ||
-      request.type === TransactionType.ABORT_RESTORE) {
-      this.atomicLockId = undefined;
-      this.atomicLockCsn = 0;
-    }
-
-    if (request.type === TransactionType.ABORT_IMPORT) {
-      const newCsn = this.atomicLockCsn;
-      this.atomicLockId = undefined;
-      this.atomicLockCsn = 0;
-      const transaction = new TransactionObject();
-      transaction.csn = newCsn;
-      transaction.type = TransactionType.ABORT_IMPORT;
-      return this.context.getNode().publish(
-        CORE_NODE.PATH_TRANSACTION.replace(/:database\b/g, this.context.getDatabase())
-        , EJSON.stringify(transaction))
-        .then(() => ({
-          status: "OK",
-          csn: newCsn,
-        }));
-    }
-
-    let transaction: TransactionObject;
-    let newCsn: number;
-    let updateObject: { _id?: string, csn?: number };
-    return new Promise((resolve, reject) => {
-      this.context.getLock().acquire("master", () => {
-        return this.context.getLock().acquire("transaction", () => {
-          const _request = { ...request, datetime: new Date() };
-          if (this.lastBeforeObj && request.before
-            && (!request.before._id || this.lastBeforeObj._id === request.before._id)) {
-            const objDiff = Util.diff(this.lastBeforeObj, request.before);
-            if (objDiff) {
-              this.logger.error(LOG_MESSAGES.REQUEST_BEFORE_HAS_MISMATCH, [JSON.stringify(objDiff)]);
-              throw new DadgetError(ERROR.E2005, [JSON.stringify(request)]);
-            } else {
-              this.logger.debug(LOG_MESSAGES.LASTBEFOREOBJ_CHECK_PASSED);
-            }
-          }
-          return this.context.getJournalDb().checkConsistent(postulatedCsn, _request)
-            .then(() => this.context.getSystemDb().getCsn())
-            .then((currentCsn) => this.context.checkUniqueConstraint(currentCsn, _request))
-            .then((_) => {
-              updateObject = _;
-              return Promise.all([this.context.getSystemDb().getCsn(), this.context.getJournalDb().getLastDigest()])
-                .then((values) => {
-                  newCsn = values[0] + 1;
-                  this.logger.info(LOG_MESSAGES.EXEC_NEWCSN, [], [newCsn]);
-                  const lastDigest = values[1];
-                  transaction = { ..._request, csn: newCsn, beforeDigest: lastDigest };
-                  transaction.digest = TransactionObject.calcDigest(transaction);
-                  transaction.protectedCsn = this.context.getJournalDb().getProtectedCsn();
-                  return this.context.getJournalDb().insert(transaction);
-                }).then(() => this.context.getSystemDb().updateCsn(newCsn));
-            }).then(() => {
-              return this.context.getNode().publish(
-                CORE_NODE.PATH_TRANSACTION.replace(/:database\b/g, this.context.getDatabase())
-                , EJSON.stringify(transaction));
-            }).then(() => {
-              return this.checkProtectedCsn();
-            });
-        }).then(() => {
-          if (!updateObject._id) { updateObject._id = transaction.target; }
-          updateObject.csn = newCsn;
-          this.lastBeforeObj = updateObject;
-          if (request.type === TransactionType.BEGIN_IMPORT) {
-            this.atomicLockCsn = newCsn - 1;
-          }
-          resolve({
-            status: "OK",
-            csn: newCsn,
-            updateObject,
-          });
-        }, (reason) => {
-          let cause = reason instanceof DadgetError ? reason : new DadgetError(ERROR.E2003, [reason]);
-          if (cause.code === ERROR.E1105.code) { cause = new DadgetError(ERROR.E2004, [cause]); }
-          cause.convertInsertsToString();
-          this.logger.warn(LOG_MESSAGES.ERROR_CAUSE, [cause.toString()]);
-          resolve({
-            status: "NG",
-            reason: cause,
-          });
-        });
-      });
-    });
+    return err;
   }
 
   private checkProtectedCsn(): void {
@@ -384,6 +667,9 @@ class ContextManagementServer extends Proxy {
           return this.context.getJournalDb().getOneAfterCsn(deletableLastCsn)
             .then((protectedCsnJournal) => {
               if (protectedCsnJournal) {
+                if (protectedCsnJournal.committedCsn !== undefined) {
+                  return protectedCsnJournal.committedCsn;
+                }
                 return protectedCsnJournal.csn;
               } else {
                 return this.context.getSystemDb().getCsn();
@@ -455,6 +741,7 @@ class ContextManagementServer extends Proxy {
 export class ContextManager extends ServiceEngine {
 
   public bootOrder = 20;
+  public committedCsn?: number;
   private logger: Logger;
   private option: ContextManagerConfigDef;
   private node: ResourceNode;
@@ -576,7 +863,7 @@ export class ContextManager extends ServiceEngine {
 
   private procAfterContextManagementServerConnect(mountHandle: string) {
     this.mountHandle = mountHandle;
-    this.getLock().acquire("master", () => {
+    this.getLock().acquire(MASTER_LOCK, () => {
       return new Promise<void>((resolve) => {
         setTimeout(resolve, KEEP_TIME_AFTER_CONTEXT_MANAGER_MASTER_ACQUIRED_MS);
       })
@@ -588,12 +875,17 @@ export class ContextManager extends ServiceEngine {
                   const protectedCsn = this.getJournalDb().getProtectedCsn();
                   this.getJournalDb().setProtectedCsn(Math.min(protectedCsn, csn));
 
+                  if (tr && tr.committedCsn !== undefined) {
+                    csn = tr.committedCsn;
+                  }
+                  this.committedCsn = undefined;
+
                   const transaction = new TransactionObject();
                   if (tr) {
                     transaction.digest = tr.digest;
                   }
                   transaction.csn = csn;
-                  transaction.type = TransactionType.ROLLBACK;
+                  transaction.type = TransactionType.FORCE_ROLLBACK;
                   // As this is a master, other replications must be rollback.
                   return this.getNode().publish(
                     CORE_NODE.PATH_TRANSACTION.replace(/:database\b/g, this.getDatabase())
@@ -613,26 +905,29 @@ export class ContextManager extends ServiceEngine {
     });
   }
 
-  checkUniqueConstraint(csn: number, request: TransactionRequest): Promise<object> {
-    if (request.type === TransactionType.TRUNCATE) { return Promise.resolve({}); }
-    if (request.type === TransactionType.BEGIN_IMPORT) { return Promise.resolve({}); }
-    if (request.type === TransactionType.END_IMPORT) { return Promise.resolve({}); }
-    if (request.type === TransactionType.ABORT_IMPORT) { return Promise.resolve({}); }
-    if (request.type === TransactionType.BEGIN_RESTORE) { return Promise.resolve({}); }
-    if (request.type === TransactionType.END_RESTORE) { return Promise.resolve({}); }
-    if (request.type === TransactionType.ABORT_RESTORE) { return Promise.resolve({}); }
+  checkUniqueConstraint(csn: number, request: TransactionRequest): Promise<object | undefined> {
+    if (request.type === TransactionType.TRUNCATE) { return Promise.resolve(undefined); }
+    if (request.type === TransactionType.BEGIN) { return Promise.resolve(undefined); }
+    if (request.type === TransactionType.END) { return Promise.resolve(undefined); }
+    if (request.type === TransactionType.ABORT) { return Promise.resolve(undefined); }
+    if (request.type === TransactionType.BEGIN_IMPORT) { return Promise.resolve(undefined); }
+    if (request.type === TransactionType.END_IMPORT) { return Promise.resolve(undefined); }
+    if (request.type === TransactionType.ABORT_IMPORT) { return Promise.resolve(undefined); }
+    if (request.type === TransactionType.BEGIN_RESTORE) { return Promise.resolve(undefined); }
+    if (request.type === TransactionType.END_RESTORE) { return Promise.resolve(undefined); }
+    if (request.type === TransactionType.ABORT_RESTORE) { return Promise.resolve(undefined); }
     if (request.type === TransactionType.RESTORE && request.new) { return Promise.resolve(request.new); }
     if (request.type === TransactionType.INSERT && request.new) {
       const newObj = request.new;
       if (serialize(newObj).length >= MAX_OBJECT_SIZE) {
-        return Promise.reject(new DadgetError(ERROR.E2006, [MAX_OBJECT_SIZE]));
+        throw new DadgetError(ERROR.E2006, [MAX_OBJECT_SIZE]);
       }
       return this._checkUniqueConstraint(csn, newObj)
         .then(() => Promise.resolve(newObj));
     } else if (request.type === TransactionType.UPDATE && request.before) {
       const newObj = TransactionRequest.applyOperator(request);
       if (serialize(newObj).length >= MAX_OBJECT_SIZE) {
-        return Promise.reject(new DadgetError(ERROR.E2006, [MAX_OBJECT_SIZE]));
+        throw new DadgetError(ERROR.E2006, [MAX_OBJECT_SIZE]);
       }
       return this._checkUniqueConstraint(csn, newObj, request.target)
         .then(() => Promise.resolve(newObj));

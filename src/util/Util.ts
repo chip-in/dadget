@@ -20,6 +20,20 @@ export class Util {
     return whilst(data);
   }
 
+  static promiseEach<T>(
+    list: T[],
+    action: (data: T) => Promise<any>,
+  ): Promise<any> {
+    return Util.promiseWhile<T[]>(
+      [...list],
+      (list) => list.length > 0,
+      (list) => {
+        const row = list.shift();
+        return row ? action(row).then(() => list) : Promise.resolve([]);
+      },
+    );
+  }
+
   static mongoSearch(documents: any[], query: object, sort?: any, validate?: boolean): any {
     const parsedQuery = parser.parse(query);
     return documents.filter((doc) => {
@@ -161,8 +175,8 @@ export class Util {
   }
 
   static project(data: any, projection?: any): object {
-    if (!projection) { return data; }
-    let mode = 0;
+    if (!projection || Object.keys(projection).length === 0) { return data; }
+    let mode = projection._id;
     for (const key in projection) {
       if (key !== "_id") { mode = projection[key]; }
     }

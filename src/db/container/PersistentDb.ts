@@ -129,7 +129,8 @@ export class PersistentDb implements IDb {
   }
 
   replaceOneById(id: string, doc: object): Promise<void> {
-    return this.db.collection(this.collection).replaceOne({ _id: id }, doc)
+    (doc as any)._id = id;
+    return this.db.collection(this.collection).replaceOne({ _id: id }, doc, { upsert: true })
       .then((result) => {
         if (!result.result.ok || result.result.n !== 1) { throw new Error("failed to replace: " + JSON.stringify(result)); }
       });
