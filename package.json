@@ -30,10 +30,10 @@
     "browser-test": "cd browser-test && browserify src/indexeddb-test.js -o dest/test.js && cp src/index.html dest/ && http-server dest -c-1"
   },
   "dependencies": {
-    "@chip-in/resource-node": "*",
     "@chip-in/logger": "*",
+    "@chip-in/resource-node": "*",
     "async-lock": "^1.1.1",
-    "bson": "^4.0.4",
+    "bson": "^4.2.0",
     "byline": "^5.0.0",
     "command-line-args": "^5.1.1",
     "command-line-usage": "^6.1.0",
@@ -47,7 +47,7 @@
   },
   "devDependencies": {
     "@types/async-lock": "0.0.20",
-    "@types/bson": "^4.0.2",
+    "@types/bson": "^4.0.3",
     "@types/byline": "^4.2.32",
     "@types/command-line-args": "^5.0.0",
     "@types/command-line-usage": "^5.0.1",
