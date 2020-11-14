@@ -196,31 +196,36 @@ class ContextManagementServer extends Proxy {
       return ProxyHelper.procPost(req, res, this.logger, (data) => {
         const csn = ProxyHelper.validateNumberRequired(data.csn, "csn");
         this.logger.info(LOG_MESSAGES.ON_RECEIVE_EXEC, [], [csn]);
-        return this.exec(csn, data.request, data.atomicId);
+        return this.exec(csn, data.request, data.atomicId)
+          .catch((reason) => ({ status: "NG", reason }));
       });
     } else if (url.pathname.endsWith(CORE_NODE.PATH_EXEC_MANY) && method === "POST") {
       return ProxyHelper.procPost(req, res, this.logger, (data) => {
         const csn = ProxyHelper.validateNumberRequired(data.csn, "csn");
         this.logger.info(LOG_MESSAGES.ON_RECEIVE_EXEC_MANY, [], [csn]);
-        return this.execMany(csn, data.requests, data.atomicId);
+        return this.execMany(csn, data.requests, data.atomicId)
+          .catch((reason) => ({ status: "NG", reason }));
       });
     } else if (url.pathname.endsWith(CORE_NODE.PATH_UPDATE_MANY) && method === "POST") {
       return ProxyHelper.procPost(req, res, this.logger, (data) => {
         this.logger.info(LOG_MESSAGES.ON_RECEIVE_UPDATE_MANY, [JSON.stringify(data.query), JSON.stringify(data.operator)], []);
-        return this.updateMany(data.query, data.operator, data.atomicId);
+        return this.updateMany(data.query, data.operator, data.atomicId)
+          .catch((reason) => ({ status: "NG", reason }));
       });
     } else if (url.pathname.endsWith(CORE_NODE.PATH_GET_TRANSACTION) && method === "GET") {
       return ProxyHelper.procGet(req, res, this.logger, (data) => {
         const csn = ProxyHelper.validateNumberRequired(data.csn, "csn");
         this.logger.info(LOG_MESSAGES.ON_RECEIVE_GET_TRANSACTION, [], [csn]);
-        return this.getTransactionJournal(csn);
+        return this.getTransactionJournal(csn)
+          .catch((reason) => ({ status: "NG", reason }));
       });
     } else if (url.pathname.endsWith(CORE_NODE.PATH_GET_TRANSACTIONS) && method === "GET") {
       return ProxyHelper.procGet(req, res, this.logger, (data) => {
         const fromCsn = ProxyHelper.validateNumberRequired(data.fromCsn, "fromCsn");
         const toCsn = ProxyHelper.validateNumberRequired(data.toCsn, "toCsn");
         this.logger.info(LOG_MESSAGES.ON_RECEIVE_GET_TRANSACTIONS, [], [fromCsn, toCsn]);
-        return this.getTransactionJournals(fromCsn, toCsn);
+        return this.getTransactionJournals(fromCsn, toCsn)
+          .catch((reason) => ({ status: "NG", reason }));
       });
     } else {
       this.logger.warn(LOG_MESSAGES.SERVER_COMMAND_NOT_FOUND, [method, url.pathname]);
@@ -244,7 +249,8 @@ class ContextManagementServer extends Proxy {
           if (request.type !== TransactionType.BEGIN &&
             request.type !== TransactionType.BEGIN_IMPORT &&
             request.type !== TransactionType.BEGIN_RESTORE) {
-            throw new DadgetError(ERROR.E2009);
+            reject(new DadgetError(ERROR.E2009));
+            return;
           }
         }
         if (request.type === TransactionType.CHECK) {

@@ -488,10 +488,10 @@ export default class Dadget extends ServiceEngine {
   }
 
   /**
-   * execManyメソッドはコンテキストマネージャの Rest API を呼び出してトランザクション要求を実行する。
+   * execManyメソッドはコンテキストマネージャの Rest API を呼び出して複数のトランザクション要求を実行する。
    *
    * @param csn トランザクションの前提となるコンテキスト通番(トランザクションの type が "insert" のときは 0 を指定でき、その場合は不整合チェックを行わない)
-   * @param request トランザクションの内容を持つオブジェクト
+   * @param request トランザクションの内容を持つオブジェクトの配列
    */
   execMany(csn: number, requests: TransactionRequest[]): Promise<void> {
     for (const request of requests) {

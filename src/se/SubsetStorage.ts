@@ -442,9 +442,9 @@ class UpdateProcessor extends Subscriber {
 }
 
 /**
- * 更新マネージャ(UpdateManager)
+ * 更新リスナー(UpdateListener)
  *
- * 更新マネージャは、コンテキストマネージャが発信する更新情報（トランザクションオブジェクト）を受信して更新トランザクションをサブセットへのトランザクションに変換し更新レシーバに転送する。
+ * 更新リスナーは、コンテキストマネージャが発信する更新情報（トランザクションオブジェクト）を受信して更新トランザクションをサブセットへのトランザクションに変換し更新レシーバに転送する。
  */
 class UpdateListener extends Subscriber {
 
@@ -1120,7 +1120,14 @@ export class SubsetStorage extends ServiceEngine implements Proxy {
       dataMap[val._id] = val;
     });
 
+    let committedCsn: number | undefined;
     transactions.forEach((trans) => {
+      if (committedCsn !== undefined && committedCsn < trans.csn) { return; }
+      if (trans.type === TransactionType.ABORT || trans.type === TransactionType.ABORT_IMPORT) {
+        if (trans.committedCsn === undefined) { throw new Error("committedCsn required"); }
+        committedCsn = trans.committedCsn;
+        return;
+      }
       if (trans.before) {
         dataMap[trans.target] = trans.before;
       } else if (trans.type === TransactionType.INSERT || trans.type === TransactionType.RESTORE) {
