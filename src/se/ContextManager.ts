@@ -26,6 +26,7 @@ const MAX_RESPONSE_SIZE_OF_JOURNALS = 10485760;
 export const ATOMIC_OPERATION_MAX_LOCK_TIME = 10 * 60 * 1000;  // 10 minutes
 const MASTER_LOCK = "master";
 const TRANSACTION_LOCK = "transaction";
+const PUBLISH_LOCK = "publish";
 
 /**
  * コンテキストマネージャコンフィグレーションパラメータ
@@ -279,6 +280,7 @@ class ContextManagementServer extends Proxy {
         return this.context.getLock().acquire(TRANSACTION_LOCK, () => {
           return this.procTransaction(postulatedCsn, request, atomicId);
         }).then(({ transaction, newCsn, updateObject }) => {
+          this.checkProtectedCsn();
           if (updateObject) {
             if (!updateObject._id) { updateObject._id = transaction.target; }
             updateObject.csn = newCsn;
@@ -380,6 +382,7 @@ class ContextManagementServer extends Proxy {
               });
           }
         }).then(() => {
+          this.checkProtectedCsn();
           this.lastBeforeObj = undefined;
           this.notifyAllWaitingList();
           resolve({
@@ -480,6 +483,7 @@ class ContextManagementServer extends Proxy {
                 });
             });
         }).then(() => {
+          this.checkProtectedCsn();
           this.lastBeforeObj = undefined;
           this.notifyAllWaitingList();
           resolve({
@@ -530,16 +534,17 @@ class ContextManagementServer extends Proxy {
             transaction.protectedCsn = this.context.getJournalDb().getProtectedCsn();
             return this.procTransactionCtrl(transaction, newCsn, atomicId);
           })
-          .then(() => this.context.getJournalDb().insert(transaction))
-          .then(() => this.context.getSystemDb().updateCsn(newCsn));
+          .then(() => Promise.all([
+            this.context.getJournalDb().insert(transaction),
+            this.context.getSystemDb().updateCsn(newCsn),
+            EJSON.stringify(transaction),
+          ]));
       })
-      .then(() => {
-        return this.context.getNode().publish(
-          CORE_NODE.PATH_TRANSACTION.replace(/:database\b/g, this.context.getDatabase())
-          , EJSON.stringify(transaction));
-      }).then(() => {
-        return this.checkProtectedCsn();
-      }).then(() => {
+      .then(([a, b, pubData]) => {
+        this.context.getLock().acquire(PUBLISH_LOCK, () => {
+          return this.context.getNode().publish(
+            CORE_NODE.PATH_TRANSACTION.replace(/:database\b/g, this.context.getDatabase()), pubData);
+        });
         return { transaction, newCsn, updateObject };
       });
   }
@@ -690,7 +695,7 @@ class ContextManagementServer extends Proxy {
               this.logger.error(LOG_MESSAGES.ERROR_MSG, [err.toString()]);
             });
         });
-    }, 0);
+    }, 60 * 1000);
   }
 
   getTransactionJournal(csn: number): Promise<object> {

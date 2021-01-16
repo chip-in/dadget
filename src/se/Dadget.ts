@@ -619,6 +619,7 @@ export default class Dadget extends ServiceEngine {
     if (transaction.type === TransactionType.FORCE_ROLLBACK) {
       this.notifyCsn = transaction.csn;
       this.notifyRollback(transaction.csn);
+      this.latestCsn = transaction.csn;
     } else if (transaction.csn > this.notifyCsn) {
       this.notifyCsn = transaction.csn;
       setTimeout(() => {
