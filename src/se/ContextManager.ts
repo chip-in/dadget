@@ -167,6 +167,7 @@ class ContextManagementServer extends Proxy {
   private atomicLockId?: string = undefined;
   private atomicTimer?: any;
   private queueWaitingList: Array<() => void> = [];
+  private pubDataList: string[] = [];
 
   constructor(protected context: ContextManager) {
     super();
@@ -541,7 +542,10 @@ class ContextManagementServer extends Proxy {
           ]));
       })
       .then(([a, b, pubData]) => {
+        this.pubDataList.push(pubData);
         this.context.getLock().acquire(PUBLISH_LOCK, () => {
+          const pubData = this.pubDataList.shift();
+          if (!pubData) { return; }
           return this.context.getNode().publish(
             CORE_NODE.PATH_TRANSACTION.replace(/:database\b/g, this.context.getDatabase()), pubData);
         });
