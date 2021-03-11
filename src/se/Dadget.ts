@@ -191,7 +191,7 @@ export default class Dadget extends ServiceEngine {
 
     const subsetStorages = node.searchServiceEngine("SubsetStorage", { database }) as SubsetStorage[];
     // Delete unused persistent databases
-    if (Dadget.enableDeleteSubset) {
+    if (Dadget.enableDeleteSubset && this.option.autoDeleteSubset) {
       PersistentDb.getAllStorage()
         .then((storageList) => {
           const subsetNames = subsetStorages
@@ -201,12 +201,8 @@ export default class Dadget extends ServiceEngine {
             if (!storageName.startsWith(database + "--")) { continue; }
             const [dbName] = storageName.split("__");
             if (subsetNames.indexOf(dbName) < 0) {
-              if (this.option.autoDeleteSubset) {
-                this.logger.warn(LOG_MESSAGES.DELETE_STORAGE, [storageName]);
-                PersistentDb.deleteStorage(storageName);
-              } else {
-                this.logger.debug(LOG_MESSAGES.SKIP_DELETING_STORAGE, [storageName]);
-              }
+              this.logger.warn(LOG_MESSAGES.DELETE_STORAGE, [storageName]);
+              PersistentDb.deleteStorage(storageName);
             }
           }
         })

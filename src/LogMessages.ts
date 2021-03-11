@@ -31,7 +31,6 @@ export const LOG_MESSAGES = {
   REMOUNTED: { code: 29, msg: "%1 is remounted" },
   CONNECTED: { code: 30, msg: "%1 is connected" },
   DELETE_STORAGE: { code: 31, msg: "Delete storage: %1" },
-  SKIP_DELETING_STORAGE: { code: 32, msg: "Skip deleting storage: %1" },
   FAILED_SWEEP_STORAGE: { code: 33, msg: "Failed sweep storages: %1" },
   QUERY: { code: 34, msg: "query: %1" },
   QUERY_ERROR: { code: 35, msg: "query error: %1, url: %2" },
