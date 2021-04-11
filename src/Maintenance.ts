@@ -6,6 +6,7 @@ import { Mongo } from "./Config";
 import { TransactionRequest, TransactionType } from "./db/Transaction";
 import Dadget from "./se/Dadget";
 import { Util } from "./util/Util";
+import * as EJSON from "./util/Ejson";
 
 const MAX_EXPORT_NUM = 100;
 const MAX_UPLOAD_BYTES = 10 * 1024 * 1024;
@@ -22,7 +23,7 @@ export class Maintenance {
       }).then((dbs) => {
         let promise = Promise.resolve();
         for (const curDb of dbs.databases) {
-          if (curDb.name.startsWith(target)) {
+          if (curDb.name === target || curDb.name.startsWith(target + "--")) {
             console.info(curDb.name);
             const targetDb = db.db(curDb.name);
             promise = promise.then(() => targetDb.dropDatabase());
@@ -59,7 +60,7 @@ export class Maintenance {
                     if (rowData.resultSet.length === 0) { return whileData; }
                     let out = "";
                     for (const data of rowData.resultSet) {
-                      out += JSON.stringify(data) + "\n";
+                      out += EJSON.stringify(data) + "\n";
                       idMap.delete((data as any)._id);
                     }
                     for (const id of idMap.keys()) {
@@ -82,7 +83,7 @@ export class Maintenance {
         return null !== row.line;
       },
       (row) => {
-        const data = JSON.parse(row.line);
+        const data = EJSON.parse(row.line);
         const target = data[idName];
         delete data._id;
         delete data.csn;
