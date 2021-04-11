@@ -269,7 +269,7 @@ export default class Dadget extends ServiceEngine {
       .then((result) => {
         const itemMap: { [id: string]: any } = {};
         let hasDupulicate = false;
-        for (const item of result.resultSet as Array<{ _id: string }>) {
+        for (const item of result.resultSet as { _id: string }[]) {
           if (itemMap[item._id]) {
             console.warn("hasDupulicate:" + item._id);
             hasDupulicate = true;
@@ -374,7 +374,7 @@ export default class Dadget extends ServiceEngine {
       })
       .catch((reason) => {
         const cause = reason instanceof DadgetError ? reason :
-          (reason.code ? DadgetError.from(reason) : new DadgetError(ERROR.E2102, [reason.toString()]));
+          (reason.code && reason.message ? DadgetError.from(reason) : new DadgetError(ERROR.E2102, [reason.toString()]));
         return Promise.reject(cause);
       });
   }
@@ -423,7 +423,7 @@ export default class Dadget extends ServiceEngine {
       })
       .catch((reason) => {
         const cause = reason instanceof DadgetError ? reason :
-          (reason.code ? DadgetError.from(reason) : new DadgetError(ERROR.E2102, [reason.toString()]));
+          (reason.code && reason.message ? DadgetError.from(reason) : new DadgetError(ERROR.E2102, [reason.toString()]));
         return Promise.reject(cause);
       });
   }
