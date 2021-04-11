@@ -213,6 +213,7 @@ class UpdateProcessor extends Subscriber {
     } else if (type !== TransactionType.NONE) {
       throw new Error("Unsupported type: " + type);
     }
+    promise = promise.catch((e) => this.logger.warn(LOG_MESSAGES.UPDATE_SUBSET_ERROR, [e.toString()]));
     promise = promise.then(() => this.storage.getJournalDb().insert(transaction));
     promise = promise.then(() => this.storage.getSystemDb().updateCsn(transaction.csn));
     return promise;
@@ -679,7 +680,7 @@ export class SubsetStorage extends ServiceEngine implements Proxy {
   private systemDb: SystemDb;
   private mountHandle: string;
   private lock: ReadWriteLock;
-  private queryWaitingList: { [csn: number]: Array<() => Promise<any>> } = {};
+  private queryWaitingList: { [csn: number]: (() => Promise<any>)[] } = {};
   private subscriberKey: string | null;
   private readyFlag: boolean = false;
   private updateProcessor: UpdateProcessor;
@@ -757,7 +758,7 @@ export class SubsetStorage extends ServiceEngine implements Proxy {
       });
   }
 
-  pullQueryWaitingList(csn: number): Array<() => Promise<any>> {
+  pullQueryWaitingList(csn: number): (() => Promise<any>)[] {
     const list = this.queryWaitingList[csn];
     if (list) {
       delete this.queryWaitingList[csn];

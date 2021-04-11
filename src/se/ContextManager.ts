@@ -166,7 +166,7 @@ class ContextManagementServer extends Proxy {
   private lastCheckPointTime: number = 0;
   private atomicLockId?: string = undefined;
   private atomicTimer?: any;
-  private queueWaitingList: Array<() => void> = [];
+  private queueWaitingList: (() => void)[] = [];
   private pubDataList: string[] = [];
 
   constructor(protected context: ContextManager) {
@@ -192,6 +192,7 @@ class ContextManagementServer extends Proxy {
     if (url.pathname == null) { throw new Error("pathname is required."); }
     const method = req.method.toUpperCase();
     this.logger.debug(LOG_MESSAGES.ON_RECEIVE, [method, url.pathname]);
+    const time = Date.now();
     if (method === "OPTIONS") {
       return ProxyHelper.procOption(req, res);
     } else if (url.pathname.endsWith(CORE_NODE.PATH_EXEC) && method === "POST") {
@@ -200,27 +201,43 @@ class ContextManagementServer extends Proxy {
         this.logger.info(LOG_MESSAGES.ON_RECEIVE_EXEC, [], [csn]);
         return this.exec(csn, data.request, data.atomicId)
           .catch((reason) => ({ status: "NG", reason }));
-      });
+      })
+        .then((result) => {
+          this.logger.info(LOG_MESSAGES.TIME_OF_EXEC, [], [Date.now() - time]);
+          return result;
+        });
     } else if (url.pathname.endsWith(CORE_NODE.PATH_EXEC_MANY) && method === "POST") {
       return ProxyHelper.procPost(req, res, this.logger, (data) => {
         const csn = ProxyHelper.validateNumberRequired(data.csn, "csn");
         this.logger.info(LOG_MESSAGES.ON_RECEIVE_EXEC_MANY, [], [csn]);
         return this.execMany(csn, data.requests, data.atomicId)
           .catch((reason) => ({ status: "NG", reason }));
-      });
+      })
+        .then((result) => {
+          this.logger.info(LOG_MESSAGES.TIME_OF_EXEC, [], [Date.now() - time]);
+          return result;
+        });
     } else if (url.pathname.endsWith(CORE_NODE.PATH_UPDATE_MANY) && method === "POST") {
       return ProxyHelper.procPost(req, res, this.logger, (data) => {
         this.logger.info(LOG_MESSAGES.ON_RECEIVE_UPDATE_MANY, [JSON.stringify(data.query), JSON.stringify(data.operator)], []);
         return this.updateMany(data.query, data.operator, data.atomicId)
           .catch((reason) => ({ status: "NG", reason }));
-      });
+      })
+        .then((result) => {
+          this.logger.info(LOG_MESSAGES.TIME_OF_EXEC, [], [Date.now() - time]);
+          return result;
+        });
     } else if (url.pathname.endsWith(CORE_NODE.PATH_GET_TRANSACTION) && method === "GET") {
       return ProxyHelper.procGet(req, res, this.logger, (data) => {
         const csn = ProxyHelper.validateNumberRequired(data.csn, "csn");
         this.logger.info(LOG_MESSAGES.ON_RECEIVE_GET_TRANSACTION, [], [csn]);
         return this.getTransactionJournal(csn)
           .catch((reason) => ({ status: "NG", reason }));
-      });
+      })
+        .then((result) => {
+          this.logger.info(LOG_MESSAGES.TIME_OF_EXEC, [], [Date.now() - time]);
+          return result;
+        });
     } else if (url.pathname.endsWith(CORE_NODE.PATH_GET_TRANSACTIONS) && method === "GET") {
       return ProxyHelper.procGet(req, res, this.logger, (data) => {
         const fromCsn = ProxyHelper.validateNumberRequired(data.fromCsn, "fromCsn");
@@ -228,7 +245,11 @@ class ContextManagementServer extends Proxy {
         this.logger.info(LOG_MESSAGES.ON_RECEIVE_GET_TRANSACTIONS, [], [fromCsn, toCsn]);
         return this.getTransactionJournals(fromCsn, toCsn)
           .catch((reason) => ({ status: "NG", reason }));
-      });
+      })
+        .then((result) => {
+          this.logger.info(LOG_MESSAGES.TIME_OF_EXEC, [], [Date.now() - time]);
+          return result;
+        });
     } else {
       this.logger.warn(LOG_MESSAGES.SERVER_COMMAND_NOT_FOUND, [method, url.pathname]);
       return ProxyHelper.procError(req, res);
@@ -962,7 +983,7 @@ export class ContextManager extends ServiceEngine {
       },
       (loopData) => {
         const indexDef = this.uniqueIndexes[loopData.count++];
-        const condition: Array<{ [field: string]: any }> = [];
+        const condition: { [field: string]: any }[] = [];
         for (const field in indexDef.index) {
           if (!indexDef.index.hasOwnProperty(field)) { continue; }
           const val = typeof obj[field] === "undefined" ? null : obj[field];
