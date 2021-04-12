@@ -63,6 +63,7 @@ export const LOG_MESSAGES = {
   TRANSACTION_TIMEOUT: { code: 62, msg: "Transaction timeout" },
   TIME_OF_EXEC: { code: 63, msg: "time of exec: %d1 ms" },
   UPDATE_SUBSET_ERROR: { code: 64, msg: "update subset db error: %1" },
+  EXEC_FORCE_ROLLBACK: { code: 65, msg: "FORCE_ROLLBACK" },
 };
 
 Logger.checkLogType(LOG_MESSAGES);

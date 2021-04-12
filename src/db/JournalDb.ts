@@ -59,6 +59,7 @@ export class JournalDb {
     if (request.type === TransactionType.BEGIN_RESTORE) { return Promise.resolve(); }
     if (request.type === TransactionType.END_RESTORE) { return Promise.resolve(); }
     if (request.type === TransactionType.RESTORE) { return Promise.resolve(); }
+    if (request.type === TransactionType.FORCE_ROLLBACK) { return Promise.resolve(); }
     return this.db.findOneBySort({ target: request.target }, { csn: -1 })
       .then((result) => {
         if (request.type === TransactionType.INSERT && request.new) {

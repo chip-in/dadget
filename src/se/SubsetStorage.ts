@@ -107,7 +107,7 @@ class UpdateProcessor extends Subscriber {
             } else if (csn > transaction.csn && transaction.type === TransactionType.FORCE_ROLLBACK) {
               return this.fetchJournal(transaction.csn)
                 .then((fetchJournal) => {
-                  if (!fetchJournal) { throw new Error("can not rollback because journal isn't found: " + transaction.csn); }
+                  if (transaction.csn === 0 || !fetchJournal) { return this.resetData(transaction.csn, true) }
                   return this.rollbackSubsetDb(transaction.csn, true)
                     .catch((e) => {
                       this.logger.warn(LOG_MESSAGES.ERROR_MSG, [e.toString()]);

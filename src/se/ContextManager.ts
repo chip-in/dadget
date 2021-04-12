@@ -73,7 +73,7 @@ class TransactionJournalSubscriber extends Subscriber {
         this.context.getJournalDb().setProtectedCsn(Math.min(protectedCsn, transaction.csn));
         return this.context.getJournalDb().findByCsn(transaction.csn)
           .then((tr) => {
-            return this.context.getJournalDb().deleteAfterCsn(transaction.csn)
+            return (transaction.csn > 0 ? this.context.getJournalDb().deleteAfterCsn(transaction.csn) : this.context.getJournalDb().deleteAll())
               .then(() => {
                 if (tr && tr.digest === transaction.digest) {
                   return this.context.getSystemDb().updateCsn(transaction.csn);
@@ -549,6 +549,7 @@ class ContextManagementServer extends Proxy {
         return Promise.all([this.context.getSystemDb().getCsn(), this.context.getJournalDb().getLastDigest()])
           .then((values) => {
             newCsn = values[0] + 1;
+            if (request.type === TransactionType.FORCE_ROLLBACK) { newCsn = 0; }
             this.logger.info(LOG_MESSAGES.EXEC_NEWCSN, [], [newCsn]);
             const lastDigest = values[1];
             transaction = { ..._request, csn: newCsn, beforeDigest: lastDigest };
@@ -684,6 +685,8 @@ class ContextManagementServer extends Proxy {
       this.logger.warn(LOG_MESSAGES.EXEC_END_RESTORE);
     } else if (request.type === TransactionType.ABORT_RESTORE) {
       this.logger.warn(LOG_MESSAGES.EXEC_ABORT_RESTORE);
+    } else if (request.type === TransactionType.FORCE_ROLLBACK) {
+      this.logger.warn(LOG_MESSAGES.EXEC_FORCE_ROLLBACK);
     } else if (request.type === TransactionType.CHECK) {
     } else {
       err = "type not found in a transaction: " + request.type;
@@ -952,6 +955,7 @@ export class ContextManager extends ServiceEngine {
     if (request.type === TransactionType.BEGIN_RESTORE) { return Promise.resolve(undefined); }
     if (request.type === TransactionType.END_RESTORE) { return Promise.resolve(undefined); }
     if (request.type === TransactionType.ABORT_RESTORE) { return Promise.resolve(undefined); }
+    if (request.type === TransactionType.FORCE_ROLLBACK) { return Promise.resolve(undefined); }
     if (request.type === TransactionType.RESTORE && request.new) { return Promise.resolve(request.new); }
     if (request.type === TransactionType.INSERT && request.new) {
       const newObj = request.new;

@@ -127,4 +127,9 @@ export class Maintenance {
       .then(() => dadget._exec(0, { type: TransactionType.END_RESTORE, target: "" }, atomicId))
       .then(() => { return; });
   }
+
+  static clear(dadget: Dadget, force: boolean): Promise<void> {
+    return dadget.clear(force)
+      .then(() => { return; });
+  }
 }

@@ -531,7 +531,13 @@ export default class Dadget extends ServiceEngine {
       });
   }
 
-  updateMany(query: object, operator: object): Promise<string[]> {
+  /**
+   * updateMany メソッドはクエリーで取得した結果に対し更新オペレーターを適用して更新する。
+   *
+   * @param query mongoDBと同じクエリーオブジェクト
+   * @param operator 更新内容を記述するオペレータ。意味はmongoDB に準ずる。
+   */
+   updateMany(query: object, operator: object): Promise<string[]> {
     return this._updateMany(query, operator, undefined);
   }
 
@@ -566,6 +572,18 @@ export default class Dadget extends ServiceEngine {
       });
   }
 
+  /**
+   * clearメソッドは全データの削除を実行する。
+   *
+   * @param force trueの場合、csnを0に戻しジャーナルも削除する
+   */
+   clear(force?: boolean): Promise<object> {
+    const request = new TransactionRequest();
+    request.type = force ? TransactionType.FORCE_ROLLBACK : TransactionType.TRUNCATE;
+    request.target = "";
+    return this._exec(0, request, undefined);
+  }
+
   private notifyAll() {
     for (const id of Object.keys(this.updateListeners)) {
       const listener = this.updateListeners[id];
@@ -589,6 +607,7 @@ export default class Dadget extends ServiceEngine {
       const listener = this.updateListeners[id];
       if (listener.csn !== PREQUERY_CSN && listener.csn > notifyCsn) {
         listener.csn = notifyCsn;
+        listener.listener(notifyCsn);
       }
     }
   }
@@ -614,8 +633,8 @@ export default class Dadget extends ServiceEngine {
     if (this.lockNotify) { return; }
     if (transaction.type === TransactionType.FORCE_ROLLBACK) {
       this.notifyCsn = transaction.csn;
-      this.notifyRollback(transaction.csn);
       this.latestCsn = transaction.csn;
+      this.notifyRollback(transaction.csn);
     } else if (transaction.csn > this.notifyCsn) {
       this.notifyCsn = transaction.csn;
       setTimeout(() => {
