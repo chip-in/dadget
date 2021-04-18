@@ -45,40 +45,6 @@ export class JournalDb {
       .catch((err) => Promise.reject(new DadgetError(ERROR.E1101, [err.toString()])));
   }
 
-  checkConsistent(postulatedCsn: number, request: TransactionRequest): Promise<void> {
-    if (postulatedCsn && postulatedCsn < this.protectedCsn) {
-      throw new DadgetError(ERROR.E1113, [postulatedCsn, this.protectedCsn]);
-    }
-    if (request.type === TransactionType.TRUNCATE) { return Promise.resolve(); }
-    if (request.type === TransactionType.BEGIN) { return Promise.resolve(); }
-    if (request.type === TransactionType.END) { return Promise.resolve(); }
-    if (request.type === TransactionType.ABORT) { return Promise.resolve(); }
-    if (request.type === TransactionType.BEGIN_IMPORT) { return Promise.resolve(); }
-    if (request.type === TransactionType.END_IMPORT) { return Promise.resolve(); }
-    if (request.type === TransactionType.ABORT_IMPORT) { return Promise.resolve(); }
-    if (request.type === TransactionType.BEGIN_RESTORE) { return Promise.resolve(); }
-    if (request.type === TransactionType.END_RESTORE) { return Promise.resolve(); }
-    if (request.type === TransactionType.RESTORE) { return Promise.resolve(); }
-    if (request.type === TransactionType.FORCE_ROLLBACK) { return Promise.resolve(); }
-    return this.db.findOneBySort({ target: request.target }, { csn: -1 })
-      .then((result) => {
-        if (request.type === TransactionType.INSERT && request.new) {
-          if (!result || result.type === TransactionType.DELETE) { return; }
-          throw new DadgetError(ERROR.E1102, [request.target]);
-        } else if (request.before) {
-          if (!result) {
-            if (request.before.csn < this.protectedCsn) { return; }
-            throw new DadgetError(ERROR.E1103);
-          }
-          if (result.type === TransactionType.DELETE) { throw new DadgetError(ERROR.E1104); }
-          if (result.csn > request.before.csn) { throw new DadgetError(ERROR.E1105, [result.csn, request.before.csn]); }
-          return;
-        } else {
-          throw new DadgetError(ERROR.E1106);
-        }
-      });
-  }
-
   getLastDigest(): Promise<string> {
     return this.db.findOneBySort({}, { csn: -1 })
       .then((result) => {

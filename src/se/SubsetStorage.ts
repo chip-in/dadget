@@ -307,7 +307,7 @@ class UpdateProcessor extends Subscriber {
     this.logger.warn(LOG_MESSAGES.ADJUST_DATA, [], [csn]);
     return Promise.resolve()
       .then(() => {
-        if (this.storage.getSystemDb().isNew()) {
+        if (csn === 0 || this.storage.getSystemDb().isNew()) {
           return this.resetData(csn, true);
         } else {
           return this.storage.getJournalDb().getLastJournal()

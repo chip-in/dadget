@@ -541,8 +541,7 @@ class ContextManagementServer extends Proxy {
         this.logger.debug(LOG_MESSAGES.LASTBEFOREOBJ_CHECK_PASSED);
       }
     }
-    return this.context.getJournalDb().checkConsistent(postulatedCsn, _request)
-      .then(() => this.context.getSystemDb().getCsn())
+    return this.context.getSystemDb().getCsn()
       .then((currentCsn) => this.context.checkUniqueConstraint(currentCsn, _request))
       .then((_) => {
         updateObject = _;
