@@ -48,6 +48,9 @@ class TransactionJournalSubscriber extends Subscriber {
     this.logger.debug(LOG_MESSAGES.CREATED, ["TransactionJournalSubscriber"]);
   }
 
+  /**
+   * Receive a MQTT message
+   */
   onReceive(msg: string) {
     const transaction: TransactionObject = EJSON.parse(msg);
     this.logger.info(LOG_MESSAGES.MSG_RECEIVED, [transaction.type], [transaction.csn]);
@@ -80,7 +83,8 @@ class TransactionJournalSubscriber extends Subscriber {
                 } else {
                   return this.adjustData(transaction.csn);
                 }
-              });
+              })
+              .then(() => this.context.getJournalDb().retrieveCheckCsn());
           })
           .catch((err) => {
             this.logger.error(LOG_MESSAGES.ERROR_MSG, [err.toString()]);
@@ -185,6 +189,9 @@ class ContextManagementServer extends Proxy {
     for (const task of queue) { task(); }
   }
 
+  /**
+   * Receive a HTTP request
+   */
   onReceive(req: http.IncomingMessage, res: http.ServerResponse): Promise<http.ServerResponse> {
     if (!req.url) { throw new Error("url is required."); }
     if (!req.method) { throw new Error("method is required."); }
@@ -541,7 +548,8 @@ class ContextManagementServer extends Proxy {
         this.logger.debug(LOG_MESSAGES.LASTBEFOREOBJ_CHECK_PASSED);
       }
     }
-    return this.context.getSystemDb().getCsn()
+    return this.context.getJournalDb().checkConsistent(postulatedCsn, _request)
+      .then(() => this.context.getSystemDb().getCsn())
       .then((currentCsn) => this.context.checkUniqueConstraint(currentCsn, _request))
       .then((_) => {
         updateObject = _;
@@ -563,6 +571,7 @@ class ContextManagementServer extends Proxy {
           ]));
       })
       .then(([a, b, pubData]) => {
+        this.context.getJournalDb().setCheckCsnByTransaction(transaction);
         this.pubDataList.push(pubData);
         this.context.getLock().acquire(PUBLISH_LOCK, () => {
           const pubData = this.pubDataList.shift();
@@ -582,7 +591,8 @@ class ContextManagementServer extends Proxy {
       this.procTransaction(0, { type: TransactionType.ABORT, target: "" }, this.atomicLockId);
     }, ATOMIC_OPERATION_MAX_LOCK_TIME);
   }
-  private resetTransactionTimeout() {
+
+  private clearTransactionTimeout() {
     if (this.atomicTimer) { clearTimeout(this.atomicTimer); }
     this.atomicTimer = undefined;
   }
@@ -625,7 +635,7 @@ class ContextManagementServer extends Proxy {
       this.atomicLockId = undefined;
       this.context.committedCsn = undefined;
       delete transaction.committedCsn;
-      this.resetTransactionTimeout();
+      this.clearTransactionTimeout();
     }
 
     if (transaction.type === TransactionType.ABORT || transaction.type === TransactionType.ABORT_IMPORT) {
@@ -636,7 +646,7 @@ class ContextManagementServer extends Proxy {
       transaction.committedCsn = this.context.committedCsn;
       this.atomicLockId = undefined;
       this.context.committedCsn = undefined;
-      this.resetTransactionTimeout();
+      this.clearTransactionTimeout();
     }
   }
 

@@ -6,9 +6,15 @@ import { DadgetError } from "../util/DadgetError";
 import { IDb } from "./container/IDb";
 
 const JOURNAL_COLLECTION = "journal";
+const RESET_CHECK_CSN_TYPES = [
+  TransactionType.TRUNCATE,
+  TransactionType.ABORT,
+  TransactionType.ABORT_IMPORT,
+];
 
 export class JournalDb {
   private protectedCsn: number = 0;
+  private checkCsn: number = 0;
 
   constructor(private db: IDb) {
     db.setCollection(JOURNAL_COLLECTION);
@@ -21,6 +27,30 @@ export class JournalDb {
 
   setProtectedCsn(protectedCsn: number) {
     this.protectedCsn = protectedCsn;
+  }
+
+  getCheckCsn() {
+    return this.checkCsn;
+  }
+
+  setCheckCsn(checkCsn: number) {
+    console.log("checkCsn: ", checkCsn);
+    this.checkCsn = checkCsn;
+  }
+
+  setCheckCsnByTransaction(transaction: TransactionObject) {
+    if (RESET_CHECK_CSN_TYPES.includes(transaction.type)) {
+      this.setCheckCsn(transaction.csn);
+    }
+  }
+
+  retrieveCheckCsn(): Promise<void> {
+    return this.db.findOneBySort({ type: { $in: RESET_CHECK_CSN_TYPES } }, { csn: -1 })
+      .then((result) => {
+        if (result) {
+          this.setCheckCsn(result.csn);
+        }
+      });
   }
 
   start(): Promise<void> {
@@ -43,6 +73,41 @@ export class JournalDb {
         console.log("protectedCsn: ", this.protectedCsn);
       })
       .catch((err) => Promise.reject(new DadgetError(ERROR.E1101, [err.toString()])));
+  }
+
+  checkConsistent(postulatedCsn: number, request: TransactionRequest): Promise<void> {
+    if (postulatedCsn && postulatedCsn < this.protectedCsn) {
+      throw new DadgetError(ERROR.E1113, [postulatedCsn, this.protectedCsn]);
+    }
+    if (request.type === TransactionType.TRUNCATE) { return Promise.resolve(); }
+    if (request.type === TransactionType.BEGIN) { return Promise.resolve(); }
+    if (request.type === TransactionType.END) { return Promise.resolve(); }
+    if (request.type === TransactionType.ABORT) { return Promise.resolve(); }
+    if (request.type === TransactionType.BEGIN_IMPORT) { return Promise.resolve(); }
+    if (request.type === TransactionType.END_IMPORT) { return Promise.resolve(); }
+    if (request.type === TransactionType.ABORT_IMPORT) { return Promise.resolve(); }
+    if (request.type === TransactionType.BEGIN_RESTORE) { return Promise.resolve(); }
+    if (request.type === TransactionType.END_RESTORE) { return Promise.resolve(); }
+    if (request.type === TransactionType.ABORT_RESTORE) { return Promise.resolve(); }
+    if (request.type === TransactionType.RESTORE) { return Promise.resolve(); }
+    if (request.type === TransactionType.FORCE_ROLLBACK) { return Promise.resolve(); }
+    return this.db.findOneBySort({ target: request.target, csn: { $gt: this.checkCsn } }, { csn: -1 })
+      .then((result) => {
+        if (request.type === TransactionType.INSERT && request.new) {
+          if (!result || result.type === TransactionType.DELETE) { return; }
+          throw new DadgetError(ERROR.E1102, [request.target]);
+        } else if (request.before) {
+          if (!result) {
+            if (request.before.csn < this.protectedCsn) { return; }
+            throw new DadgetError(ERROR.E1103);
+          }
+          if (result.type === TransactionType.DELETE) { throw new DadgetError(ERROR.E1104); }
+          if (result.csn > request.before.csn) { throw new DadgetError(ERROR.E1105, [result.csn, request.before.csn]); }
+          return;
+        } else {
+          throw new DadgetError(ERROR.E1106);
+        }
+      });
   }
 
   getLastDigest(): Promise<string> {
