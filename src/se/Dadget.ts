@@ -8,7 +8,6 @@ import { PersistentDb } from "../db/container/PersistentDb";
 import { TransactionObject, TransactionRequest, TransactionType } from "../db/Transaction";
 import { ERROR } from "../Errors";
 import { LOG_MESSAGES } from "../LogMessages";
-import { Maintenance } from "../Maintenance";
 import { DadgetError } from "../util/DadgetError";
 import * as EJSON from "../util/Ejson";
 import { Logger } from "../util/Logger";
@@ -714,10 +713,6 @@ export default class Dadget extends ServiceEngine {
    */
   static setServerAccessControlAllowOrigin(origin: string) {
     setAccessControlAllowOrigin(origin);
-  }
-
-  exportDb(fileName: string): Promise<void> {
-    return Maintenance.export(this, fileName);
   }
 
   static getLogger() {

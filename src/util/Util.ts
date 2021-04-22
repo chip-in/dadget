@@ -17,7 +17,11 @@ export class Util {
     const whilst = (data: T): Promise<T> => {
       return condition(data) ? action(data).then(whilst) : Promise.resolve(data);
     };
-    return whilst(data);
+    try {
+      return whilst(data);
+    } catch (error) {
+      return Promise.reject(error);
+    }
   }
 
   static promiseEach<T>(
