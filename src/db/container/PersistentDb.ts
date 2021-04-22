@@ -152,14 +152,7 @@ export class PersistentDb implements IDb {
   }
 
   deleteAll(): Promise<void> {
-    const newName = this.collection + "-" + new Date().toISOString();
-    return this.db.collection(this.collection).count({})
-      .then((count) => {
-        if (count > 0) {
-          return this.db.renameCollection(this.collection, newName)
-            .then(() => { });
-        }
-      });
+    return this.db.collection(this.collection).drop();
   }
 
   private createIndexes(): Promise<void> {
@@ -172,7 +165,7 @@ export class PersistentDb implements IDb {
       })
       .then((indexes) => {
         // インデックスの削除
-        const indexPromisies: Array<Promise<any>> = [];
+        const indexPromisies: Promise<any>[] = [];
         for (const index of indexes) {
           if (index.name !== "_id_" && !indexMap[index.name]) {
             indexPromisies.push(this.db.collection(this.collection).dropIndex(index.name));
@@ -183,7 +176,7 @@ export class PersistentDb implements IDb {
       })
       .then(() => {
         // インデックスの追加
-        const indexPromisies: Array<Promise<any>> = [];
+        const indexPromisies: Promise<any>[] = [];
         for (const indexName in indexMap) {
           if (!indexNameList[indexName]) {
             const fields = indexMap[indexName].index;
