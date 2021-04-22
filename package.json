@@ -30,11 +30,11 @@
     "browser-test": "cd browser-test && browserify src/indexeddb-test.js -o dest/test.js && cp src/index.html dest/ && http-server dest -c-1"
   },
   "dependencies": {
+    "@babel/polyfill": "^7.12.1",
     "@chip-in/logger": "*",
     "@chip-in/resource-node": "*",
     "async-lock": "^1.1.1",
     "bson": "^4.2.0",
-    "byline": "^5.0.0",
     "command-line-args": "^5.1.1",
     "command-line-usage": "^6.1.0",
     "deep-diff": "^0.3.8",
@@ -54,7 +54,7 @@
     "@types/deep-diff": "0.0.31",
     "@types/deep-equal": "^1.0.1",
     "@types/mongodb": "^2.2.19",
-    "@types/node": "^8.9.4",
+    "@types/node": "^14.14.41",
     "@types/object-hash": "0.5.29",
     "@types/rwlock": "^5.0.2",
     "@types/uuid": "^3.4.2",

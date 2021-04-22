@@ -1,4 +1,5 @@
-import * as byline from "byline";
+import "@babel/polyfill";
+import * as readline from "readline";
 import * as fs from "fs";
 import { Db, MongoClient } from "mongodb";
 import { promisify } from "util";
@@ -74,38 +75,36 @@ export class Maintenance {
       });
   }
 
-  private static uploadStream(stream: byline.LineStream, dadget: Dadget, type: TransactionType, idName: string, atomicId: string) {
+  private static async uploadStream(rl: readline.ReadLine, dadget: Dadget, type: TransactionType, idName: string, atomicId: string) {
     let list: TransactionRequest[] = [];
     let listSize = 0;
-    return Util.promiseWhile<{ line: string }>(
-      { line: stream.read() as string },
-      (row) => {
-        return null !== row.line;
-      },
-      (row) => {
-        const data = EJSON.parse(row.line);
-        const target = data[idName];
-        delete data._id;
-        delete data.csn;
-        listSize += row.line.length;
-        list.push({ type, target, new: data });
-        let promise: Promise<any> = Promise.resolve();
-        if (listSize > MAX_UPLOAD_BYTES) {
-          const _list = list;
-          list = [];
-          listSize = 0;
-          promise = promise.then(() => dadget._execMany(0, _list, atomicId));
-        }
-        return promise.then(() => ({ line: stream.read() as string }));
-      },
-    ).then(() => listSize > 0 ? dadget._execMany(0, list, atomicId) : {});
+    for await (const line of rl) {
+      const data = EJSON.parse(line);
+      const target = data[idName];
+      delete data._id;
+      delete data.csn;
+      listSize += line.length;
+      list.push({ type, target, new: data });
+      if (listSize > MAX_UPLOAD_BYTES) {
+        const _list = list;
+        list = [];
+        listSize = 0;
+        await dadget._execMany(0, _list, atomicId);
+      }
+    }
+    if (listSize > 0) {
+      await dadget._execMany(0, list, atomicId);
+    }
   }
 
   static import(dadget: Dadget, fileName: string, idName: string): Promise<void> {
-    const stream = byline(fs.createReadStream(fileName));
+    const rl = readline.createInterface({
+      input: fs.createReadStream(fileName, { encoding: 'utf8' }),
+      crlfDelay: Infinity
+    });
     const atomicId = Dadget.uuidGen();
     return dadget._exec(0, { type: TransactionType.BEGIN_IMPORT, target: "" }, atomicId)
-      .then(() => Maintenance.uploadStream(stream, dadget, TransactionType.INSERT, idName, atomicId))
+      .then(() => Maintenance.uploadStream(rl, dadget, TransactionType.INSERT, idName, atomicId))
       .catch((reason) => {
         return dadget._exec(0, { type: TransactionType.ABORT_IMPORT, target: "" }, atomicId)
           .then(() => { throw reason; });
@@ -115,11 +114,14 @@ export class Maintenance {
   }
 
   static restore(dadget: Dadget, fileName: string): Promise<void> {
-    const stream = byline(fs.createReadStream(fileName));
+    const rl = readline.createInterface({
+      input: fs.createReadStream(fileName, { encoding: 'utf8' }),
+      crlfDelay: Infinity
+    });
     const atomicId = Dadget.uuidGen();
     return dadget._exec(0, { type: TransactionType.BEGIN_RESTORE, target: "" }, atomicId)
       .then(() => dadget._exec(0, { type: TransactionType.TRUNCATE, target: "" }, atomicId))
-      .then(() => Maintenance.uploadStream(stream, dadget, TransactionType.RESTORE, "_id", atomicId))
+      .then(() => Maintenance.uploadStream(rl, dadget, TransactionType.RESTORE, "_id", atomicId))
       .catch((reason) => {
         return dadget._exec(0, { type: TransactionType.ABORT_RESTORE, target: "" }, atomicId)
           .then(() => { throw reason; });
