@@ -69,6 +69,12 @@ class TransactionJournalSubscriber extends Subscriber {
       }
     }
 
+    if (this.context.getDigestMap().has(transaction.csn) &&
+      this.context.getDigestMap().get(transaction.csn) === transaction.digest) {
+      this.context.getDigestMap().delete(transaction.csn);
+      return;
+    }
+
     this.context.getLock().acquire(TRANSACTION_LOCK, () => {
       if (transaction.type === TransactionType.FORCE_ROLLBACK) {
         this.logger.warn(LOG_MESSAGES.ROLLBACK, [], [transaction.csn]);
@@ -571,6 +577,7 @@ class ContextManagementServer extends Proxy {
           ]));
       })
       .then(([a, b, pubData]) => {
+        if (transaction.digest) this.context.getDigestMap().set(transaction.csn, transaction.digest);
         this.context.getJournalDb().setCheckCsnByTransaction(transaction);
         this.pubDataList.push(pubData);
         this.context.getLock().acquire(PUBLISH_LOCK, () => {
@@ -802,6 +809,7 @@ export class ContextManager extends ServiceEngine {
   private lock: AsyncLock;
   private subscriberKey: string | null;
   private uniqueIndexes: IndexDef[];
+  private digestMap: Map<number, string> = new Map();
 
   constructor(option: ContextManagerConfigDef) {
     super(option);
@@ -833,6 +841,10 @@ export class ContextManager extends ServiceEngine {
 
   getMountHandle(): string | undefined {
     return this.mountHandle;
+  }
+
+  getDigestMap() {
+    return this.digestMap;
   }
 
   start(node: ResourceNode): Promise<void> {
