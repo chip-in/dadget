@@ -75,11 +75,27 @@ export class Maintenance {
       });
   }
 
-  private static async uploadStream(rl: readline.ReadLine, dadget: Dadget, type: TransactionType, idName: string, atomicId: string) {
+  private static async readAllLines(fileName: string) {
+    const rl = readline.createInterface({
+      input: fs.createReadStream(fileName, { encoding: 'utf8' }),
+      crlfDelay: Infinity
+    });
+    const lines: string[] = [];
+    rl.on('line', (input: string) => { lines.push(input) });
+    return new Promise<string[]>((resolve, reject) => {
+      rl.on('close', () => resolve(lines));
+    });
+  }
+
+  private static async uploadStream(promise: Promise<string[]>, dadget: Dadget, type: TransactionType, idName: string, atomicId: string) {
     let list: TransactionRequest[] = [];
     let listSize = 0;
-    for await (const line of rl) {
+    const lines = await promise;
+    for (const line of lines) {
       const data = EJSON.parse(line);
+      if (!data.hasOwnProperty(idName)) {
+        throw new Error("data has no " + idName + " property.");
+      }
       const target = data[idName];
       delete data._id;
       delete data.csn;
@@ -98,13 +114,10 @@ export class Maintenance {
   }
 
   static import(dadget: Dadget, fileName: string, idName: string): Promise<void> {
-    const rl = readline.createInterface({
-      input: fs.createReadStream(fileName, { encoding: 'utf8' }),
-      crlfDelay: Infinity
-    });
+    const lines = Maintenance.readAllLines(fileName);
     const atomicId = Dadget.uuidGen();
     return dadget._exec(0, { type: TransactionType.BEGIN_IMPORT, target: "" }, atomicId)
-      .then(() => Maintenance.uploadStream(rl, dadget, TransactionType.INSERT, idName, atomicId))
+      .then(() => Maintenance.uploadStream(lines, dadget, TransactionType.INSERT, idName, atomicId))
       .catch((reason) => {
         return dadget._exec(0, { type: TransactionType.ABORT_IMPORT, target: "" }, atomicId)
           .then(() => { throw reason; });
@@ -114,14 +127,11 @@ export class Maintenance {
   }
 
   static restore(dadget: Dadget, fileName: string): Promise<void> {
-    const rl = readline.createInterface({
-      input: fs.createReadStream(fileName, { encoding: 'utf8' }),
-      crlfDelay: Infinity
-    });
+    const lines = Maintenance.readAllLines(fileName);
     const atomicId = Dadget.uuidGen();
     return dadget._exec(0, { type: TransactionType.BEGIN_RESTORE, target: "" }, atomicId)
       .then(() => dadget._exec(0, { type: TransactionType.TRUNCATE, target: "" }, atomicId))
-      .then(() => Maintenance.uploadStream(rl, dadget, TransactionType.RESTORE, "_id", atomicId))
+      .then(() => Maintenance.uploadStream(lines, dadget, TransactionType.RESTORE, "_id", atomicId))
       .catch((reason) => {
         return dadget._exec(0, { type: TransactionType.ABORT_RESTORE, target: "" }, atomicId)
           .then(() => { throw reason; });

@@ -152,7 +152,10 @@ export class PersistentDb implements IDb {
   }
 
   deleteAll(): Promise<void> {
-    return this.db.collection(this.collection).drop();
+    return this.db.collection(this.collection).deleteMany({})
+      .then((result) => {
+        if (!result.result.ok) { throw new Error("failed to delete: " + JSON.stringify(result)); }
+      });
   }
 
   private createIndexes(): Promise<void> {

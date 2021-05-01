@@ -33,7 +33,7 @@ export class IndexDef {
   /**
    * インデックスの属性を指定する。その仕様はmongo db の createIndex の第二引数に準じる
    */
-  property?: { unique: boolean };
+  property?: { unique?: boolean };
 }
 
 /**

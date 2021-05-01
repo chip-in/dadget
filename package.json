@@ -58,7 +58,7 @@
     "@types/object-hash": "0.5.29",
     "@types/rwlock": "^5.0.2",
     "@types/uuid": "^3.4.2",
-    "babel-cli": "^6.24.1",
+    "babel-cli": "^6.26.0",
     "babel-plugin-transform-remove-console": "^6.9.0",
     "babel-preset-env": "^1.6.1",
     "browserify": "^16.1.1",

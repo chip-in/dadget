@@ -22,7 +22,7 @@ export class PersistentDb implements IDb {
 
   public static getAllStorage(): Promise<string[]> {
     const dbList: string[] = [];
-    return new Promise((resolve, reject) => {
+    return new Promise<void>((resolve, reject) => {
       const dadgetSchema = PersistentDb.openDadgetSchema(reject);
       dadgetSchema.onsuccess = (event) => {
         const schemaDb = (event.target as IDBRequest).result as IDBDatabase;
