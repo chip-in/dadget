@@ -580,12 +580,22 @@ class ContextManagementServer extends Proxy {
         if (transaction.digest) this.context.getDigestMap().set(transaction.csn, transaction.digest);
         this.context.getJournalDb().setCheckCsnByTransaction(transaction);
         this.pubDataList.push(pubData);
-        this.context.getLock().acquire(PUBLISH_LOCK, () => {
-          const pubData = this.pubDataList.shift();
-          if (!pubData) { return; }
-          return this.context.getNode().publish(
-            CORE_NODE.PATH_TRANSACTION.replace(/:database\b/g, this.context.getDatabase()), pubData);
-        });
+        if (!this.context.getLock().isBusy(PUBLISH_LOCK)) {
+          this.context.getLock().acquire(PUBLISH_LOCK, () => {
+            return Util.promiseWhile<string[]>(
+              this.pubDataList,
+              (data) => {
+                return data.length !== 0;
+              },
+              (data) => {
+                const pubData = data.shift();
+                if (!pubData) { throw new Error("empty data error"); }
+                return this.context.getNode().publish(
+                  CORE_NODE.PATH_TRANSACTION.replace(/:database\b/g, this.context.getDatabase()), pubData)
+                  .then(() => this.pubDataList);
+              });
+          });
+        }
         return { transaction, newCsn, updateObject };
       });
   }
