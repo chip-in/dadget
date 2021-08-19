@@ -410,10 +410,16 @@ class ContextManagementServer extends Proxy {
               })
               .catch((reason) => {
                 return this.procTransaction(0, { type: TransactionType.ABORT, target: "" }, atomicId)
+                  .then(({ newCsn }) => {
+                    _newCsn = newCsn;
+                  })
                   .then(() => { throw reason; });
               })
               .then(() => {
-                this.procTransaction(0, { type: TransactionType.END, target: "" }, atomicId);
+                return this.procTransaction(0, { type: TransactionType.END, target: "" }, atomicId)
+                  .then(({ newCsn }) => {
+                    _newCsn = newCsn;
+                  });
               });
           }
         }).then(() => {
@@ -431,6 +437,7 @@ class ContextManagementServer extends Proxy {
           this.logger.warn(LOG_MESSAGES.ERROR_CAUSE, [cause.toString()]);
           resolve({
             status: "NG",
+            csn: _newCsn,
             reason: cause,
           });
         });
@@ -452,6 +459,7 @@ class ContextManagementServer extends Proxy {
         }
 
         let _newCsn: number;
+        let count = 0;
         return this.context.getLock().acquire(TRANSACTION_LOCK, () => {
           return this.context.getSystemDb().getCsn()
             .then((currentCsn) => {
@@ -474,6 +482,7 @@ class ContextManagementServer extends Proxy {
                             request.target = (obj as any)._id;
                             request.before = obj;
                             request.operator = operator;
+                            count++;
                             return this.procTransaction(0, request, atomicId)
                               .then(({ newCsn }) => {
                                 _newCsn = newCsn;
@@ -485,6 +494,7 @@ class ContextManagementServer extends Proxy {
                     atomicId = Dadget.uuidGen();
                     return this.procTransaction(0, { type: TransactionType.BEGIN, target: "" }, atomicId)
                       .then(({ newCsn }) => {
+                        _newCsn = newCsn;
                         return Util.promiseEach<object>(
                           result.resultSet,
                           (row) => {
@@ -499,6 +509,7 @@ class ContextManagementServer extends Proxy {
                                 request.target = (obj as any)._id;
                                 request.before = obj;
                                 request.operator = operator;
+                                count++;
                                 return this.procTransaction(0, request, atomicId)
                                   .then(({ newCsn }) => {
                                     _newCsn = newCsn;
@@ -509,10 +520,16 @@ class ContextManagementServer extends Proxy {
                       })
                       .catch((reason) => {
                         return this.procTransaction(0, { type: TransactionType.ABORT, target: "" }, atomicId)
+                          .then(({ newCsn }) => {
+                            _newCsn = newCsn;
+                          })
                           .then(() => { throw reason; });
                       })
                       .then(() => {
-                        this.procTransaction(0, { type: TransactionType.END, target: "" }, atomicId);
+                        return this.procTransaction(0, { type: TransactionType.END, target: "" }, atomicId)
+                          .then(({ newCsn }) => {
+                            _newCsn = newCsn;
+                          });
                       });
                   }
                 });
@@ -524,6 +541,7 @@ class ContextManagementServer extends Proxy {
           resolve({
             status: "OK",
             csn: _newCsn,
+            count,
           });
         }, (reason) => {
           let cause = reason instanceof DadgetError ? reason : new DadgetError(ERROR.E2003, [reason]);
@@ -532,6 +550,7 @@ class ContextManagementServer extends Proxy {
           this.logger.warn(LOG_MESSAGES.ERROR_CAUSE, [cause.toString()]);
           resolve({
             status: "NG",
+            csn: _newCsn,
             reason: cause,
           });
         });

@@ -205,13 +205,23 @@ class UpdateProcessor extends Subscriber {
             return this.resetData(committedCsn, false);
           });
       });
+    } else if (type === TransactionType.FORCE_ROLLBACK) {
+      const committedCsn = transaction.csn;
+      promise = promise.then(() => {
+        if (committedCsn === 0) { return this.resetData0() }
+        return this.rollbackSubsetDb(committedCsn, true)
+          .catch((e) => {
+            this.logger.warn(LOG_MESSAGES.ERROR_MSG, [e.toString()]);
+            return this.resetData(committedCsn, true);
+          });
+      });
     } else if (type === TransactionType.BEGIN_RESTORE) {
       promise = promise.then(() => this.storage.getJournalDb().setProtectedCsn(transaction.csn));
       promise = promise.then(() => { this.storage.committedCsn = transaction.committedCsn; });
     } else if (type === TransactionType.END_RESTORE || type === TransactionType.ABORT_RESTORE) {
       promise = promise.then(() => { this.storage.committedCsn = undefined; });
     } else if (type !== TransactionType.NONE) {
-      throw new Error("Unsupported type: " + type);
+      promise = promise.then(() => { throw new Error("Unsupported type: " + type); });
     }
     promise = promise.catch((e) => this.logger.warn(LOG_MESSAGES.UPDATE_SUBSET_ERROR, [e.toString()]));
     promise = promise.then(() => this.storage.getJournalDb().insert(transaction));

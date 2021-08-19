@@ -104,7 +104,7 @@ export class Util {
           const reason = result.reason as DadgetError;
           throw new DadgetError({ code: reason.code, message: reason.message }, reason.inserts, reason.ns);
         } else {
-          throw JSON.stringify(result);
+          throw new Error(JSON.stringify(result));
         }
       });
   }

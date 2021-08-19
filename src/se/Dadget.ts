@@ -473,7 +473,7 @@ export default class Dadget extends ServiceEngine {
           const reason = result.reason as DadgetError;
           throw new DadgetError({ code: reason.code, message: reason.message }, reason.inserts, reason.ns);
         } else {
-          throw JSON.stringify(result);
+          throw new Error(JSON.stringify(result));
         }
       })
       .catch((reason) => {
@@ -518,10 +518,11 @@ export default class Dadget extends ServiceEngine {
         if (result.status === "OK") {
           this.latestCsn = result.csn;
         } else if (result.reason) {
+          if (result.csn) this.latestCsn = result.csn;
           const reason = result.reason as DadgetError;
           throw new DadgetError({ code: reason.code, message: reason.message }, reason.inserts, reason.ns);
         } else {
-          throw JSON.stringify(result);
+          throw new Error(JSON.stringify(result));
         }
       })
       .catch((reason) => {
@@ -535,12 +536,13 @@ export default class Dadget extends ServiceEngine {
    *
    * @param query mongoDBと同じクエリーオブジェクト
    * @param operator 更新内容を記述するオペレータ。意味はmongoDB に準ずる。
+   * @return 変更された行数
    */
-   updateMany(query: object, operator: object): Promise<string[]> {
+  updateMany(query: object, operator: object): Promise<number> {
     return this._updateMany(query, operator, undefined);
   }
 
-  _updateMany(query: object, operator: object, atomicId: string | undefined): Promise<string[]> {
+  _updateMany(query: object, operator: object, atomicId: string | undefined): Promise<number> {
     const sendData = { query, operator, atomicId };
     return this.node.fetch(CORE_NODE.PATH_CONTEXT.replace(/:database\b/g, this.database) + CORE_NODE.PATH_UPDATE_MANY, {
       method: "POST",
@@ -557,12 +559,13 @@ export default class Dadget extends ServiceEngine {
         const result = EJSON.deserialize(_);
         if (result.status === "OK") {
           this.latestCsn = result.csn;
-          return result.ids;
+          return result.count;
         } else if (result.reason) {
+          if (result.csn) this.latestCsn = result.csn;
           const reason = result.reason as DadgetError;
           throw new DadgetError({ code: reason.code, message: reason.message }, reason.inserts, reason.ns);
         } else {
-          throw JSON.stringify(result);
+          throw new Error(JSON.stringify(result));
         }
       })
       .catch((reason) => {
@@ -576,7 +579,7 @@ export default class Dadget extends ServiceEngine {
    *
    * @param force trueの場合、csnを0に戻しジャーナルも削除する
    */
-   clear(force?: boolean): Promise<object> {
+  clear(force?: boolean): Promise<object> {
     const request = new TransactionRequest();
     request.type = force ? TransactionType.FORCE_ROLLBACK : TransactionType.TRUNCATE;
     request.target = "";
@@ -782,7 +785,7 @@ class DadgetTr {
     return this.dadget._execMany(csn, requests, this.atomicId);
   }
 
-  updateMany(query: object, operator: object): Promise<string[]> {
+  updateMany(query: object, operator: object): Promise<number> {
     if (this.fixFlag) { return Promise.reject(new DadgetError(ERROR.E2107)); }
     return this.dadget._updateMany(query, operator, this.atomicId);
   }
