@@ -20,14 +20,14 @@ export class PersistentDb implements IDb {
   }
 
   public static getAllStorage(): Promise<string[]> {
-    return MongoClient.connect(Mongo.getUrl())
-      .then((db) => db.admin().listDatabases())
+    return MongoClient.connect(Mongo.getUrl(), Mongo.getOption())
+      .then((client) => client.db().admin().listDatabases())
       .then((list) => list.databases.map((_: { name: string; }) => _.name));
   }
 
   public static deleteStorage(name: string) {
-    return MongoClient.connect(Mongo.getUrl() + name)
-      .then((db) => db.dropDatabase());
+    return MongoClient.connect(Mongo.getUrl(), Mongo.getOption())
+      .then((client) => client.db(name).dropDatabase());
   }
 
   constructor(protected database: string) {
@@ -44,30 +44,16 @@ export class PersistentDb implements IDb {
 
   start(): Promise<void> {
     if (!PersistentDb.dbMap[this.database]) {
-      return MongoClient.connect(Mongo.getUrl() + this.database)
-        .then((_) => this.renameOldName(_))
-        .then((_) => {
-          this.db = _;
-          PersistentDb.dbMap[this.database] = _;
+      return MongoClient.connect(Mongo.getUrl(), Mongo.getOption())
+        .then((client) => {
+          this.db = client.db(this.database);
+          PersistentDb.dbMap[this.database] = this.db;
           return this.createIndexes();
         });
     } else {
       this.db = PersistentDb.dbMap[this.database];
-      return this.renameOldName(this.db)
-        .then(() => this.createIndexes());
+      return this.createIndexes();
     }
-  }
-
-  renameOldName(db: Db): Promise<Db> {
-    const oldName = "__" + this.collection + "__";
-    return db.collection(oldName).count({})
-      .then((count) => {
-        if (count > 0) {
-          return db.renameCollection(oldName, this.collection)
-            .then(() => db);
-        }
-        return db;
-      });
   }
 
   findOne(query: object): Promise<object | null> {
@@ -91,7 +77,7 @@ export class PersistentDb implements IDb {
   }
 
   count(query: object): Promise<number> {
-    return this.db.collection(this.collection).count(PersistentDb.convertQuery(query));
+    return this.db.collection(this.collection).countDocuments(PersistentDb.convertQuery(query));
   }
 
   insertOne(doc: object): Promise<void> {
@@ -162,10 +148,7 @@ export class PersistentDb implements IDb {
     if (!this.indexMap) { return Promise.resolve(); }
     const indexMap = this.indexMap;
     const indexNameList: { [name: string]: any } = {};
-    return this.db.createCollection(this.collection)
-      .then((_) => {
-        return this.db.collection(this.collection).indexes();
-      })
+    return this.db.collection(this.collection).indexes()
       .then((indexes) => {
         // インデックスの削除
         const indexPromisies: Promise<any>[] = [];

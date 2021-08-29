@@ -40,7 +40,7 @@
     "deep-diff": "^0.3.8",
     "deep-equal": "^1.0.1",
     "mongo-parse": "^2.0.3",
-    "mongodb": "^2.2.34",
+    "mongodb": "^3.6.11",
     "object-hash": "1.1.8",
     "rwlock": "^5.0.0",
     "uuid": "^3.1.0"
@@ -53,7 +53,7 @@
     "@types/command-line-usage": "^5.0.1",
     "@types/deep-diff": "0.0.31",
     "@types/deep-equal": "^1.0.1",
-    "@types/mongodb": "^2.2.19",
+    "@types/mongodb": "^3.6.20",
     "@types/node": "^14.14.41",
     "@types/object-hash": "0.5.29",
     "@types/rwlock": "^5.0.2",

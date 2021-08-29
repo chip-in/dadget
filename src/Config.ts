@@ -1,9 +1,97 @@
+import { MongoClientOptions } from "mongodb";
 
 export class Mongo {
+  static option: MongoClientOptions;
+
   static getUrl() {
-    let url = (process.env.MONGODB_URL ? process.env.MONGODB_URL : "mongodb://localhost:27017/") as string;
-    if (url.slice(-1) !== "/") { url += "/"; }
-    return url;
+    return (process.env.MONGODB_URL ? process.env.MONGODB_URL : "mongodb://localhost:27017/") as string;
+  }
+
+  static getOption(): MongoClientOptions {
+    if (Mongo.option) return Mongo.option;
+    const option: any = { useUnifiedTopology: true };
+    const env = process.env;
+    const intList = [
+      "poolSize",
+      "keepAlive",
+      "connectTimeoutMS",
+      "socketTimeoutMS",
+      "reconnectTries",
+      "reconnectInterval",
+      "haInterval",
+      "secondaryAcceptableLatencyMS",
+      "acceptableLatencyMS",
+      "w",
+      "wtimeout",
+      "bufferMaxEntries",
+      "maxStalenessSeconds",
+    ];
+    const boolList = [
+      "ssl",
+      "sslValidate",
+      "tls",
+      "tlsInsecure",
+      "autoReconnect",
+      "noDelay",
+      "ha",
+      "connectWithNoPrimary",
+      "j",
+      "forceServerObjectId",
+      "serializeFunctions",
+      "ignoreUndefined",
+      "raw",
+      "promoteLongs",
+      "promoteBuffers",
+      "promoteValues",
+      "domainsEnabled",
+    ];
+    const strList = [
+      "sslCert",
+      "sslKey",
+      "sslPass",
+      "tlsCAFile",
+      "tlsCertificateKeyFile",
+      "tlsCertificateKeyFilePassword",
+      "replicaSet",
+      "authSource",
+      "w",
+      "appname",
+      "loggerLevel",
+    ];
+    block: for (const key of Object.keys(env)) {
+      if (key !== "MONGODB_URL" && key.startsWith("MONGODB_")) {
+        const val: any = env[key];
+        const lKey = key.substring("MONGODB_".length).replace('_', '').toLowerCase();
+        for (const name of intList) {
+          if (lKey === name.toLowerCase()) {
+            const v = parseInt(val, 10);
+            if (!isNaN(v)) {
+              option[name] = v;
+              continue block;
+            }
+          }
+        }
+        for (const name of boolList) {
+          if (lKey === name.toLowerCase()) {
+            const v = parseInt(val, 10);
+            option[name] = val.toLowerCase() === "true";
+            continue block;
+          }
+        }
+        for (const name of strList) {
+          if (lKey === name.toLowerCase()) {
+            option[name] = val;
+            continue block;
+          }
+        }
+        if (lKey === "sslca") {
+          option.sslCA = [val];
+          continue block;
+        }
+      }
+    }
+    Mongo.option = option;
+    return option;
   }
 }
 

@@ -15,22 +15,21 @@ const MAX_UPLOAD_BYTES = 10 * 1024 * 1024;
 export class Maintenance {
   static reset(target: string): void {
     console.info("reset DB:", target);
-    let db: Db;
-    const dbUrl = Mongo.getUrl() + target;
-    MongoClient.connect(dbUrl)
+    let client: MongoClient;
+    MongoClient.connect(Mongo.getUrl(), Mongo.getOption())
       .then((_) => {
-        db = _;
-        return db.admin().listDatabases();
+        client = _;
+        return client.db().admin().listDatabases();
       }).then((dbs) => {
         let promise = Promise.resolve();
         for (const curDb of dbs.databases) {
           if (curDb.name === target || curDb.name.startsWith(target + "--")) {
             console.info(curDb.name);
-            const targetDb = db.db(curDb.name);
+            const targetDb = client.db(curDb.name);
             promise = promise.then(() => targetDb.dropDatabase());
           }
         }
-        promise.then(() => db.close());
+        promise.then(() => client.close());
       });
   }
 
