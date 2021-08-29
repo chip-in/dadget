@@ -976,9 +976,12 @@ export class ContextManager extends ServiceEngine {
                   transaction.csn = csn;
                   transaction.type = TransactionType.FORCE_ROLLBACK;
                   // As this is a master, other replications must be rollback.
-                  return this.getNode().publish(
+                  this.getNode().publish(
                     CORE_NODE.PATH_TRANSACTION.replace(/:database\b/g, this.getDatabase())
-                    , EJSON.stringify(transaction));
+                    , EJSON.stringify(transaction)
+                  ).catch((err) => {
+                    this.logger.error(LOG_MESSAGES.ERROR_MSG, [err.toString()]);
+                  });
                 });
             })
             .then(() => {
