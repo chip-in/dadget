@@ -24,7 +24,7 @@ export class PersistentDb implements IDb {
   private static errorExit(error: any): any {
     const logger = Logger.getLoggerWoDB("PersistentDb");
     logger.error(LOG_MESSAGES.ERROR_MSG, [error.toString()]);
-    process.exit(0);
+    process.exit(1);
   }
 
   public static getAllStorage(): Promise<string[]> {
