@@ -60,7 +60,7 @@ class UpdateProcessor extends Subscriber {
         this.storage.getJournalDb().setProtectedCsn(transaction.protectedCsn);
         this.storage.getJournalDb().deleteBeforeCsn(transaction.protectedCsn)
           .catch((err) => {
-            this.logger.error(LOG_MESSAGES.ERROR_MSG, [err.toString()]);
+            this.logger.error(LOG_MESSAGES.ERROR_MSG, [err.toString()], [200]);
           });
       }
     }
@@ -110,7 +110,7 @@ class UpdateProcessor extends Subscriber {
                   if (transaction.csn === 0 || !fetchJournal) { return this.resetData(transaction.csn, true) }
                   return this.rollbackSubsetDb(transaction.csn, true)
                     .catch((e) => {
-                      this.logger.warn(LOG_MESSAGES.ERROR_MSG, [e.toString()]);
+                      this.logger.warn(LOG_MESSAGES.ERROR_MSG, [e.toString()], [201]);
                       return this.resetData(transaction.csn, true);
                     });
                 })
@@ -152,7 +152,7 @@ class UpdateProcessor extends Subscriber {
             }
           })
           .catch((e) => {
-            this.logger.error(LOG_MESSAGES.ERROR_MSG, [e.toString()]);
+            this.logger.error(LOG_MESSAGES.ERROR_MSG, [e.toString()], [202]);
             release2();
             release1();
           });
@@ -201,7 +201,7 @@ class UpdateProcessor extends Subscriber {
       promise = promise.then(() => {
         return this.rollbackSubsetDb(committedCsn, false)
           .catch((e) => {
-            this.logger.warn(LOG_MESSAGES.ERROR_MSG, [e.toString()]);
+            this.logger.warn(LOG_MESSAGES.ERROR_MSG, [e.toString()], [203]);
             return this.resetData(committedCsn, false);
           });
       });
@@ -211,7 +211,7 @@ class UpdateProcessor extends Subscriber {
         if (committedCsn === 0) { return this.resetData0() }
         return this.rollbackSubsetDb(committedCsn, true)
           .catch((e) => {
-            this.logger.warn(LOG_MESSAGES.ERROR_MSG, [e.toString()]);
+            this.logger.warn(LOG_MESSAGES.ERROR_MSG, [e.toString()], [204]);
             return this.resetData(committedCsn, true);
           });
       });
@@ -371,7 +371,7 @@ class UpdateProcessor extends Subscriber {
                 });
             })
             .catch((e) => {
-              this.logger.warn(LOG_MESSAGES.ERROR_MSG, [e.toString()]);
+              this.logger.warn(LOG_MESSAGES.ERROR_MSG, [e.toString()], [205]);
               return this.resetData(csn, true);
             });
         }
@@ -429,7 +429,7 @@ class UpdateProcessor extends Subscriber {
           .then(() => { if (withJournal) { this.storage.setReady(subsetTransaction); } });
       })
       .catch((e) => {
-        this.logger.error(LOG_MESSAGES.ERROR_MSG, [e.toString()]);
+        this.logger.error(LOG_MESSAGES.ERROR_MSG, [e.toString()], [206]);
         throw e;
       });
   }
@@ -446,7 +446,7 @@ class UpdateProcessor extends Subscriber {
         this.storage.setReady();
       })
       .catch((e) => {
-        this.logger.error(LOG_MESSAGES.ERROR_MSG, [e.toString()]);
+        this.logger.error(LOG_MESSAGES.ERROR_MSG, [e.toString()], [207]);
         throw e;
       });
   }
@@ -1031,7 +1031,7 @@ export class SubsetStorage extends ServiceEngine implements Proxy {
           });
         }
       }).catch((e) => {
-        this.logger.warn(LOG_MESSAGES.ERROR_MSG, [e.toString()]);
+        this.logger.warn(LOG_MESSAGES.ERROR_MSG, [e.toString()], [208]);
         release();
         return Promise.reject(e);
       });
@@ -1116,7 +1116,7 @@ export class SubsetStorage extends ServiceEngine implements Proxy {
           });
         }
       }).catch((e) => {
-        this.logger.warn(LOG_MESSAGES.ERROR_MSG, [e.toString()]);
+        this.logger.warn(LOG_MESSAGES.ERROR_MSG, [e.toString()], [209]);
         release();
         return Promise.reject(e);
       });

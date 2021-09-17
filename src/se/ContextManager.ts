@@ -63,7 +63,7 @@ class TransactionJournalSubscriber extends Subscriber {
         setTimeout(() => {
           this.context.getJournalDb().deleteBeforeCsn(protectedCsn)
             .catch((err) => {
-              this.logger.error(LOG_MESSAGES.ERROR_MSG, [err.toString()]);
+              this.logger.error(LOG_MESSAGES.ERROR_MSG, [err.toString()], [100]);
             });
         });
       }
@@ -93,7 +93,7 @@ class TransactionJournalSubscriber extends Subscriber {
               .then(() => this.context.getJournalDb().retrieveCheckCsn());
           })
           .catch((err) => {
-            this.logger.error(LOG_MESSAGES.ERROR_MSG, [err.toString()]);
+            this.logger.error(LOG_MESSAGES.ERROR_MSG, [err.toString()], [101]);
           });
       } else {
         // Assume this node is a replication.
@@ -118,7 +118,7 @@ class TransactionJournalSubscriber extends Subscriber {
             }
           })
           .catch((err) => {
-            this.logger.error(LOG_MESSAGES.ERROR_MSG, [err.toString()]);
+            this.logger.error(LOG_MESSAGES.ERROR_MSG, [err.toString(), [102]]);
           });
       }
     });
@@ -165,7 +165,7 @@ class TransactionJournalSubscriber extends Subscriber {
       },
     )
       .catch((err) => {
-        this.logger.error(LOG_MESSAGES.ERROR_MSG, [err.toString()]);
+        this.logger.error(LOG_MESSAGES.ERROR_MSG, [err.toString()], [103]);
       });
   }
 }
@@ -765,7 +765,7 @@ class ContextManagementServer extends Proxy {
           this.context.getJournalDb().setProtectedCsn(protectedCsn);
           this.context.getJournalDb().deleteBeforeCsn(protectedCsn)
             .catch((err) => {
-              this.logger.error(LOG_MESSAGES.ERROR_MSG, [err.toString()]);
+              this.logger.error(LOG_MESSAGES.ERROR_MSG, [err.toString()], [104]);
             });
         });
     }, 60 * 1000);
@@ -980,7 +980,7 @@ export class ContextManager extends ServiceEngine {
                     CORE_NODE.PATH_TRANSACTION.replace(/:database\b/g, this.getDatabase())
                     , EJSON.stringify(transaction)
                   ).catch((err) => {
-                    this.logger.error(LOG_MESSAGES.ERROR_MSG, [err.toString()]);
+                    this.logger.error(LOG_MESSAGES.ERROR_MSG, [err.toString()], [105]);
                   });
                 });
             })
@@ -991,7 +991,7 @@ export class ContextManager extends ServiceEngine {
             });
         })
         .catch((err) => {
-          this.logger.error(LOG_MESSAGES.ERROR_MSG, [err.toString()]);
+          this.logger.error(LOG_MESSAGES.ERROR_MSG, [err.toString()], [106]);
           throw err;
         });
     });

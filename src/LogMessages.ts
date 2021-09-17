@@ -4,7 +4,7 @@ export const LOG_MESSAGES = {
   CREATED: { code: 1, msg: "%1 is created" },
   MSG_RECEIVED: { code: 2, msg: "msg received, type: %1, csn: %d1" },
   CHECKPOINT_RECEIVED: { code: 3, msg: "CHECKPOINT protectedCsn: %d1" },
-  ERROR_MSG: { code: 4, msg: "%1" },
+  ERROR_MSG: { code: 4, msg: "%1 (%d1)" },
   ABORT_IMPORT: { code: 5, msg: "ABORT_IMPORT csn: %d1" },
   ROLLBACK: { code: 6, msg: "ROLLBACK csn: %d1" },
   ADJUST_DATA: { code: 7, msg: "adjustData csn: %d1" },

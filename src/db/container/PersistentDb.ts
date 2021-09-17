@@ -21,9 +21,9 @@ export class PersistentDb implements IDb {
     return query;
   }
 
-  private static errorExit(error: any): any {
+  private static errorExit(error: any, num: number): any {
     const logger = Logger.getLoggerWoDB("PersistentDb");
-    logger.error(LOG_MESSAGES.ERROR_MSG, [error.toString()]);
+    logger.error(LOG_MESSAGES.ERROR_MSG, [error.toString()], [num]);
     process.exit(1);
   }
 
@@ -31,13 +31,13 @@ export class PersistentDb implements IDb {
     return MongoClient.connect(Mongo.getUrl(), Mongo.getOption())
       .then((client) => client.db().admin().listDatabases())
       .then((list) => list.databases.map((_: { name: string; }) => _.name))
-      .catch((error) => PersistentDb.errorExit(error));
+      .catch((error) => PersistentDb.errorExit(error, 1));
   }
 
   public static deleteStorage(name: string) {
     return MongoClient.connect(Mongo.getUrl(), Mongo.getOption())
       .then((client) => client.db(name).dropDatabase())
-      .catch((error) => PersistentDb.errorExit(error));
+      .catch((error) => PersistentDb.errorExit(error, 2));
   }
 
   constructor(protected database: string) {
@@ -60,7 +60,7 @@ export class PersistentDb implements IDb {
           PersistentDb.dbMap[this.database] = this.db;
           return this.createIndexes();
         })
-        .catch((error) => PersistentDb.errorExit(error));
+        .catch((error) => PersistentDb.errorExit(error, 3));
     } else {
       this.db = PersistentDb.dbMap[this.database];
       return this.createIndexes();
@@ -69,17 +69,17 @@ export class PersistentDb implements IDb {
 
   findOne(query: object): Promise<object | null> {
     return this.db.collection(this.collection).findOne(PersistentDb.convertQuery(query))
-      .catch((error) => PersistentDb.errorExit(error));
+      .catch((error) => PersistentDb.errorExit(error, 4));
   }
 
   findByRange(field: string, from: any, to: any, dir: number, projection?: object): Promise<any[]> {
     return this.find({ $and: [{ [field]: { $gte: from } }, { [field]: { $lte: to } }] }, { [field]: dir }, undefined, undefined, projection)
-      .catch((error) => PersistentDb.errorExit(error));
+      .catch((error) => PersistentDb.errorExit(error, 5));
   }
 
   findOneBySort(query: object, sort: object): Promise<any> {
     return this.db.collection(this.collection).find(PersistentDb.convertQuery(query)).sort(sort).limit(1).next()
-      .catch((error) => PersistentDb.errorExit(error));
+      .catch((error) => PersistentDb.errorExit(error, 6));
   }
 
   find(query: object, sort?: object, limit?: number, offset?: number, projection?: object): Promise<any[]> {
@@ -88,22 +88,22 @@ export class PersistentDb implements IDb {
     if (offset) { cursor = cursor.skip(offset); }
     if (limit) { cursor = cursor.limit(limit); }
     return cursor.toArray()
-      .catch((error) => PersistentDb.errorExit(error));
+      .catch((error) => PersistentDb.errorExit(error, 7));
   }
 
   count(query: object): Promise<number> {
     return this.db.collection(this.collection).countDocuments(PersistentDb.convertQuery(query))
-      .catch((error) => PersistentDb.errorExit(error));
+      .catch((error) => PersistentDb.errorExit(error, 8));
   }
 
   insertOne(doc: object): Promise<void> {
     return this.db.collection(this.collection).insertOne(doc).then(() => { })
-      .catch((error) => PersistentDb.errorExit(error));
+      .catch((error) => PersistentDb.errorExit(error, 9));
   }
 
   insertMany(docs: object[]): Promise<void> {
     return this.db.collection(this.collection).insertMany(docs).then(() => { })
-      .catch((error) => PersistentDb.errorExit(error));
+      .catch((error) => PersistentDb.errorExit(error, 10));
   }
 
   increment(id: string, field: string): Promise<number> {
@@ -116,7 +116,7 @@ export class PersistentDb implements IDb {
           return Promise.reject(result.lastErrorObject.toString());
         }
       })
-      .catch((error) => PersistentDb.errorExit(error));
+      .catch((error) => PersistentDb.errorExit(error, 11));
   }
 
   updateOneById(id: string, update: object): Promise<void> {
@@ -124,7 +124,7 @@ export class PersistentDb implements IDb {
       .then((result) => {
         if (!result.result.ok || result.result.n !== 1) { throw new Error("failed to update: " + JSON.stringify(result)); }
       })
-      .catch((error) => PersistentDb.errorExit(error));
+      .catch((error) => PersistentDb.errorExit(error, 12));
   }
 
   updateOne(filter: object, update: object): Promise<void> {
@@ -132,7 +132,7 @@ export class PersistentDb implements IDb {
       .then((result) => {
         if (!result.result.ok || result.result.n !== 1) { throw new Error("failed to update: " + JSON.stringify(result)); }
       })
-      .catch((error) => PersistentDb.errorExit(error));
+      .catch((error) => PersistentDb.errorExit(error, 13));
   }
 
   replaceOneById(id: string, doc: object): Promise<void> {
@@ -141,7 +141,7 @@ export class PersistentDb implements IDb {
       .then((result) => {
         if (!result.result.ok || result.result.n !== 1) { throw new Error("failed to replace: " + JSON.stringify(result)); }
       })
-      .catch((error) => PersistentDb.errorExit(error));
+      .catch((error) => PersistentDb.errorExit(error, 14));
   }
 
   deleteOneById(id: string): Promise<void> {
@@ -149,7 +149,7 @@ export class PersistentDb implements IDb {
       .then((result) => {
         if (!result.result.ok) { throw new Error("failed to delete: " + JSON.stringify(result)); }
       })
-      .catch((error) => PersistentDb.errorExit(error));
+      .catch((error) => PersistentDb.errorExit(error, 15));
   }
 
   deleteByRange(field: string, from: any, to: any): Promise<void> {
@@ -158,7 +158,7 @@ export class PersistentDb implements IDb {
       .then((result) => {
         if (!result.result.ok) { throw new Error("failed to delete: " + JSON.stringify(result)); }
       })
-      .catch((error) => PersistentDb.errorExit(error));
+      .catch((error) => PersistentDb.errorExit(error, 16));
   }
 
   deleteAll(): Promise<void> {
@@ -166,38 +166,47 @@ export class PersistentDb implements IDb {
       .then((result) => {
         if (!result.result.ok) { throw new Error("failed to delete: " + JSON.stringify(result)); }
       })
-      .catch((error) => PersistentDb.errorExit(error));
+      .catch((error) => PersistentDb.errorExit(error, 17));
   }
 
   private createIndexes(): Promise<void> {
     if (!this.indexMap) { return Promise.resolve(); }
     const indexMap = this.indexMap;
     const indexNameList: { [name: string]: any } = {};
-    return this.db.collection(this.collection).indexes()
+    return this.db.collections()
+      .then((collections) => {
+        for (const collection of collections) {
+          if (collection.collectionName === this.collection) {
+            return collection;
+          }
+        }
+        return this.db.createCollection(this.collection);
+      })
+      .then((collection) => collection.indexes())
       .then((indexes) => {
         // インデックスの削除
-        const indexPromisies: Promise<any>[] = [];
+        const indexPromises: Promise<any>[] = [];
         for (const index of indexes) {
           if (index.name !== "_id_" && !indexMap[index.name]) {
-            indexPromisies.push(this.db.collection(this.collection).dropIndex(index.name));
+            indexPromises.push(this.db.collection(this.collection).dropIndex(index.name));
           }
           indexNameList[index.name] = true;
         }
-        return Promise.all(indexPromisies);
+        return Promise.all(indexPromises);
       })
       .then(() => {
         // インデックスの追加
-        const indexPromisies: Promise<any>[] = [];
+        const indexPromises: Promise<any>[] = [];
         for (const indexName in indexMap) {
           if (!indexNameList[indexName]) {
             const fields = indexMap[indexName].index;
             const options: { [key: string]: any } = indexMap[indexName].property ? { ...indexMap[indexName].property } : {};
             options.name = indexName;
-            indexPromisies.push(this.db.collection(this.collection).createIndex(fields, options));
+            indexPromises.push(this.db.collection(this.collection).createIndex(fields, options));
           }
         }
-        return Promise.all(indexPromisies).then(() => { });
+        return Promise.all(indexPromises).then(() => { });
       })
-      .catch((error) => PersistentDb.errorExit(error));
+      .catch((error) => PersistentDb.errorExit(error, 18));
   }
 }
