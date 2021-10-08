@@ -83,7 +83,7 @@ export class PersistentDb implements IDb {
   }
 
   find(query: object, sort?: object, limit?: number, offset?: number, projection?: object): Promise<any[]> {
-    let cursor = this.db.collection(this.collection).find(PersistentDb.convertQuery(query), projection)
+    let cursor = this.db.collection(this.collection).find(PersistentDb.convertQuery(query), { projection })
     if (sort) { cursor = cursor.sort(sort); }
     if (offset) { cursor = cursor.skip(offset); }
     if (limit) { cursor = cursor.limit(limit); }

@@ -95,7 +95,7 @@ export class ProxyHelper {
 
   static procOption(req: http.IncomingMessage, res: http.ServerResponse): Promise<http.ServerResponse> {
     const head: any = {
-      "Access-Control-Allow-Headers": "Content-Type",
+      "Access-Control-Allow-Headers": "Content-Type, authorization",
       "Access-Control-Allow-Methods": "POST, GET, OPTIONS",
     };
     const allowOrigin = getAccessControlAllowOrigin(req.headers.origin as string);
