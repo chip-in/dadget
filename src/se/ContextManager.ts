@@ -596,7 +596,9 @@ class ContextManagementServer extends Proxy {
           ]));
       })
       .then(([a, b, pubData]) => {
-        if (transaction.digest) this.context.getDigestMap().set(transaction.csn, transaction.digest);
+        if (request.type !== TransactionType.FORCE_ROLLBACK && transaction.digest) {
+          this.context.getDigestMap().set(transaction.csn, transaction.digest);
+        }
         this.context.getJournalDb().setCheckCsnByTransaction(transaction);
         this.pubDataList.push(pubData);
         if (!this.context.getLock().isBusy(PUBLISH_LOCK)) {
