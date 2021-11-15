@@ -7,3 +7,4 @@ npm-debug.log
 /docs
 examples/*/lib
 examples/*/node_modules
+.dccache
