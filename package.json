@@ -30,13 +30,14 @@
     "browser-test": "cd browser-test && browserify src/indexeddb-test.js -o dest/test.js && cp src/index.html dest/ && http-server dest -c-1"
   },
   "dependencies": {
-    "@babel/polyfill": "^7.12.1",
     "@chip-in/logger": "*",
     "@chip-in/resource-node": "*",
     "async-lock": "^1.3.0",
+    "babel-plugin-transform-remove-console": "^6.9.4",
     "bson": "^4.2.0",
     "command-line-args": "^5.1.1",
     "command-line-usage": "^6.1.0",
+    "core-js": "3",
     "deep-diff": "^0.3.8",
     "deep-equal": "^1.0.1",
     "mongo-parse": "^2.0.3",
@@ -46,6 +47,9 @@
     "uuid": "^3.1.0"
   },
   "devDependencies": {
+    "@babel/cli": "^7.16.0",
+    "@babel/core": "^7.16.0",
+    "@babel/preset-env": "^7.16.0",
     "@types/async-lock": "^1.1.3",
     "@types/bson": "^4.0.3",
     "@types/byline": "^4.2.32",
@@ -58,9 +62,6 @@
     "@types/object-hash": "0.5.29",
     "@types/rwlock": "^5.0.2",
     "@types/uuid": "^3.4.2",
-    "babel-cli": "^6.26.0",
-    "babel-plugin-transform-remove-console": "^6.9.0",
-    "babel-preset-env": "^1.6.1",
     "browserify": "^16.1.1",
     "chai": "^4.1.2",
     "http-server": "^0.11.1",
