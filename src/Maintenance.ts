@@ -1,4 +1,3 @@
-import "@babel/polyfill";
 import * as readline from "readline";
 import * as fs from "fs";
 import { Db, MongoClient } from "mongodb";
@@ -140,7 +139,7 @@ export class Maintenance {
   }
 
   static clear(dadget: Dadget, force: boolean): Promise<void> {
-    return dadget.clear(force)
+    return dadget._clear(force)
       .then(() => { return; });
   }
 }

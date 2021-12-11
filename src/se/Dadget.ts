@@ -576,10 +576,12 @@ export default class Dadget extends ServiceEngine {
 
   /**
    * clearメソッドは全データの削除を実行する。
-   *
-   * @param force trueの場合、csnを0に戻しジャーナルも削除する
    */
-  clear(force?: boolean): Promise<object> {
+  clear(): Promise<object> {
+    return this._clear();
+  }
+
+  _clear(force?: boolean): Promise<object> {
     const request = new TransactionRequest();
     request.type = force ? TransactionType.FORCE_ROLLBACK : TransactionType.TRUNCATE;
     request.target = "";
