@@ -381,6 +381,7 @@ class UpdateProcessor extends Subscriber {
   private resetData(csn: number, withJournal: boolean): Promise<void> {
     if (csn === 0) { return this.resetData0(); }
     this.logger.warn(LOG_MESSAGES.RESET_DATA, [], [csn]);
+    this.storage.pause();
     const query = this.subsetDefinition.query ? this.subsetDefinition.query : {};
     return this.fetchJournal(csn)
       .then((fetchJournal) => {
@@ -436,6 +437,7 @@ class UpdateProcessor extends Subscriber {
 
   private resetData0(): Promise<void> {
     this.logger.warn(LOG_MESSAGES.RESET_DATA0);
+    this.storage.pause();
     return Promise.resolve()
       .then(() => this.storage.getJournalDb().deleteAll())
       .then(() => this.storage.getSubsetDb().deleteAll())
@@ -689,6 +691,7 @@ export class SubsetStorage extends ServiceEngine implements Proxy {
   private journalDb: JournalDb;
   private systemDb: SystemDb;
   private mountHandle: string;
+  private mounted = false;
   private lock: ReadWriteLock;
   private queryWaitingList: { [csn: number]: (() => Promise<any>)[] } = {};
   private subscriberKey: string | null;
@@ -748,6 +751,10 @@ export class SubsetStorage extends ServiceEngine implements Proxy {
     return this.readyFlag;
   }
 
+  pause(): void {
+    this.readyFlag = false;
+  }
+
   setReady(transaction?: TransactionObject): void {
     if (transaction) {
       this.committedCsn = transaction.committedCsn;
@@ -757,15 +764,18 @@ export class SubsetStorage extends ServiceEngine implements Proxy {
     }
     this.readyFlag = true;
 
-    // Rest サービスを登録する。
-    const mountingMode = this.option.exported ? "loadBalancing" : "localOnly";
-    this.logger.info(LOG_MESSAGES.MOUNTING_MODE, [mountingMode]);
-    this.node.mount(CORE_NODE.PATH_SUBSET
-      .replace(/:database\b/g, this.database)
-      .replace(/:subset\b/g, this.subsetName), mountingMode, this)
-      .then((value) => {
-        this.mountHandle = value;
-      });
+    if (!this.mounted) {
+      // Rest サービスを登録する。
+      this.mounted = true;
+      const mountingMode = this.option.exported ? "loadBalancing" : "localOnly";
+      this.logger.info(LOG_MESSAGES.MOUNTING_MODE, [mountingMode]);
+      this.node.mount(CORE_NODE.PATH_SUBSET
+        .replace(/:database\b/g, this.database)
+        .replace(/:subset\b/g, this.subsetName), mountingMode, this)
+        .then((value) => {
+          this.mountHandle = value;
+        });
+    }
   }
 
   pullQueryWaitingList(csn: number): (() => Promise<any>)[] {

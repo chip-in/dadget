@@ -634,7 +634,7 @@ export default class Dadget extends ServiceEngine {
       transaction.type === TransactionType.END_RESTORE) {
       this.lockNotify = false;
     }
-    if (this.lockNotify) { return; }
+    if (this.lockNotify || transaction.committedCsn !== undefined) { return; }
     if (transaction.type === TransactionType.FORCE_ROLLBACK) {
       this.notifyCsn = transaction.csn;
       this.latestCsn = transaction.csn;

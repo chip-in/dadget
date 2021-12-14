@@ -7,6 +7,7 @@ import { IDb } from "./container/IDb";
 
 const JOURNAL_COLLECTION = "journal";
 const RESET_CHECK_CSN_TYPES = [
+  TransactionType.FORCE_ROLLBACK,
   TransactionType.TRUNCATE,
   TransactionType.ABORT,
   TransactionType.ABORT_IMPORT,

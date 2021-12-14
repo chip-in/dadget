@@ -84,7 +84,7 @@ class TransactionJournalSubscriber extends Subscriber {
           .then((tr) => {
             return (transaction.csn > 0 ? this.context.getJournalDb().deleteAfterCsn(transaction.csn) : this.context.getJournalDb().deleteAll())
               .then(() => {
-                if (tr && tr.digest === transaction.digest) {
+                if (transaction.csn === 0 || tr && tr.digest === transaction.digest) {
                   return this.context.getSystemDb().updateCsn(transaction.csn);
                 } else {
                   return this.adjustData(transaction.csn);
@@ -192,7 +192,9 @@ class ContextManagementServer extends Proxy {
   private notifyAllWaitingList() {
     const queue = this.queueWaitingList;
     this.queueWaitingList = [];
-    for (const task of queue) { task(); }
+    setTimeout(() => {
+      for (const task of queue) { task(); }
+    }, 0);
   }
 
   /**
@@ -278,9 +280,31 @@ class ContextManagementServer extends Proxy {
       });
     }
 
+    if (request.type === TransactionType.CHECK) {
+      if (this.atomicLockId === atomicId) {
+        this.setTransactionTimeout();
+        return Promise.resolve({
+          status: "OK",
+        });
+      } else {
+        return Promise.resolve({
+          status: "NG",
+          reason: "transaction mismatch",
+        });
+      }
+    }
+
+    if (this.atomicLockId && this.atomicLockId !== atomicId) {
+      return new Promise<object>((resolve, reject) => {
+        this.queueWaitingList.push(() => {
+          this.exec(postulatedCsn, request, atomicId)
+            .then((result) => resolve(result)).catch((reason) => reject(reason));
+        });
+      });
+    }
+
     return new Promise((resolve, reject) => {
       this.context.getLock().acquire(MASTER_LOCK, () => {
-
         if (this.atomicLockId ? this.atomicLockId !== atomicId : atomicId) {
           if (request.type !== TransactionType.BEGIN &&
             request.type !== TransactionType.BEGIN_IMPORT &&
@@ -288,28 +312,6 @@ class ContextManagementServer extends Proxy {
             reject(new DadgetError(ERROR.E2009));
             return;
           }
-        }
-        if (request.type === TransactionType.CHECK) {
-          if (this.atomicLockId === atomicId) {
-            this.setTransactionTimeout();
-            resolve({
-              status: "OK",
-            });
-          } else {
-            resolve({
-              status: "NG",
-              reason: "transaction mismatch",
-            });
-          }
-          return;
-        }
-        if (this.atomicLockId && this.atomicLockId !== atomicId) {
-          return new Promise<object>((resolve, reject) => {
-            this.queueWaitingList.push(() => {
-              this.exec(postulatedCsn, request, atomicId)
-                .then((result) => resolve(result)).catch((reason) => reject(reason));
-            });
-          });
         }
 
         return this.context.getLock().acquire(TRANSACTION_LOCK, () => {
@@ -369,18 +371,17 @@ class ContextManagementServer extends Proxy {
       }
     }
 
+    if (this.atomicLockId && this.atomicLockId !== atomicId) {
+      return new Promise<object>((resolve, reject) => {
+        this.queueWaitingList.push(() => {
+          this.execMany(postulatedCsn, requests, atomicId)
+            .then((result) => resolve(result)).catch((reason) => reject(reason));
+        });
+      });
+    }
+
     return new Promise((resolve, reject) => {
       this.context.getLock().acquire(MASTER_LOCK, () => {
-
-        if (this.atomicLockId && this.atomicLockId !== atomicId) {
-          return new Promise<object>((resolve, reject) => {
-            this.queueWaitingList.push(() => {
-              this.execMany(postulatedCsn, requests, atomicId)
-                .then((result) => resolve(result)).catch((reason) => reject(reason));
-            });
-          });
-        }
-
         let _newCsn: number;
         return this.context.getLock().acquire(TRANSACTION_LOCK, () => {
           if (this.atomicLockId) {
@@ -446,18 +447,17 @@ class ContextManagementServer extends Proxy {
   }
 
   updateMany(query: object, operator: object, atomicId?: string): Promise<object> {
+    if (this.atomicLockId && this.atomicLockId !== atomicId) {
+      return new Promise<object>((resolve, reject) => {
+        this.queueWaitingList.push(() => {
+          this.updateMany(query, operator, atomicId)
+            .then((result) => resolve(result)).catch((reason) => reject(reason));
+        });
+      });
+    }
+
     return new Promise((resolve, reject) => {
       this.context.getLock().acquire(MASTER_LOCK, () => {
-
-        if (this.atomicLockId && this.atomicLockId !== atomicId) {
-          return new Promise<object>((resolve, reject) => {
-            this.queueWaitingList.push(() => {
-              this.updateMany(query, operator, atomicId)
-                .then((result) => resolve(result)).catch((reason) => reject(reason));
-            });
-          });
-        }
-
         let _newCsn: number;
         let count = 0;
         return this.context.getLock().acquire(TRANSACTION_LOCK, () => {
@@ -626,7 +626,8 @@ class ContextManagementServer extends Proxy {
     this.atomicTimer = setTimeout(() => {
       this.atomicTimer = undefined;
       this.logger.warn(LOG_MESSAGES.TRANSACTION_TIMEOUT);
-      this.procTransaction(0, { type: TransactionType.ABORT, target: "" }, this.atomicLockId);
+      this.procTransaction(0, { type: TransactionType.ABORT, target: "" }, this.atomicLockId)
+        .then(() => this.notifyAllWaitingList());
     }, ATOMIC_OPERATION_MAX_LOCK_TIME);
   }
 
@@ -966,7 +967,7 @@ export class ContextManager extends ServiceEngine {
                   const protectedCsn = this.getJournalDb().getProtectedCsn();
                   this.getJournalDb().setProtectedCsn(Math.min(protectedCsn, csn));
 
-                  if (tr && tr.committedCsn !== undefined) {
+                  if (tr && tr.committedCsn !== undefined && tr.type !== TransactionType.ABORT) {
                     csn = tr.committedCsn;
                   }
                   this.committedCsn = undefined;
