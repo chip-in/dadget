@@ -967,7 +967,10 @@ export class ContextManager extends ServiceEngine {
                   const protectedCsn = this.getJournalDb().getProtectedCsn();
                   this.getJournalDb().setProtectedCsn(Math.min(protectedCsn, csn));
 
-                  if (tr && tr.committedCsn !== undefined && tr.type !== TransactionType.ABORT) {
+                  if (tr && tr.committedCsn !== undefined && ![
+                    TransactionType.ABORT,
+                    TransactionType.ABORT_IMPORT,
+                    TransactionType.ABORT_RESTORE].includes(tr.type)) {
                     csn = tr.committedCsn;
                   }
                   this.committedCsn = undefined;
