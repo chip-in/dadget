@@ -2,7 +2,7 @@ import * as URL from "url";
 import * as EJSON from "../util/Ejson";
 
 import { ResourceNode, ServiceEngine } from "@chip-in/resource-node";
-import { CORE_NODE } from "../Config";
+import { CORE_NODE, SPLIT_IN_SUBSET_DB } from "../Config";
 import { ERROR } from "../Errors";
 import { LOG_MESSAGES } from "../LogMessages";
 import { DadgetError } from "../util/DadgetError";
@@ -57,7 +57,7 @@ export class QueryHandler extends ServiceEngine {
   }
 
   getDbName(): string {
-    return this.database + "--" + this.subsetName;
+    return this.database + SPLIT_IN_SUBSET_DB + this.subsetName;
   }
 
   start(node: ResourceNode): Promise<void> {

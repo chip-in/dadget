@@ -1,6 +1,7 @@
 import * as parser from "mongo-parse";
 import * as hash from "object-hash";
 import { v1 as uuidv1 } from "uuid";
+import { SPLIT_IN_INDEXED_DB } from "../../Config";
 import { Util } from "../../util/Util";
 import { TransactionRequest } from "../Transaction";
 import { IDb } from "./IDb";
@@ -75,7 +76,7 @@ export class PersistentDb implements IDb {
 
   start(): Promise<void> {
     this.isStarted = true;
-    const storageName = this.database + "__" + this.collection;
+    const storageName = this.database + SPLIT_IN_INDEXED_DB + this.collection;
     const indexHash = this.indexMap ? hash(this.indexMap) : "";
     let dbVer = 1;
     return new Promise((resolve, reject) => {
@@ -195,7 +196,7 @@ export class PersistentDb implements IDb {
     transaction.onerror = (event) => {
       console.error("logAll error");
     };
-    return "logAll: " + this.database + "__" + this.collection;
+    return "logAll: " + this.database + SPLIT_IN_INDEXED_DB + this.collection;
   }
 
   findOne(query: object): Promise<object | null> {

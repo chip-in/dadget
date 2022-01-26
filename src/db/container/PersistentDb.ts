@@ -1,12 +1,14 @@
 import { Db, MongoClient } from "mongodb";
-import { Mongo } from "../../Config";
+import { Mongo, SPLIT_IN_ONE_DB } from "../../Config";
 import { IDb } from "./IDb";
 import { Logger } from "../../util/Logger";
 import { LOG_MESSAGES } from "../../LogMessages";
 
 export class PersistentDb implements IDb {
-  private static dbMap: { [database: string]: Db } = {};
+  private static connection: MongoClient;
   private db: Db;
+  private database: string;
+  private subsetName: string;
   private collection: string;
   private indexMap: { [name: string]: { index: object, property?: object } };
 
@@ -21,6 +23,13 @@ export class PersistentDb implements IDb {
     return query;
   }
 
+  private static async getConnection() {
+    if (!PersistentDb.connection) {
+      PersistentDb.connection = await MongoClient.connect(Mongo.getUrl(), Mongo.getOption())
+    }
+    return PersistentDb.connection;
+  }
+
   private static errorExit(error: any, num: number): any {
     const logger = Logger.getLoggerWoDB("PersistentDb");
     logger.error(LOG_MESSAGES.ERROR_MSG, [error.toString()], [num]);
@@ -28,24 +37,57 @@ export class PersistentDb implements IDb {
   }
 
   public static getAllStorage(): Promise<string[]> {
-    return MongoClient.connect(Mongo.getUrl(), Mongo.getOption())
-      .then((client) => client.db().admin().listDatabases())
-      .then((list) => list.databases.map((_: { name: string; }) => _.name))
-      .catch((error) => PersistentDb.errorExit(error, 1));
+    if (Mongo.isOneDb()) {
+      return PersistentDb.getConnection()
+        .then((client) => client.db(Mongo.getDbName("")).listCollections())
+        .then((result) => result.toArray())
+        .then((list) => {
+          const set = new Set();
+          for (const row of list) {
+            set.add(row.name.split(SPLIT_IN_ONE_DB)[0]);
+          }
+          return Array.from(set);
+        })
+        .catch((error) => PersistentDb.errorExit(error, 1));
+    } else {
+      return PersistentDb.getConnection()
+        .then((client) => client.db().admin().listDatabases())
+        .then((list) => list.databases.map((_: { name: string; }) => _.name))
+        .catch((error) => PersistentDb.errorExit(error, 1));
+    }
   }
 
   public static deleteStorage(name: string) {
-    return MongoClient.connect(Mongo.getUrl(), Mongo.getOption())
-      .then((client) => client.db(name).dropDatabase())
-      .catch((error) => PersistentDb.errorExit(error, 2));
+    if (Mongo.isOneDb()) {
+      return (async () => {
+        try {
+          const client = await PersistentDb.getConnection();
+          const result = await client.db(Mongo.getDbName("")).listCollections();
+          const list = await result.toArray();
+          for (const row of list) {
+            if (row.name.split(SPLIT_IN_ONE_DB)[0] === name) {
+              await client.db(Mongo.getDbName("")).dropCollection(row.name);
+            }
+          }
+        } catch (error) {
+          PersistentDb.errorExit(error, 2);
+        }
+      })();
+    } else {
+      return PersistentDb.getConnection()
+        .then((client) => client.db(name).dropDatabase())
+        .catch((error) => PersistentDb.errorExit(error, 2));
+    }
   }
 
-  constructor(protected database: string) {
+  constructor(database: string) {
+    this.subsetName = database;
+    this.database = Mongo.getDbName(database)
     console.log("PersistentDb is created");
   }
 
   setCollection(collection: string) {
-    this.collection = collection;
+    this.collection = Mongo.getCollectionName(this.subsetName, collection);
   }
 
   setIndexes(indexMap: { [name: string]: { index: object, property?: object } }): void {
@@ -53,18 +95,12 @@ export class PersistentDb implements IDb {
   }
 
   start(): Promise<void> {
-    if (!PersistentDb.dbMap[this.database]) {
-      return MongoClient.connect(Mongo.getUrl(), Mongo.getOption())
-        .then((client) => {
-          this.db = client.db(this.database);
-          PersistentDb.dbMap[this.database] = this.db;
-          return this.createIndexes();
-        })
-        .catch((error) => PersistentDb.errorExit(error, 3));
-    } else {
-      this.db = PersistentDb.dbMap[this.database];
-      return this.createIndexes();
-    }
+    return PersistentDb.getConnection()
+      .then((client) => {
+        this.db = client.db(this.database);
+        return this.createIndexes();
+      })
+      .catch((error) => PersistentDb.errorExit(error, 3));
   }
 
   findOne(query: object): Promise<object | null> {

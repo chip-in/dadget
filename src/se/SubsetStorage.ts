@@ -6,7 +6,7 @@ import * as URL from "url";
 import * as EJSON from "../util/Ejson";
 
 import { Proxy, ResourceNode, ServiceEngine, Subscriber } from "@chip-in/resource-node";
-import { CORE_NODE } from "../Config";
+import { CORE_NODE, SPLIT_IN_SUBSET_DB } from "../Config";
 import { CacheDb } from "../db/container/CacheDb";
 import { PersistentDb } from "../db/container/PersistentDb";
 import { JournalDb } from "../db/JournalDb";
@@ -740,7 +740,7 @@ export class SubsetStorage extends ServiceEngine implements Proxy {
   }
 
   getDbName(): string {
-    return this.database + "--" + this.subsetName;
+    return this.database + SPLIT_IN_SUBSET_DB + this.subsetName;
   }
 
   getType(): string {

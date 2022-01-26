@@ -889,6 +889,12 @@ export class ContextManager extends ServiceEngine {
     if (this.option.database.match(/--/)) {
       throw new DadgetError(ERROR.E2001, ["Database name can not contain '--'."]);
     }
+    if (this.option.database.match(/__/)) {
+      throw new DadgetError(ERROR.E2001, ["Database name can not contain '__'."]);
+    }
+    if (this.option.database.match(/==/)) {
+      throw new DadgetError(ERROR.E2001, ["Database name can not contain '=='."]);
+    }
     this.database = this.option.database;
 
     // サブセットの定義を取得する

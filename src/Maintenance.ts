@@ -1,8 +1,8 @@
 import * as readline from "readline";
 import * as fs from "fs";
-import { Db, MongoClient } from "mongodb";
+import { MongoClient } from "mongodb";
 import { promisify } from "util";
-import { Mongo } from "./Config";
+import { Mongo, SPLIT_IN_SUBSET_DB } from "./Config";
 import { TransactionRequest, TransactionType } from "./db/Transaction";
 import Dadget from "./se/Dadget";
 import { Util } from "./util/Util";
@@ -22,7 +22,7 @@ export class Maintenance {
       }).then((dbs) => {
         let promise = Promise.resolve();
         for (const curDb of dbs.databases) {
-          if (curDb.name === target || curDb.name.startsWith(target + "--")) {
+          if (curDb.name === target || curDb.name.startsWith(target + SPLIT_IN_SUBSET_DB)) {
             console.info(curDb.name);
             const targetDb = client.db(curDb.name);
             promise = promise.then(() => targetDb.dropDatabase());

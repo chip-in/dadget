@@ -1,10 +1,45 @@
 import { MongoClientOptions } from "mongodb";
 
+export const SPLIT_IN_SUBSET_DB = "--";
+export const SPLIT_IN_ONE_DB = "==";
+export const SPLIT_IN_INDEXED_DB = "__";
+
 export class Mongo {
   static option: MongoClientOptions;
+  static url: [string, string | null];
+
+  static _getUrl() {
+    if (Mongo.url) return Mongo.url;
+    const baseUrl = (process.env.MONGODB_URL ? process.env.MONGODB_URL : "mongodb://localhost:27017/") as string;
+    const url = new URL(baseUrl);
+    if (url.pathname.length <= 1) {
+      Mongo.url = [baseUrl, null];
+    } else {
+      const dbName = url.pathname.substring(1);
+      Mongo.url = [baseUrl.substring(0, baseUrl.length - dbName.length), dbName];
+
+    }
+    return Mongo.url;
+  }
 
   static getUrl() {
-    return (process.env.MONGODB_URL ? process.env.MONGODB_URL : "mongodb://localhost:27017/") as string;
+    return Mongo._getUrl()[0];
+  }
+
+  static isOneDb() {
+    return !!Mongo._getUrl()[1];
+  }
+
+  static getDbName(database: string) {
+    return Mongo._getUrl()[1] || database;
+  }
+
+  static getCollectionName(database: string, collection: string) {
+    if (Mongo._getUrl()[1]) {
+      return database + SPLIT_IN_ONE_DB + collection
+    } else {
+      return collection
+    }
   }
 
   static getOption(): MongoClientOptions {

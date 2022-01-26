@@ -3,7 +3,7 @@ import { v1 as uuidv1 } from "uuid";
 
 import { Logger as ChipInLogger } from "@chip-in/logger";
 import { ResourceNode, ServiceEngine, Subscriber } from "@chip-in/resource-node";
-import { CORE_NODE, setAccessControlAllowOrigin } from "../Config";
+import { CORE_NODE, setAccessControlAllowOrigin, SPLIT_IN_INDEXED_DB, SPLIT_IN_SUBSET_DB } from "../Config";
 import { PersistentDb } from "../db/container/PersistentDb";
 import { TransactionObject, TransactionRequest, TransactionType } from "../db/Transaction";
 import { ERROR } from "../Errors";
@@ -197,8 +197,8 @@ export default class Dadget extends ServiceEngine {
             .filter((subset) => subset.getType() === "persistent")
             .map((subset) => subset.getDbName());
           for (const storageName of storageList) {
-            if (!storageName.startsWith(database + "--")) { continue; }
-            const [dbName] = storageName.split("__");
+            if (!storageName.startsWith(database + SPLIT_IN_SUBSET_DB)) { continue; }
+            const [dbName] = storageName.split(SPLIT_IN_INDEXED_DB);
             if (subsetNames.indexOf(dbName) < 0) {
               this.logger.warn(LOG_MESSAGES.DELETE_STORAGE, [storageName]);
               PersistentDb.deleteStorage(storageName);
