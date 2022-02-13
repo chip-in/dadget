@@ -570,13 +570,26 @@ class SubsetUpdatorProxy extends Proxy {
     this.logger.debug(LOG_MESSAGES.ON_RECEIVE, [method, url.pathname]);
     if (method === "OPTIONS") {
       return ProxyHelper.procOption(req, res);
-    } else if (url.pathname.endsWith(CORE_NODE.PATH_GET_TRANSACTION) && method === "GET") {
+    } else if (url.pathname.endsWith(CORE_NODE.PATH_GET_TRANSACTION) && method === "POST") {
+      return ProxyHelper.procPost(req, res, this.logger, (request) => {
+        const csn = ProxyHelper.validateNumberRequired(request.csn, "csn");
+        this.logger.info(LOG_MESSAGES.ON_RECEIVE_GET_TRANSACTION, [], [csn]);
+        return this.getTransactionJournal(csn);
+      });
+    } else if (url.pathname.endsWith(CORE_NODE.PATH_GET_TRANSACTION_OLD) && method === "GET") {
       return ProxyHelper.procGet(req, res, this.logger, (request) => {
         const csn = ProxyHelper.validateNumberRequired(request.csn, "csn");
         this.logger.info(LOG_MESSAGES.ON_RECEIVE_GET_TRANSACTION, [], [csn]);
         return this.getTransactionJournal(csn);
       });
-    } else if (url.pathname.endsWith(CORE_NODE.PATH_GET_TRANSACTIONS) && method === "GET") {
+    } else if (url.pathname.endsWith(CORE_NODE.PATH_GET_TRANSACTIONS) && method === "POST") {
+      return ProxyHelper.procPost(req, res, this.logger, (request) => {
+        const fromCsn = ProxyHelper.validateNumberRequired(request.fromCsn, "fromCsn");
+        const toCsn = ProxyHelper.validateNumberRequired(request.toCsn, "toCsn");
+        this.logger.info(LOG_MESSAGES.ON_RECEIVE_GET_TRANSACTIONS, [], [fromCsn, toCsn]);
+        return this.getTransactionJournals(fromCsn, toCsn);
+      });
+    } else if (url.pathname.endsWith(CORE_NODE.PATH_GET_TRANSACTIONS_OLD) && method === "GET") {
       return ProxyHelper.procGet(req, res, this.logger, (request) => {
         const fromCsn = ProxyHelper.validateNumberRequired(request.fromCsn, "fromCsn");
         const toCsn = ProxyHelper.validateNumberRequired(request.toCsn, "toCsn");
@@ -939,30 +952,36 @@ export class SubsetStorage extends ServiceEngine implements Proxy {
     if (url.pathname == null) { throw new Error("pathname is required."); }
     const method = req.method.toUpperCase();
     this.logger.debug(LOG_MESSAGES.ON_RECEIVE, [method, url.pathname]);
+    const procQuery = (request: any) => {
+      const csn = ProxyHelper.validateNumberRequired(request.csn, "csn");
+      const query = EJSON.parse(request.query);
+      const sort = request.sort ? EJSON.parse(request.sort) : undefined;
+      const limit = ProxyHelper.validateNumber(request.limit, "limit");
+      const offset = ProxyHelper.validateNumber(request.offset, "offset");
+      const projection = request.projection ? EJSON.parse(request.projection) : undefined;
+      return this.query(csn, query, sort, limit, request.csnMode, projection, offset)
+        .then((result) => {
+          return { status: "OK", result };
+        });
+    };
+    const procCount = (request: any) => {
+      const csn = ProxyHelper.validateNumberRequired(request.csn, "csn");
+      const query = EJSON.parse(request.query);
+      return this.count(csn, query, request.csnMode)
+        .then((result) => {
+          return { status: "OK", result };
+        });
+    };
     if (method === "OPTIONS") {
       return ProxyHelper.procOption(req, res);
-    } else if (url.pathname.endsWith(CORE_NODE.PATH_QUERY) && method === "GET") {
-      return ProxyHelper.procGet(req, res, this.logger, (request) => {
-        const csn = ProxyHelper.validateNumberRequired(request.csn, "csn");
-        const query = EJSON.parse(request.query);
-        const sort = request.sort ? EJSON.parse(request.sort) : undefined;
-        const limit = ProxyHelper.validateNumber(request.limit, "limit");
-        const offset = ProxyHelper.validateNumber(request.offset, "offset");
-        const projection = request.projection ? EJSON.parse(request.projection) : undefined;
-        return this.query(csn, query, sort, limit, request.csnMode, projection, offset)
-          .then((result) => {
-            return { status: "OK", result };
-          });
-      });
-    } else if (url.pathname.endsWith(CORE_NODE.PATH_COUNT) && method === "GET") {
-      return ProxyHelper.procGet(req, res, this.logger, (request) => {
-        const csn = ProxyHelper.validateNumberRequired(request.csn, "csn");
-        const query = EJSON.parse(request.query);
-        return this.count(csn, query, request.csnMode)
-          .then((result) => {
-            return { status: "OK", result };
-          });
-      });
+    } else if (url.pathname.endsWith(CORE_NODE.PATH_QUERY) && method === "POST") {
+      return ProxyHelper.procPost(req, res, this.logger, procQuery);
+    } else if (url.pathname.endsWith(CORE_NODE.PATH_QUERY_OLD) && method === "GET") {
+      return ProxyHelper.procGet(req, res, this.logger, procQuery);
+    } else if (url.pathname.endsWith(CORE_NODE.PATH_COUNT) && method === "POST") {
+      return ProxyHelper.procPost(req, res, this.logger, procCount);
+    } else if (url.pathname.endsWith(CORE_NODE.PATH_COUNT_OLD) && method === "GET") {
+      return ProxyHelper.procGet(req, res, this.logger, procCount);
     } else {
       this.logger.warn(LOG_MESSAGES.SERVER_COMMAND_NOT_FOUND, [method, url.pathname]);
       return ProxyHelper.procError(req, res);

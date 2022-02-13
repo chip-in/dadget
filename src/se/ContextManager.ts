@@ -242,7 +242,18 @@ class ContextManagementServer extends Proxy {
           this.logger.info(LOG_MESSAGES.TIME_OF_EXEC, [], [Date.now() - time]);
           return result;
         });
-    } else if (url.pathname.endsWith(CORE_NODE.PATH_GET_TRANSACTION) && method === "GET") {
+    } else if (url.pathname.endsWith(CORE_NODE.PATH_GET_TRANSACTION) && method === "POST") {
+      return ProxyHelper.procPost(req, res, this.logger, (data) => {
+        const csn = ProxyHelper.validateNumberRequired(data.csn, "csn");
+        this.logger.info(LOG_MESSAGES.ON_RECEIVE_GET_TRANSACTION, [], [csn]);
+        return this.getTransactionJournal(csn)
+          .catch((reason) => ({ status: "NG", reason }));
+      })
+        .then((result) => {
+          this.logger.info(LOG_MESSAGES.TIME_OF_EXEC, [], [Date.now() - time]);
+          return result;
+        });
+    } else if (url.pathname.endsWith(CORE_NODE.PATH_GET_TRANSACTION_OLD) && method === "GET") {
       return ProxyHelper.procGet(req, res, this.logger, (data) => {
         const csn = ProxyHelper.validateNumberRequired(data.csn, "csn");
         this.logger.info(LOG_MESSAGES.ON_RECEIVE_GET_TRANSACTION, [], [csn]);
@@ -253,7 +264,19 @@ class ContextManagementServer extends Proxy {
           this.logger.info(LOG_MESSAGES.TIME_OF_EXEC, [], [Date.now() - time]);
           return result;
         });
-    } else if (url.pathname.endsWith(CORE_NODE.PATH_GET_TRANSACTIONS) && method === "GET") {
+    } else if (url.pathname.endsWith(CORE_NODE.PATH_GET_TRANSACTIONS) && method === "POST") {
+      return ProxyHelper.procPost(req, res, this.logger, (data) => {
+        const fromCsn = ProxyHelper.validateNumberRequired(data.fromCsn, "fromCsn");
+        const toCsn = ProxyHelper.validateNumberRequired(data.toCsn, "toCsn");
+        this.logger.info(LOG_MESSAGES.ON_RECEIVE_GET_TRANSACTIONS, [], [fromCsn, toCsn]);
+        return this.getTransactionJournals(fromCsn, toCsn)
+          .catch((reason) => ({ status: "NG", reason }));
+      })
+        .then((result) => {
+          this.logger.info(LOG_MESSAGES.TIME_OF_EXEC, [], [Date.now() - time]);
+          return result;
+        });
+    } else if (url.pathname.endsWith(CORE_NODE.PATH_GET_TRANSACTIONS_OLD) && method === "GET") {
       return ProxyHelper.procGet(req, res, this.logger, (data) => {
         const fromCsn = ProxyHelper.validateNumberRequired(data.fromCsn, "fromCsn");
         const toCsn = ProxyHelper.validateNumberRequired(data.toCsn, "toCsn");

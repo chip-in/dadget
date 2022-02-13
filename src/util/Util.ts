@@ -84,11 +84,13 @@ export class Util {
     const pathname = (subset ?
       CORE_NODE.PATH_SUBSET_UPDATOR.replace(/:database\b/g, database).replace(/:subset\b/g, subset) :
       CORE_NODE.PATH_CONTEXT.replace(/:database\b/g, database)) + CORE_NODE.PATH_GET_TRANSACTION;
-    const reqUrl = URL.format({
-      pathname,
-      query: { csn },
-    });
-    return node.fetch(reqUrl)
+    return node.fetch(pathname, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+      },
+      body: EJSON.stringify({ csn }),
+    })
       .then((fetchResult) => {
         if (typeof fetchResult.ok !== "undefined" && !fetchResult.ok) { throw Error(fetchResult.statusText); }
         return fetchResult.json();
@@ -127,11 +129,13 @@ export class Util {
       mainLoop,
       (mainLoop) => mainLoop.csn <= toCsn,
       (mainLoop) => {
-        const reqUrl = URL.format({
-          pathname,
-          query: { fromCsn: mainLoop.csn, toCsn },
-        });
-        return node.fetch(reqUrl)
+        return node.fetch(pathname, {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+          },
+          body: EJSON.stringify({ fromCsn: mainLoop.csn, toCsn }),
+        })
           .then((fetchResult) => {
             if (typeof fetchResult.ok !== "undefined" && !fetchResult.ok) { throw Error(fetchResult.statusText); }
             return fetchResult.json();

@@ -106,13 +106,15 @@ export class QueryHandler extends ServiceEngine {
       projection: projection ? EJSON.stringify(projection) : undefined,
       offset,
     };
-    const reqUrl = URL.format({
-      pathname: CORE_NODE.PATH_SUBSET
-        .replace(/:database\b/g, this.database)
-        .replace(/:subset\b/g, this.subsetName) + CORE_NODE.PATH_QUERY,
-      query: request,
-    });
-    return this.node.fetch(reqUrl)
+    return this.node.fetch(CORE_NODE.PATH_SUBSET
+      .replace(/:database\b/g, this.database)
+      .replace(/:subset\b/g, this.subsetName) + CORE_NODE.PATH_QUERY, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+      },
+      body: EJSON.stringify(request),
+    })
       .then((result) => {
         if (typeof result.ok !== "undefined" && !result.ok) { throw Error("fetch error:" + result.statusText); }
         return result.json();
@@ -124,7 +126,7 @@ export class QueryHandler extends ServiceEngine {
         throw new Error("fetch error:" + JSON.stringify(data));
       })
       .catch((reason) => {
-        this.logger.warn(LOG_MESSAGES.QUERY_ERROR, [reason.toString(), reqUrl]);
+        this.logger.warn(LOG_MESSAGES.QUERY_ERROR, [reason.toString(), EJSON.stringify(request)]);
         return { csn, resultSet: [], restQuery: query, csnMode };
       });
   }
@@ -133,13 +135,15 @@ export class QueryHandler extends ServiceEngine {
     this.logger.info(LOG_MESSAGES.COUNT_CSN, [csnMode || ""], [csn]);
     this.logger.debug(LOG_MESSAGES.COUNT, [JSON.stringify(query)]);
     const request = { csn, query: EJSON.stringify(query), csnMode };
-    const reqUrl = URL.format({
-      pathname: CORE_NODE.PATH_SUBSET
-        .replace(/:database\b/g, this.database)
-        .replace(/:subset\b/g, this.subsetName) + CORE_NODE.PATH_COUNT,
-      query: request,
-    });
-    return this.node.fetch(reqUrl)
+    return this.node.fetch(CORE_NODE.PATH_SUBSET
+      .replace(/:database\b/g, this.database)
+      .replace(/:subset\b/g, this.subsetName) + CORE_NODE.PATH_COUNT, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+      },
+      body: EJSON.stringify(request),
+    })
       .then((result) => {
         if (typeof result.ok !== "undefined" && !result.ok) { throw Error("fetch error:" + result.statusText); }
         return result.json();
@@ -151,7 +155,7 @@ export class QueryHandler extends ServiceEngine {
         throw new Error("fetch error:" + JSON.stringify(data));
       })
       .catch((reason) => {
-        this.logger.warn(LOG_MESSAGES.COUNT_ERROR, [reason.toString(), reqUrl]);
+        this.logger.warn(LOG_MESSAGES.COUNT_ERROR, [reason.toString(), EJSON.stringify(request)]);
         return { csn, resultCount: 0, restQuery: query, csnMode };
       });
   }
