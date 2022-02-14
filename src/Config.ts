@@ -163,13 +163,13 @@ export const CORE_NODE = {
   PATH_EXEC: "/exec",
   PATH_EXEC_MANY: "/execMany",
   PATH_UPDATE_MANY: "/updateMany",
-  PATH_GET_TRANSACTION: "/_get/getTransactionJournal",
+  PATH_GET_TRANSACTION: "/getTransactionJournal/_get",
   PATH_GET_TRANSACTION_OLD: "/getTransactionJournal",
-  PATH_GET_TRANSACTIONS: "/_get/getTransactionJournals",
+  PATH_GET_TRANSACTIONS: "/getTransactionJournals/_get",
   PATH_GET_TRANSACTIONS_OLD: "/getTransactionJournals",
-  PATH_QUERY: "/_get/query",
+  PATH_QUERY: "/query/_get",
   PATH_QUERY_OLD: "/query",
-  PATH_COUNT: "/_get/count",
+  PATH_COUNT: "/count/_get",
   PATH_COUNT_OLD: "/count",
 };
 
