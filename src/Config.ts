@@ -11,13 +11,14 @@ export class Mongo {
   static _getUrl() {
     if (Mongo.url) return Mongo.url;
     const baseUrl = (process.env.MONGODB_URL ? process.env.MONGODB_URL : "mongodb://localhost:27017/") as string;
-    const url = new URL(baseUrl);
-    if (url.pathname.length <= 1) {
-      Mongo.url = [baseUrl, null];
+    const re = /^mongodb:\/\/(?<id_pw>[^:\s]+:[^@\s]*@)?(?<hosts>[^@\/\s]+)(\/(?<db>[^?\s]*)(?<query>\?[^\s\n]+)?)?$/;
+    const url = baseUrl.match(re);
+    if (!url || !url.groups) throw "Invalid mongodb URL:" + baseUrl;
+    const newUrl = "mongodb://" + (url.groups.id_pw || "") + url.groups.hosts + "/" + (url.groups.query || "");
+    if (!url.groups.db) {
+      Mongo.url = [newUrl, null];
     } else {
-      const dbName = url.pathname.substring(1);
-      Mongo.url = [baseUrl.substring(0, baseUrl.length - dbName.length), dbName];
-
+      Mongo.url = [newUrl, url.groups.db];
     }
     return Mongo.url;
   }
