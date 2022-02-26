@@ -114,13 +114,13 @@ export class PersistentDb implements IDb {
   }
 
   findOneBySort(query: object, sort: object): Promise<any> {
-    return this.db.collection(this.collection).find(PersistentDb.convertQuery(query)).sort(sort).limit(1).next()
+    return this.db.collection(this.collection).find(PersistentDb.convertQuery(query)).sort(sort as any).limit(1).next()
       .catch((error) => PersistentDb.errorExit(error, 6));
   }
 
   find(query: object, sort?: object, limit?: number, offset?: number, projection?: object): Promise<any[]> {
-    let cursor = this.db.collection(this.collection).find(PersistentDb.convertQuery(query), { projection })
-    if (sort) { cursor = cursor.sort(sort); }
+    let cursor = this.db.collection(this.collection).find(PersistentDb.convertQuery(query), { allowDiskUse: true, projection })
+    if (sort) { cursor = cursor.sort(sort as any); }
     if (offset) { cursor = cursor.skip(offset); }
     if (limit) { cursor = cursor.limit(limit); }
     return cursor.toArray()
@@ -144,8 +144,8 @@ export class PersistentDb implements IDb {
 
   increment(id: string, field: string): Promise<number> {
     return this.db.collection(this.collection)
-      .findOneAndUpdate({ _id: id }, { $inc: { [field]: 1 } }, { returnOriginal: false })
-      .then((result) => {
+      .findOneAndUpdate({ _id: id }, { $inc: { [field]: 1 } }, { returnDocument: "after" })
+      .then((result: any) => {
         if (result.ok) {
           return result.value[field];
         } else {
@@ -157,51 +157,33 @@ export class PersistentDb implements IDb {
 
   updateOneById(id: string, update: object): Promise<void> {
     return this.db.collection(this.collection).updateOne({ _id: id }, update)
-      .then((result) => {
-        if (!result.result.ok || result.result.n !== 1) { throw new Error("failed to update: " + JSON.stringify(result)); }
-      })
       .catch((error) => PersistentDb.errorExit(error, 12));
   }
 
   updateOne(filter: object, update: object): Promise<void> {
     return this.db.collection(this.collection).updateOne(filter, update)
-      .then((result) => {
-        if (!result.result.ok || result.result.n !== 1) { throw new Error("failed to update: " + JSON.stringify(result)); }
-      })
       .catch((error) => PersistentDb.errorExit(error, 13));
   }
 
   replaceOneById(id: string, doc: object): Promise<void> {
     (doc as any)._id = id;
     return this.db.collection(this.collection).replaceOne({ _id: id }, doc, { upsert: true })
-      .then((result) => {
-        if (!result.result.ok || result.result.n !== 1) { throw new Error("failed to replace: " + JSON.stringify(result)); }
-      })
       .catch((error) => PersistentDb.errorExit(error, 14));
   }
 
   deleteOneById(id: string): Promise<void> {
     return this.db.collection(this.collection).deleteOne({ _id: id })
-      .then((result) => {
-        if (!result.result.ok) { throw new Error("failed to delete: " + JSON.stringify(result)); }
-      })
       .catch((error) => PersistentDb.errorExit(error, 15));
   }
 
   deleteByRange(field: string, from: any, to: any): Promise<void> {
     const query = { $and: [{ [field]: { $gte: from } }, { [field]: { $lte: to } }] };
     return this.db.collection(this.collection).deleteMany(PersistentDb.convertQuery(query))
-      .then((result) => {
-        if (!result.result.ok) { throw new Error("failed to delete: " + JSON.stringify(result)); }
-      })
       .catch((error) => PersistentDb.errorExit(error, 16));
   }
 
   deleteAll(): Promise<void> {
     return this.db.collection(this.collection).deleteMany({})
-      .then((result) => {
-        if (!result.result.ok) { throw new Error("failed to delete: " + JSON.stringify(result)); }
-      })
       .catch((error) => PersistentDb.errorExit(error, 17));
   }
 
@@ -235,7 +217,7 @@ export class PersistentDb implements IDb {
         const indexPromises: Promise<any>[] = [];
         for (const indexName in indexMap) {
           if (!indexNameList[indexName]) {
-            const fields = indexMap[indexName].index;
+            const fields = indexMap[indexName].index as any;
             const options: { [key: string]: any } = indexMap[indexName].property ? { ...indexMap[indexName].property } : {};
             options.name = indexName;
             indexPromises.push(this.db.collection(this.collection).createIndex(fields, options));
