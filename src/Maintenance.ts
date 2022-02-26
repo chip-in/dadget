@@ -20,7 +20,7 @@ export class Maintenance {
         client = _;
         return client.db().admin().listDatabases();
       }).then((dbs) => {
-        let promise = Promise.resolve();
+        let promise = Promise.resolve(true);
         for (const curDb of dbs.databases) {
           if (curDb.name === target || curDb.name.startsWith(target + SPLIT_IN_SUBSET_DB)) {
             console.info(curDb.name);
