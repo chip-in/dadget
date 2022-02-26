@@ -353,6 +353,7 @@ class ContextManagementServer extends Proxy {
             updateObject,
           });
         }, (reason) => {
+          this.notifyAllWaitingList();
           let cause = reason instanceof DadgetError ? reason : new DadgetError(ERROR.E2003, [reason]);
           if (cause.code === ERROR.E1105.code) { cause = new DadgetError(ERROR.E2004, [cause]); }
           cause.convertInsertsToString();
@@ -455,6 +456,7 @@ class ContextManagementServer extends Proxy {
             csn: _newCsn,
           });
         }, (reason) => {
+          this.notifyAllWaitingList();
           let cause = reason instanceof DadgetError ? reason : new DadgetError(ERROR.E2003, [reason]);
           if (cause.code === ERROR.E1105.code) { cause = new DadgetError(ERROR.E2004, [cause]); }
           cause.convertInsertsToString();
@@ -567,6 +569,7 @@ class ContextManagementServer extends Proxy {
             count,
           });
         }, (reason) => {
+          this.notifyAllWaitingList();
           let cause = reason instanceof DadgetError ? reason : new DadgetError(ERROR.E2003, [reason]);
           if (cause.code === ERROR.E1105.code) { cause = new DadgetError(ERROR.E2004, [cause]); }
           cause.convertInsertsToString();
