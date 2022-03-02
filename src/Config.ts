@@ -174,4 +174,4 @@ export const CORE_NODE = {
   PATH_COUNT_OLD: "/count",
 };
 
-export const MAX_OBJECT_SIZE = 8 * 1024 * 1024;
+export const MAX_OBJECT_SIZE = 8 * 1024 * 1024 - 2048;
