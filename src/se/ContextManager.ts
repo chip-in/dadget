@@ -1116,7 +1116,7 @@ export class ContextManager extends ServiceEngine {
 
 export class ExecOptions {
   /**
-   * ユニークエラーを無視
+   * ユニーク制約エラーの場合にスキップして処理を継続する。（_idは不可）
    */
   continueOnUniqueError?: boolean;
 
