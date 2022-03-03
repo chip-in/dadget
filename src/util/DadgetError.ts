@@ -31,3 +31,10 @@ export class DadgetError {
     return this.message.replace(/%([\d]+)/g, (match, i) => this.inserts && this.inserts[i - 1] ? this.inserts[i - 1].toString() : "undefined");
   }
 }
+
+export class UniqueError extends Error {
+  constructor(e?: string) {
+    super(e);
+    this.name = new.target.name;
+  }
+}

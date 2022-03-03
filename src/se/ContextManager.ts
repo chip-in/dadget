@@ -10,7 +10,7 @@ import { SystemDb } from "../db/SystemDb";
 import { TransactionObject, TransactionRequest, TransactionType } from "../db/Transaction";
 import { ERROR } from "../Errors";
 import { LOG_MESSAGES } from "../LogMessages";
-import { DadgetError } from "../util/DadgetError";
+import { DadgetError, UniqueError } from "../util/DadgetError";
 import * as EJSON from "../util/Ejson";
 import { Logger } from "../util/Logger";
 import { ProxyHelper } from "../util/ProxyHelper";
@@ -214,7 +214,7 @@ class ContextManagementServer extends Proxy {
       return ProxyHelper.procPost(req, res, this.logger, (data) => {
         const csn = ProxyHelper.validateNumberRequired(data.csn, "csn");
         this.logger.info(LOG_MESSAGES.ON_RECEIVE_EXEC, [], [csn]);
-        return this.exec(csn, data.request, data.atomicId)
+        return this.exec(csn, data.request, data.atomicId, data.options)
           .catch((reason) => ({ status: "NG", reason }));
       })
         .then((result) => {
@@ -225,7 +225,7 @@ class ContextManagementServer extends Proxy {
       return ProxyHelper.procPost(req, res, this.logger, (data) => {
         const csn = ProxyHelper.validateNumberRequired(data.csn, "csn");
         this.logger.info(LOG_MESSAGES.ON_RECEIVE_EXEC_MANY, [], [csn]);
-        return this.execMany(csn, data.requests, data.atomicId)
+        return this.execMany(csn, data.requests, data.atomicId, data.options)
           .catch((reason) => ({ status: "NG", reason }));
       })
         .then((result) => {
@@ -294,7 +294,7 @@ class ContextManagementServer extends Proxy {
     }
   }
 
-  exec(postulatedCsn: number, request: TransactionRequest, atomicId?: string): Promise<object> {
+  exec(postulatedCsn: number, request: TransactionRequest, atomicId?: string, options?: ExecOptions): Promise<object> {
     const err = this.checkTransactionRequest(request);
     if (err) {
       return Promise.resolve({
@@ -320,7 +320,7 @@ class ContextManagementServer extends Proxy {
     if (this.atomicLockId && this.atomicLockId !== atomicId) {
       return new Promise<object>((resolve, reject) => {
         this.queueWaitingList.push(() => {
-          this.exec(postulatedCsn, request, atomicId)
+          this.exec(postulatedCsn, request, atomicId, options)
             .then((result) => resolve(result)).catch((reason) => reject(reason));
         });
       });
@@ -354,6 +354,16 @@ class ContextManagementServer extends Proxy {
           });
         }, (reason) => {
           this.notifyAllWaitingList();
+          if (ExecOptions.continueOnError(options, reason)) {
+            return this.context.getSystemDb().getCsn()
+              .then((csn) => {
+                resolve({
+                  status: "OK",
+                  csn,
+                  updateObject: null
+                });
+              })
+          }
           let cause = reason instanceof DadgetError ? reason : new DadgetError(ERROR.E2003, [reason]);
           if (cause.code === ERROR.E1105.code) { cause = new DadgetError(ERROR.E2004, [cause]); }
           cause.convertInsertsToString();
@@ -367,7 +377,7 @@ class ContextManagementServer extends Proxy {
     });
   }
 
-  execMany(postulatedCsn: number, requests: TransactionRequest[], atomicId?: string): Promise<object> {
+  execMany(postulatedCsn: number, requests: TransactionRequest[], atomicId?: string, options?: ExecOptions): Promise<object> {
     for (const request of requests) {
       const err = this.checkTransactionRequest(request);
       if (err) {
@@ -398,7 +408,7 @@ class ContextManagementServer extends Proxy {
     if (this.atomicLockId && this.atomicLockId !== atomicId) {
       return new Promise<object>((resolve, reject) => {
         this.queueWaitingList.push(() => {
-          this.execMany(postulatedCsn, requests, atomicId)
+          this.execMany(postulatedCsn, requests, atomicId, options)
             .then((result) => resolve(result)).catch((reason) => reject(reason));
         });
       });
@@ -415,6 +425,9 @@ class ContextManagementServer extends Proxy {
                 return this.procTransaction(0, request, atomicId)
                   .then(({ newCsn }) => {
                     _newCsn = newCsn;
+                  })
+                  .catch((e) => {
+                    if (!ExecOptions.continueOnError(options, e)) throw e;
                   });
               },
             );
@@ -429,6 +442,9 @@ class ContextManagementServer extends Proxy {
                     return this.procTransaction(postulatedCsn, request, atomicId)
                       .then(({ newCsn }) => {
                         _newCsn = newCsn;
+                      })
+                      .catch((e) => {
+                        if (!ExecOptions.continueOnError(options, e)) throw e;
                       });
                   },
                 );
@@ -1091,9 +1107,23 @@ export class ContextManager extends ServiceEngine {
           .then((result) => {
             if (result.restQuery) { throw new Error("The queryHandlers has been empty before completing queries."); }
             if (result.resultCount === 0) { return loopData; }
-            throw new Error("duplicate data error: " + JSON.stringify(condition));
+            throw new UniqueError("duplicate data error: " + JSON.stringify(condition));
           });
       },
     ).then(() => { return; });
+  }
+}
+
+export class ExecOptions {
+  /**
+   * ユニークエラーを無視
+   */
+  continueOnUniqueError?: boolean;
+
+  static continueOnError(options: ExecOptions | undefined, e: any) {
+    if (options?.continueOnUniqueError) {
+      if (e instanceof UniqueError) return true;
+    }
+    return false;
   }
 }

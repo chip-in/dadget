@@ -12,7 +12,7 @@ import { DadgetError } from "../util/DadgetError";
 import * as EJSON from "../util/Ejson";
 import { Logger } from "../util/Logger";
 import { Util } from "../util/Util";
-import { ATOMIC_OPERATION_MAX_LOCK_TIME, ContextManager } from "./ContextManager";
+import { ATOMIC_OPERATION_MAX_LOCK_TIME, ContextManager, ExecOptions } from "./ContextManager";
 import { DatabaseRegistry } from "./DatabaseRegistry";
 import { QueryHandler } from "./QueryHandler";
 import { SubsetStorage } from "./SubsetStorage";
@@ -439,20 +439,21 @@ export default class Dadget extends ServiceEngine {
    *
    * @param csn トランザクションの前提となるコンテキスト通番(トランザクションの type が "insert" のときは 0 を指定でき、その場合は不整合チェックを行わない)
    * @param request トランザクションの内容を持つオブジェクト
-   * @return 更新されたオブジェクト
+   * @param options 更新オプション(任意)
+   * @return 更新されたオブジェクト(更新オプションが指定される場合、NULLの可能性がある)
    */
-  exec(csn: number, request: TransactionRequest): Promise<object> {
+  exec(csn: number, request: TransactionRequest, options?: ExecOptions): Promise<object | null> {
     request.type = request.type.toLowerCase() as TransactionType;
     if (request.type !== TransactionType.INSERT &&
       request.type !== TransactionType.UPDATE &&
       request.type !== TransactionType.DELETE) {
       return Promise.reject(new DadgetError(ERROR.E2104));
     }
-    return this._exec(csn, request, undefined);
+    return this._exec(csn, request, undefined, options);
   }
 
-  _exec(csn: number, request: TransactionRequest, atomicId: string | undefined): Promise<object> {
-    const sendData = { csn, request, atomicId };
+  _exec(csn: number, request: TransactionRequest, atomicId: string | undefined, options?: ExecOptions): Promise<object | null> {
+    const sendData = { csn, request, atomicId, options };
     return this.node.fetch(CORE_NODE.PATH_CONTEXT.replace(/:database\b/g, this.database) + CORE_NODE.PATH_EXEC, {
       method: "POST",
       headers: {
@@ -487,8 +488,9 @@ export default class Dadget extends ServiceEngine {
    *
    * @param csn トランザクションの前提となるコンテキスト通番(トランザクションの type が "insert" のときは 0 を指定でき、その場合は不整合チェックを行わない)
    * @param request トランザクションの内容を持つオブジェクトの配列
+   * @param options 更新オプション(任意)
    */
-  execMany(csn: number, requests: TransactionRequest[]): Promise<void> {
+  execMany(csn: number, requests: TransactionRequest[], options?: ExecOptions): Promise<void> {
     for (const request of requests) {
       request.type = request.type.toLowerCase() as TransactionType;
       if (request.type !== TransactionType.INSERT &&
@@ -497,11 +499,11 @@ export default class Dadget extends ServiceEngine {
         return Promise.reject(new DadgetError(ERROR.E2104));
       }
     }
-    return this._execMany(csn, requests, undefined);
+    return this._execMany(csn, requests, undefined, options);
   }
 
-  _execMany(csn: number, requests: TransactionRequest[], atomicId: string | undefined): Promise<void> {
-    const sendData = { csn, requests, atomicId };
+  _execMany(csn: number, requests: TransactionRequest[], atomicId: string | undefined, options?: ExecOptions): Promise<void> {
+    const sendData = { csn, requests, atomicId, options };
     return this.node.fetch(CORE_NODE.PATH_CONTEXT.replace(/:database\b/g, this.database) + CORE_NODE.PATH_EXEC_MANY, {
       method: "POST",
       headers: {
@@ -577,15 +579,15 @@ export default class Dadget extends ServiceEngine {
   /**
    * clearメソッドは全データの削除を実行する。
    */
-  clear(): Promise<object> {
+  clear(): Promise<void> {
     return this._clear();
   }
 
-  _clear(force?: boolean): Promise<object> {
+  _clear(force?: boolean): Promise<void> {
     const request = new TransactionRequest();
     request.type = force ? TransactionType.FORCE_ROLLBACK : TransactionType.TRUNCATE;
     request.target = "";
-    return this._exec(0, request, undefined);
+    return this._exec(0, request, undefined).then(() => { });
   }
 
   private notifyAll() {
@@ -740,30 +742,30 @@ class DadgetTr {
     this.fixFlag = true;
   }
 
-  _check(): Promise<object> {
+  _check(): Promise<void> {
     if (this.atomicId === undefined) { return Promise.reject(new DadgetError(ERROR.E2107)); }
-    return this.dadget._exec(0, { type: TransactionType.CHECK, target: "" }, this.atomicId);
+    return this.dadget._exec(0, { type: TransactionType.CHECK, target: "" }, this.atomicId).then(() => { });
   }
 
-  _begin(): Promise<object> {
+  _begin(): Promise<void> {
     if (this.atomicId) { return Promise.reject("transaction is running"); }
     this.atomicId = Dadget.uuidGen();
-    return this.dadget._exec(0, { type: TransactionType.BEGIN, target: "" }, this.atomicId);
+    return this.dadget._exec(0, { type: TransactionType.BEGIN, target: "" }, this.atomicId).then(() => { });
   }
 
-  _commit(): Promise<object> {
+  _commit(): Promise<void> {
     if (this.atomicId === undefined) { return Promise.reject(new DadgetError(ERROR.E2107)); }
     const atomicId = this.atomicId;
-    return this.dadget._exec(0, { type: TransactionType.END, target: "" }, this.atomicId);
+    return this.dadget._exec(0, { type: TransactionType.END, target: "" }, this.atomicId).then(() => { });
   }
 
-  _rollback(): Promise<object> {
-    if (this.atomicId === undefined) { return Promise.resolve({}); }
+  _rollback(): Promise<void> {
+    if (this.atomicId === undefined) { return Promise.resolve(); }
     const atomicId = this.atomicId;
-    return this.dadget._exec(0, { type: TransactionType.ABORT, target: "" }, this.atomicId);
+    return this.dadget._exec(0, { type: TransactionType.ABORT, target: "" }, this.atomicId).then(() => { });
   }
 
-  exec(csn: number, request: TransactionRequest): Promise<object> {
+  exec(csn: number, request: TransactionRequest, options?: ExecOptions): Promise<object | null> {
     if (this.fixFlag) { return Promise.reject(new DadgetError(ERROR.E2107)); }
     request.type = request.type.toLowerCase() as TransactionType;
     if (request.type !== TransactionType.INSERT &&
@@ -771,10 +773,10 @@ class DadgetTr {
       request.type !== TransactionType.DELETE) {
       return Promise.reject(new DadgetError(ERROR.E2104));
     }
-    return this.dadget._exec(csn, request, this.atomicId);
+    return this.dadget._exec(csn, request, this.atomicId, options);
   }
 
-  execMany(csn: number, requests: TransactionRequest[]): Promise<void> {
+  execMany(csn: number, requests: TransactionRequest[], options?: ExecOptions): Promise<void> {
     if (this.fixFlag) { return Promise.reject(new DadgetError(ERROR.E2107)); }
     for (const request of requests) {
       request.type = request.type.toLowerCase() as TransactionType;
@@ -784,7 +786,7 @@ class DadgetTr {
         return Promise.reject(new DadgetError(ERROR.E2104));
       }
     }
-    return this.dadget._execMany(csn, requests, this.atomicId);
+    return this.dadget._execMany(csn, requests, this.atomicId, options);
   }
 
   updateMany(query: object, operator: object): Promise<number> {
