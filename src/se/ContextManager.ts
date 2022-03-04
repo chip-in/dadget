@@ -89,8 +89,7 @@ class TransactionJournalSubscriber extends Subscriber {
                 } else {
                   return this.adjustData(transaction.csn);
                 }
-              })
-              .then(() => this.context.getJournalDb().retrieveCheckCsn());
+              });
           })
           .catch((err) => {
             this.logger.error(LOG_MESSAGES.ERROR_MSG, [err.toString()], [101]);
@@ -641,7 +640,6 @@ class ContextManagementServer extends Proxy {
         if (request.type !== TransactionType.FORCE_ROLLBACK && transaction.digest) {
           this.context.getDigestMap().set(transaction.csn, transaction.digest);
         }
-        this.context.getJournalDb().setCheckCsnByTransaction(transaction);
         this.pubDataList.push(pubData);
         if (!this.context.getLock().isBusy(PUBLISH_LOCK)) {
           this.context.getLock().acquire(PUBLISH_LOCK, () => {

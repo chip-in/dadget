@@ -46,9 +46,9 @@ export const ERROR = {
   E1102: { code: 1102, message: "Consistent Error: already exists. target=%1" },
 
   /**
-   * Consistent Error: Not found
+   * Consistent Error: The before data not found
    */
-  E1103: { code: 1103, message: "Consistent Error: Not found" },
+  E1103: { code: 1103, message: "Consistent Error: The before data not found" },
 
   /**
    * Consistent Error: The object has already been deleted

@@ -6,16 +6,9 @@ import { DadgetError } from "../util/DadgetError";
 import { IDb } from "./container/IDb";
 
 const JOURNAL_COLLECTION = "journal";
-const RESET_CHECK_CSN_TYPES = [
-  TransactionType.FORCE_ROLLBACK,
-  TransactionType.TRUNCATE,
-  TransactionType.ABORT,
-  TransactionType.ABORT_IMPORT,
-];
 
 export class JournalDb {
   private protectedCsn: number = 0;
-  private checkCsn: number = 0;
 
   constructor(private db: IDb) {
     db.setCollection(JOURNAL_COLLECTION);
@@ -28,30 +21,6 @@ export class JournalDb {
 
   setProtectedCsn(protectedCsn: number) {
     this.protectedCsn = protectedCsn;
-  }
-
-  getCheckCsn() {
-    return this.checkCsn;
-  }
-
-  setCheckCsn(checkCsn: number) {
-    console.log("checkCsn: ", checkCsn);
-    this.checkCsn = checkCsn;
-  }
-
-  setCheckCsnByTransaction(transaction: TransactionObject) {
-    if (RESET_CHECK_CSN_TYPES.includes(transaction.type)) {
-      this.setCheckCsn(transaction.csn);
-    }
-  }
-
-  retrieveCheckCsn(): Promise<void> {
-    return this.db.findOneBySort({ type: { $in: RESET_CHECK_CSN_TYPES } }, { csn: -1 })
-      .then((result) => {
-        if (result) {
-          this.setCheckCsn(result.csn);
-        }
-      });
   }
 
   start(): Promise<void> {
@@ -92,7 +61,17 @@ export class JournalDb {
     if (request.type === TransactionType.ABORT_RESTORE) { return Promise.resolve(); }
     if (request.type === TransactionType.RESTORE) { return Promise.resolve(); }
     if (request.type === TransactionType.FORCE_ROLLBACK) { return Promise.resolve(); }
-    return this.db.findOneBySort({ target: request.target, csn: { $gt: this.checkCsn } }, { csn: -1 })
+    return this.db.find({ target: { $in: [request.target, ""] } }, { csn: -1 })
+      .then((results) => {
+        let abort = false;
+        for (const row of results) {
+          if (!abort && row.target) return row;
+          if (!row.target) {
+            if (row.type == TransactionType.TRUNCATE) return;
+            abort = row.type == TransactionType.ABORT || row.type == TransactionType.ABORT_IMPORT;
+          }
+        }
+      })
       .then((result) => {
         if (request.type === TransactionType.INSERT && request.new) {
           if (!result || result.type === TransactionType.DELETE) { return; }
