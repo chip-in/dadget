@@ -1,4 +1,6 @@
 import { MongoClientOptions } from "mongodb";
+import * as fs from "fs";
+import * as path from "path";
 
 export const SPLIT_IN_SUBSET_DB = "--";
 export const SPLIT_IN_ONE_DB = "==";
@@ -82,8 +84,6 @@ export class Mongo {
       "domainsEnabled",
     ];
     const strList = [
-      "sslCert",
-      "sslKey",
       "sslPass",
       "tlsCAFile",
       "tlsCertificateKeyFile",
@@ -93,6 +93,12 @@ export class Mongo {
       "w",
       "appname",
       "loggerLevel",
+    ];
+    const fileList = [
+      "sslCA",
+      "sslCRL",
+      "sslCert",
+      "sslKey",
     ];
     block: for (const key of Object.keys(env)) {
       if (key !== "MONGODB_URL" && key.startsWith("MONGODB_")) {
@@ -120,9 +126,17 @@ export class Mongo {
             continue block;
           }
         }
-        if (lKey === "sslca") {
-          option.sslCA = [val];
-          continue block;
+        for (const name of fileList) {
+          if (lKey === name.toLowerCase()) {
+            if (fs.existsSync(val)) {
+              option[name] = val;
+            } else {
+              const filePath = path.join(process.cwd(), "." + name);
+              fs.writeFileSync(filePath, val, { mode: 0o660 });
+              option[name] = filePath;
+            }
+            continue block;
+          }
         }
       }
     }
