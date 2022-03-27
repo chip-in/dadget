@@ -2,6 +2,7 @@ import * as parser from "mongo-parse";
 import * as hash from "object-hash";
 import { Util } from "../util/Util";
 import * as EJSON from "../util/Ejson";
+import { v1 as uuidv1 } from "uuid";
 
 export const enum TransactionType {
   INSERT = "insert",
@@ -344,7 +345,7 @@ export class TransactionObject extends TransactionRequest {
    * @param transaction
    */
   static calcDigest(transaction: TransactionObject) {
-    return hash(transaction, { algorithm: "md5", encoding: "base64" });
+    return uuidv1();
   }
 
   /**
@@ -363,7 +364,7 @@ export class TransactionObject extends TransactionRequest {
   beforeDigest: string;
 
   /**
-   * トランザクションオブジェクトからこの属性を除いたものを object-hash により、{ algorithm: "md5", encoding: "base64" }ハッシュした値
+   * ジャーナルチェックのためのUUID
    */
   digest?: string;
 
