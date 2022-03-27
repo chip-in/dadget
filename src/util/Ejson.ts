@@ -1,4 +1,4 @@
-export function stringify(obj: object): string {
+export function stringify(obj: any): string {
   return JSON.stringify(serialize(obj));
 }
 export function parse(str: string): any {

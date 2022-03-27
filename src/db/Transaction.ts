@@ -1,6 +1,7 @@
 import * as parser from "mongo-parse";
 import * as hash from "object-hash";
 import { Util } from "../util/Util";
+import * as EJSON from "../util/Ejson";
 
 export const enum TransactionType {
   INSERT = "insert",
@@ -42,14 +43,14 @@ export class TransactionRequest {
    *
    * 追加するオブジェクト。中身の形式は自由であるが、chip-in で予約されている _id, csn の2つの属性を含んでいてはいけない
    */
-  new?: object;
+  new?: object | string;
 
   /**
    * update,delete のとき
    *
    * 更新/削除するオブジェクトの直前の値（前提となるコンテキスト通番での値）で、_id, csn の2つの属性を含んでいなければならない
    */
-  before?: { [key: string]: any };
+  before?: { [key: string]: any } | string;
 
   /**
    * updateのときのみ
@@ -58,6 +59,22 @@ export class TransactionRequest {
    */
   operator?: { [op: string]: any };
 
+  static getNew(self: TransactionRequest): object {
+    return typeof self.new === "string" ? EJSON.parse(self.new) : self.new;
+  }
+
+  static getNewStr(self: TransactionRequest): string {
+    return typeof self.new === "string" ? self.new : EJSON.stringify(self.new);
+  }
+
+  static getBefore(self: TransactionRequest): { [key: string]: any } {
+    return typeof self.before === "string" ? EJSON.parse(self.before) : self.before;
+  }
+
+  static getRawBefore(self: TransactionRequest): { [key: string]: any } {
+    return typeof self.before === "string" ? JSON.parse(self.before) : self.before;
+  }
+
   /**
    * 更新operator適用
    * @param transaction
@@ -65,9 +82,9 @@ export class TransactionRequest {
   static applyOperator(transaction: TransactionRequest): { [key: string]: any } {
     if (!transaction.before) { throw new Error("transaction.before is missing."); }
     if (!transaction.operator) { throw new Error("transaction.operator is missing."); }
-    const obj = Object.assign({}, transaction.before) as { [key: string]: any };
+    const before = TransactionRequest.getBefore(transaction);
     const transactionObject = transaction as TransactionObject;
-    const updateObj = TransactionRequest.applyMongodbUpdate(obj, transaction.operator, transactionObject.datetime);
+    const updateObj = TransactionRequest.applyMongodbUpdate(before, transaction.operator, transactionObject.datetime);
     if (transactionObject.csn) { updateObj.csn = transactionObject.csn; }
     return updateObj;
   }

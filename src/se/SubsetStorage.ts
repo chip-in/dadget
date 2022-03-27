@@ -182,7 +182,8 @@ class UpdateProcessor extends Subscriber {
     this.logger.info(LOG_MESSAGES.UPDATE_SUBSET_DB, [], [transaction.csn]);
     const type = transaction.type;
     if ((type === TransactionType.INSERT || type === TransactionType.RESTORE) && transaction.new) {
-      const obj = { ...transaction.new, _id: transaction.target, csn: transaction.csn };
+      const newObj = TransactionRequest.getNew(transaction);
+      const obj = { ...newObj, _id: transaction.target, csn: transaction.csn };
       promise = promise.then(() => this.storage.getSubsetDb().insert(obj));
     } else if (type === TransactionType.UPDATE && transaction.before) {
       const updateObj = TransactionRequest.applyOperator(transaction);
@@ -248,9 +249,11 @@ class UpdateProcessor extends Subscriber {
           if (type === TransactionType.INSERT || type === TransactionType.RESTORE) {
             promise = promise.then(() => this.storage.getSubsetDb().deleteById(transaction.target));
           } else if (type === TransactionType.UPDATE && transaction.before) {
-            promise = promise.then(() => this.storage.getSubsetDb().update(transaction.target, transaction.before as object));
+            const before = TransactionRequest.getBefore(transaction);
+            promise = promise.then(() => this.storage.getSubsetDb().update(transaction.target, before));
           } else if (type === TransactionType.DELETE && transaction.before) {
-            promise = promise.then(() => this.storage.getSubsetDb().insert(transaction.before as object));
+            const before = TransactionRequest.getBefore(transaction);
+            promise = promise.then(() => this.storage.getSubsetDb().insert(before));
           } else if (type === TransactionType.TRUNCATE) {
             throw new Error("Cannot roll back TRUNCATE");
           } else if (type === TransactionType.BEGIN) {
@@ -508,7 +511,8 @@ class UpdateListener extends Subscriber {
     const query = parser.parse(subsetDefinition.query);
 
     if ((transaction.type === TransactionType.INSERT || transaction.type === TransactionType.RESTORE) && transaction.new) {
-      if (query.matches(transaction.new, false)) {
+      const newObj = TransactionRequest.getNew(transaction);
+      if (query.matches(newObj, false)) {
         // insert to inner -> INSERT
         return transaction;
       } else {
@@ -519,7 +523,8 @@ class UpdateListener extends Subscriber {
 
     if (transaction.type === TransactionType.UPDATE && transaction.before) {
       const updateObj = TransactionRequest.applyOperator(transaction);
-      if (query.matches(transaction.before, false)) {
+      const before = TransactionRequest.getBefore(transaction);
+      if (query.matches(before, false)) {
         if (query.matches(updateObj, false)) {
           // update from inner to inner -> UPDATE
           return transaction;
@@ -539,7 +544,8 @@ class UpdateListener extends Subscriber {
     }
 
     if (transaction.type === TransactionType.DELETE && transaction.before) {
-      if (query.matches(transaction.before, false)) {
+      const before = TransactionRequest.getBefore(transaction);
+      if (query.matches(before, false)) {
         // delete from inner -> DELETE
         return transaction;
       } else {
@@ -1169,7 +1175,7 @@ export class SubsetStorage extends ServiceEngine implements Proxy {
         return;
       }
       if (trans.before) {
-        dataMap[trans.target] = trans.before;
+        dataMap[trans.target] = TransactionRequest.getBefore(trans);
       } else if (trans.type === TransactionType.INSERT || trans.type === TransactionType.RESTORE) {
         delete dataMap[trans.target];
       }

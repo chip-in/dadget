@@ -1,6 +1,5 @@
 import { Proxy, ResourceNode, ServiceEngine, Subscriber } from "@chip-in/resource-node";
 import * as AsyncLock from "async-lock";
-import { serialize } from "bson";
 import * as http from "http";
 import * as URL from "url";
 import { CORE_NODE, MAX_OBJECT_SIZE } from "../Config";
@@ -344,7 +343,10 @@ class ContextManagementServer extends Proxy {
             if (!updateObject._id) { updateObject._id = transaction.target; }
             updateObject.csn = newCsn;
           }
-          this.lastBeforeObj = updateObject;
+          if (request.type !== TransactionType.BEGIN &&
+            request.type !== TransactionType.END) {
+            this.lastBeforeObj = updateObject;
+          }
           this.notifyAllWaitingList();
           resolve({
             status: "OK",
@@ -520,7 +522,7 @@ class ContextManagementServer extends Proxy {
                             const request = new TransactionRequest();
                             request.type = TransactionType.UPDATE;
                             request.target = (obj as any)._id;
-                            request.before = obj;
+                            request.before = EJSON.stringify(obj);
                             request.operator = operator;
                             count++;
                             return this.procTransaction(0, request, atomicId)
@@ -547,7 +549,7 @@ class ContextManagementServer extends Proxy {
                                 const request = new TransactionRequest();
                                 request.type = TransactionType.UPDATE;
                                 request.target = (obj as any)._id;
-                                request.before = obj;
+                                request.before = EJSON.stringify(obj);
                                 request.operator = operator;
                                 count++;
                                 return this.procTransaction(0, request, atomicId)
@@ -604,9 +606,9 @@ class ContextManagementServer extends Proxy {
     let newCsn: number;
     let updateObject: { _id?: string, csn?: number } | undefined;
     const _request = { ...request, datetime: new Date() };
-    if (this.lastBeforeObj && request.before
-      && (!request.before._id || this.lastBeforeObj._id === request.before._id)) {
-      const objDiff = Util.diff(this.lastBeforeObj, request.before);
+    if (this.lastBeforeObj && request.before && this.lastBeforeObj._id === request.target) {
+      const before = TransactionRequest.getBefore(request);
+      const objDiff = Util.diff(this.lastBeforeObj, before);
       if (objDiff) {
         this.logger.error(LOG_MESSAGES.REQUEST_BEFORE_HAS_MISMATCH, [JSON.stringify(objDiff)]);
         throw new DadgetError(ERROR.E2005, [JSON.stringify(request)]);
@@ -735,14 +737,7 @@ class ContextManagementServer extends Proxy {
       if (!request.target) { err = "target required in a transaction"; }
       if (request.before) { err = "before not required for INSERT"; }
       if (request.operator) { err = "operator not required for INSERT"; }
-      if (!request.new) {
-        err = "new required for INSERT";
-      } else {
-        const keys = Object.keys(request.new);
-        if (keys.indexOf("_id") >= 0 || keys.indexOf("csn") >= 0) {
-          err = "new object must not contain _id or csn";
-        }
-      }
+      if (!request.new) { err = "new required for INSERT"; }
     } else if (request.type === TransactionType.UPDATE) {
       if (!request.target) { err = "target required in a transaction"; }
       if (!request.before) { err = "before required for UPDATE"; }
@@ -1061,23 +1056,33 @@ export class ContextManager extends ServiceEngine {
     if (request.type === TransactionType.END_RESTORE) { return Promise.resolve(undefined); }
     if (request.type === TransactionType.ABORT_RESTORE) { return Promise.resolve(undefined); }
     if (request.type === TransactionType.FORCE_ROLLBACK) { return Promise.resolve(undefined); }
-    if (request.type === TransactionType.RESTORE && request.new) { return Promise.resolve(request.new); }
+    if (request.type === TransactionType.RESTORE && request.new) {
+      const newObj = TransactionRequest.getNew(request);
+      if (newObj.hasOwnProperty("_id") || newObj.hasOwnProperty("csn")) {
+        throw new DadgetError(ERROR.E2002, ["new object must not contain _id or csn"]);
+      }
+      return Promise.resolve(newObj);
+    }
     if (request.type === TransactionType.INSERT && request.new) {
-      const newObj = request.new;
-      if (serialize(newObj).length >= MAX_OBJECT_SIZE) {
+      const newObj = TransactionRequest.getNew(request);
+      if (newObj.hasOwnProperty("_id") || newObj.hasOwnProperty("csn")) {
+        throw new DadgetError(ERROR.E2002, ["new object must not contain _id or csn"]);
+      }
+      if (TransactionRequest.getNewStr(request).length >= MAX_OBJECT_SIZE) {
         throw new DadgetError(ERROR.E2006, [MAX_OBJECT_SIZE]);
       }
       return this._checkUniqueConstraint(csn, newObj)
         .then(() => Promise.resolve(newObj));
     } else if (request.type === TransactionType.UPDATE && request.before) {
       const newObj = TransactionRequest.applyOperator(request);
-      if (serialize(newObj).length >= MAX_OBJECT_SIZE) {
+      if (JSON.stringify(newObj).length >= MAX_OBJECT_SIZE) {
         throw new DadgetError(ERROR.E2006, [MAX_OBJECT_SIZE]);
       }
       return this._checkUniqueConstraint(csn, newObj, request.target)
         .then(() => Promise.resolve(newObj));
     } else if (request.type === TransactionType.DELETE && request.before) {
-      return Promise.resolve(request.before);
+      const before = TransactionRequest.getBefore(request);
+      return Promise.resolve(before);
     } else {
       throw new Error("checkConsistent error");
     }

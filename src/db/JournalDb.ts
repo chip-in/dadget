@@ -77,12 +77,13 @@ export class JournalDb {
           if (!result || result.type === TransactionType.DELETE) { return; }
           throw new DadgetError(ERROR.E1102, [request.target]);
         } else if (request.before) {
+          const before = TransactionRequest.getRawBefore(request);
           if (!result) {
-            if (request.before.csn < this.protectedCsn) { return; }
+            if (before.csn < this.protectedCsn) { return; }
             throw new DadgetError(ERROR.E1103);
           }
           if (result.type === TransactionType.DELETE) { throw new DadgetError(ERROR.E1104); }
-          if (result.csn > request.before.csn) { throw new DadgetError(ERROR.E1105, [result.csn, request.before.csn]); }
+          if (result.csn > before.csn) { throw new DadgetError(ERROR.E1105, [result.csn, before.csn]); }
           return;
         } else {
           throw new DadgetError(ERROR.E1106);

@@ -34,7 +34,6 @@
     "@chip-in/resource-node": "*",
     "async-lock": "^1.3.0",
     "babel-plugin-transform-remove-console": "^6.9.4",
-    "bson": "^4.2.0",
     "command-line-args": "^5.1.1",
     "command-line-usage": "^6.1.0",
     "core-js": "3",
