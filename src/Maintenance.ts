@@ -2,6 +2,8 @@ import * as readline from "readline";
 import * as fs from "fs";
 import { MongoClient } from "mongodb";
 import { promisify } from "util";
+import * as split2 from "split2";
+import * as through2 from "through2";
 import { Mongo, SPLIT_IN_SUBSET_DB } from "./Config";
 import { TransactionRequest, TransactionType } from "./db/Transaction";
 import Dadget from "./se/Dadget";
@@ -9,7 +11,7 @@ import { Util } from "./util/Util";
 import * as EJSON from "./util/Ejson";
 
 const MAX_EXPORT_NUM = 100;
-const MAX_UPLOAD_BYTES = 10 * 1024 * 1024;
+const MAX_UPLOAD_BYTES = 100 * 1024;
 
 export class Maintenance {
   static reset(target: string): void {
@@ -73,49 +75,66 @@ export class Maintenance {
       });
   }
 
-  private static async readAllLines(fileName: string) {
-    const rl = readline.createInterface({
-      input: fs.createReadStream(fileName, { encoding: 'utf8' }),
-      crlfDelay: Infinity
-    });
-    const lines: string[] = [];
-    rl.on('line', (input: string) => { lines.push(input) });
-    return new Promise<string[]>((resolve, reject) => {
-      rl.on('close', () => resolve(lines));
-    });
-  }
-
-  private static async uploadStream(promise: Promise<string[]>, dadget: Dadget, type: TransactionType, idName: string, atomicId: string) {
+  private static async uploadStream(fileName: string, dadget: Dadget, type: TransactionType, idName: string, atomicId: string) {
     let list: TransactionRequest[] = [];
     let listSize = 0;
-    const lines = await promise;
-    for (const line of lines) {
-      const data = EJSON.parse(line);
-      if (!data.hasOwnProperty(idName)) {
-        throw new Error("data has no " + idName + " property.");
-      }
-      const target = data[idName];
-      delete data._id;
-      delete data.csn;
-      listSize += line.length;
-      list.push({ type, target, new: data });
-      if (listSize > MAX_UPLOAD_BYTES) {
-        const _list = list;
-        list = [];
-        listSize = 0;
-        await dadget._execMany(0, _list, atomicId);
-      }
+    let promise1 = Promise.resolve();
+    let promise2 = Promise.resolve();
+    const func = async (list: TransactionRequest[]) => {
+      promise1 = dadget._execMany(0, list, atomicId);
+      await promise2;
+      promise2 = promise1;
     }
-    if (listSize > 0) {
-      await dadget._execMany(0, list, atomicId);
-    }
+    return new Promise<void>((resolve, reject) => {
+      fs.createReadStream(fileName, { encoding: 'utf8' })
+        .pipe(split2())
+        .pipe(
+          through2((chunk, enc, callback) => {
+            const line = chunk.toString();
+            const data = EJSON.parse(line);
+            if (!data.hasOwnProperty(idName)) {
+              throw new Error("data has no " + idName + " property.");
+            }
+            const target = data[idName];
+            delete data._id;
+            delete data.csn;
+            listSize += line.length;
+            list.push({ type, target, new: data });
+            if (listSize < MAX_UPLOAD_BYTES) {
+              callback(); //next step, no process
+            } else {
+              //call the method that creates a promise, and at the end
+              //just empty the buffer, and process the next chunk
+              func(list).finally(() => {
+                list = [];
+                listSize = 0;
+                callback();
+              });
+            }
+          }))
+        .on('error', error => {
+          reject(error);
+        })
+        .on('finish', () => {
+          //any remaining data still needs to be sent
+          //resolve the outer promise only when the final batch has completed processing
+          if (list.length > 0) {
+            func(list).then(() => promise2).finally(() => {
+              resolve();
+            });
+          } else {
+            promise2.finally(() => {
+              resolve();
+            });
+          }
+        });
+    });
   }
 
   static import(dadget: Dadget, fileName: string, idName: string): Promise<void> {
-    const lines = Maintenance.readAllLines(fileName);
     const atomicId = Dadget.uuidGen();
     return dadget._exec(0, { type: TransactionType.BEGIN_IMPORT, target: "" }, atomicId)
-      .then(() => Maintenance.uploadStream(lines, dadget, TransactionType.INSERT, idName, atomicId))
+      .then(() => Maintenance.uploadStream(fileName, dadget, TransactionType.INSERT, idName, atomicId))
       .catch((reason) => {
         return dadget._exec(0, { type: TransactionType.ABORT_IMPORT, target: "" }, atomicId)
           .then(() => { throw reason; });
@@ -125,11 +144,10 @@ export class Maintenance {
   }
 
   static restore(dadget: Dadget, fileName: string): Promise<void> {
-    const lines = Maintenance.readAllLines(fileName);
     const atomicId = Dadget.uuidGen();
     return dadget._exec(0, { type: TransactionType.BEGIN_RESTORE, target: "" }, atomicId)
       .then(() => dadget._exec(0, { type: TransactionType.TRUNCATE, target: "" }, atomicId))
-      .then(() => Maintenance.uploadStream(lines, dadget, TransactionType.RESTORE, "_id", atomicId))
+      .then(() => Maintenance.uploadStream(fileName, dadget, TransactionType.RESTORE, "_id", atomicId))
       .catch((reason) => {
         return dadget._exec(0, { type: TransactionType.ABORT_RESTORE, target: "" }, atomicId)
           .then(() => { throw reason; });
