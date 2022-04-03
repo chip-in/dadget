@@ -85,8 +85,6 @@ export class JournalDb {
           if (result.type === TransactionType.DELETE) { throw new DadgetError(ERROR.E1104); }
           if (result.csn > before.csn) { throw new DadgetError(ERROR.E1105, [result.csn, before.csn]); }
           return;
-        } else {
-          throw new DadgetError(ERROR.E1106);
         }
       });
   }

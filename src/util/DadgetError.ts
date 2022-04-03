@@ -33,7 +33,7 @@ export class DadgetError {
 }
 
 export class UniqueError extends Error {
-  constructor(e?: string) {
+  constructor(e: string, public obj: object) {
     super(e);
     this.name = new.target.name;
   }

@@ -446,6 +446,8 @@ export default class Dadget extends ServiceEngine {
     request.type = request.type.toLowerCase() as TransactionType;
     if (request.type !== TransactionType.INSERT &&
       request.type !== TransactionType.UPDATE &&
+      request.type !== TransactionType.UPSERT &&
+      request.type !== TransactionType.REPLACE &&
       request.type !== TransactionType.DELETE) {
       return Promise.reject(new DadgetError(ERROR.E2104));
     }
@@ -497,6 +499,8 @@ export default class Dadget extends ServiceEngine {
       request.type = request.type.toLowerCase() as TransactionType;
       if (request.type !== TransactionType.INSERT &&
         request.type !== TransactionType.UPDATE &&
+        request.type !== TransactionType.UPSERT &&
+        request.type !== TransactionType.REPLACE &&
         request.type !== TransactionType.DELETE) {
         return Promise.reject(new DadgetError(ERROR.E2104));
       }
@@ -776,6 +780,8 @@ class DadgetTr {
     request.type = request.type.toLowerCase() as TransactionType;
     if (request.type !== TransactionType.INSERT &&
       request.type !== TransactionType.UPDATE &&
+      request.type !== TransactionType.UPSERT &&
+      request.type !== TransactionType.REPLACE &&
       request.type !== TransactionType.DELETE) {
       return Promise.reject(new DadgetError(ERROR.E2104));
     }
@@ -788,6 +794,8 @@ class DadgetTr {
       request.type = request.type.toLowerCase() as TransactionType;
       if (request.type !== TransactionType.INSERT &&
         request.type !== TransactionType.UPDATE &&
+        request.type !== TransactionType.UPSERT &&
+        request.type !== TransactionType.REPLACE &&
         request.type !== TransactionType.DELETE) {
         return Promise.reject(new DadgetError(ERROR.E2104));
       }

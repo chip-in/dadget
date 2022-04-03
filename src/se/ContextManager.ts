@@ -293,7 +293,7 @@ class ContextManagementServer extends Proxy {
   }
 
   exec(postulatedCsn: number, request: TransactionRequest, atomicId?: string, options?: ExecOptions): Promise<object> {
-    const err = this.checkTransactionRequest(request);
+    const err = this.checkTransactionRequest(request, options);
     if (err) {
       return Promise.resolve({
         status: "NG",
@@ -336,7 +336,7 @@ class ContextManagementServer extends Proxy {
         }
 
         return this.context.getLock().acquire(TRANSACTION_LOCK, () => {
-          return this.procTransaction(postulatedCsn, request, atomicId);
+          return this.procTransaction(postulatedCsn, request, atomicId, options);
         }).then(({ transaction, newCsn, updateObject }) => {
           this.checkProtectedCsn();
           if (updateObject) {
@@ -380,7 +380,7 @@ class ContextManagementServer extends Proxy {
 
   execMany(postulatedCsn: number, requests: TransactionRequest[], atomicId?: string, options?: ExecOptions): Promise<object> {
     for (const request of requests) {
-      const err = this.checkTransactionRequest(request);
+      const err = this.checkTransactionRequest(request, options);
       if (err) {
         return Promise.resolve({
           status: "NG",
@@ -423,7 +423,7 @@ class ContextManagementServer extends Proxy {
             return Util.promiseEach<TransactionRequest>(
               requests,
               (request) => {
-                return this.procTransaction(0, request, atomicId)
+                return this.procTransaction(0, request, atomicId, options)
                   .then(({ newCsn }) => {
                     _newCsn = newCsn;
                   })
@@ -440,7 +440,7 @@ class ContextManagementServer extends Proxy {
                 return Util.promiseEach<TransactionRequest>(
                   requests,
                   (request) => {
-                    return this.procTransaction(postulatedCsn, request, atomicId)
+                    return this.procTransaction(postulatedCsn, request, atomicId, options)
                       .then(({ newCsn }) => {
                         _newCsn = newCsn;
                       })
@@ -601,7 +601,7 @@ class ContextManagementServer extends Proxy {
     });
   }
 
-  private procTransaction(postulatedCsn: number, request: TransactionRequest, atomicId?: string) {
+  private procTransaction(postulatedCsn: number, request: TransactionRequest, atomicId?: string, options?: ExecOptions) {
     let transaction: TransactionObject;
     let newCsn: number;
     let updateObject: { _id?: string, csn?: number } | undefined;
@@ -618,7 +618,7 @@ class ContextManagementServer extends Proxy {
     }
     return this.context.getJournalDb().checkConsistent(postulatedCsn, _request)
       .then(() => this.context.getSystemDb().getCsn())
-      .then((currentCsn) => this.context.checkUniqueConstraint(currentCsn, _request))
+      .then((currentCsn) => this.context.checkUniqueConstraint(currentCsn, _request, options))
       .then((_) => {
         updateObject = _;
         return Promise.all([this.context.getSystemDb().getCsn(), this.context.getJournalDb().getLastDigest()])
@@ -731,23 +731,24 @@ class ContextManagementServer extends Proxy {
     }
   }
 
-  private checkTransactionRequest(request: TransactionRequest) {
+  private checkTransactionRequest(request: TransactionRequest, options?: ExecOptions) {
     let err: string | null = null;
     if (request.type === TransactionType.INSERT || request.type === TransactionType.RESTORE) {
-      if (!request.target) { err = "target required in a transaction"; }
-      if (request.before) { err = "before not required for INSERT"; }
-      if (request.operator) { err = "operator not required for INSERT"; }
-      if (!request.new) { err = "new required for INSERT"; }
+      if (!request.target) { err = "target is required for INSERT"; }
+      if (request.before) { err = "before is not required for INSERT"; }
+      if (request.operator && !options?.upsertOnUniqueError) { err = "operator is not required for INSERT"; }
+      if (!request.new) { err = "new is required for INSERT"; }
     } else if (request.type === TransactionType.UPDATE) {
-      if (!request.target) { err = "target required in a transaction"; }
-      if (!request.before) { err = "before required for UPDATE"; }
-      if (!request.operator) { err = "operator required for UPDATE"; }
-      if (request.new) { err = "new not required for UPDATE"; }
+      if (!request.target) { err = "target is required for UPDATE"; }
+      if (!request.operator) { err = "operator is required for UPDATE"; }
+      if (request.new) { err = "new is not required for UPDATE"; }
+    } else if (request.type === TransactionType.UPSERT || request.type === TransactionType.REPLACE) {
+      if (!request.target) { err = "target is required for UPSERT and REPLACE"; }
+      if (!request.new) { err = "new is required for UPSERT and REPLACE"; }
     } else if (request.type === TransactionType.DELETE) {
-      if (!request.target) { err = "target required in a transaction"; }
-      if (!request.before) { err = "before required for DELETE"; }
-      if (request.operator) { err = "operator not required for DELETE"; }
-      if (request.new) { err = "new not required for DELETE"; }
+      if (!request.target) { err = "target is required for DELETE"; }
+      if (request.operator) { err = "operator is not required for DELETE"; }
+      if (request.new) { err = "new is not required for DELETE"; }
     } else if (request.type === TransactionType.TRUNCATE) {
       this.logger.warn(LOG_MESSAGES.EXEC_TRUNCATE);
     } else if (request.type === TransactionType.BEGIN) {
@@ -772,7 +773,7 @@ class ContextManagementServer extends Proxy {
       this.logger.warn(LOG_MESSAGES.EXEC_FORCE_ROLLBACK);
     } else if (request.type === TransactionType.CHECK) {
     } else {
-      err = "type not found in a transaction: " + request.type;
+      err = "type is not found in a transaction: " + request.type;
     }
     return err;
   }
@@ -1044,7 +1045,7 @@ export class ContextManager extends ServiceEngine {
     });
   }
 
-  checkUniqueConstraint(csn: number, request: TransactionRequest): Promise<object | undefined> {
+  checkUniqueConstraint(csn: number, request: TransactionRequest, options?: ExecOptions): Promise<object | undefined> {
     if (request.type === TransactionType.TRUNCATE) { return Promise.resolve(undefined); }
     if (request.type === TransactionType.BEGIN) { return Promise.resolve(undefined); }
     if (request.type === TransactionType.END) { return Promise.resolve(undefined); }
@@ -1071,21 +1072,93 @@ export class ContextManager extends ServiceEngine {
       if (TransactionRequest.getNewStr(request).length >= MAX_OBJECT_SIZE) {
         throw new DadgetError(ERROR.E2006, [MAX_OBJECT_SIZE]);
       }
+      if (this.uniqueIndexes.length !== 1 &&
+        (options?.upsertOnUniqueError || options?.replaceOnUniqueError)) {
+        throw new DadgetError(ERROR.E2012);
+      }
       return this._checkUniqueConstraint(csn, newObj)
-        .then(() => Promise.resolve(newObj));
-    } else if (request.type === TransactionType.UPDATE && request.before) {
-      const newObj = TransactionRequest.applyOperator(request);
-      if (JSON.stringify(newObj).length >= MAX_OBJECT_SIZE) {
+        .then(() => Promise.resolve(newObj))
+        .catch((error) => {
+          if (error instanceof UniqueError && (options?.upsertOnUniqueError || options?.replaceOnUniqueError)) {
+            const beforeObj = error.obj as any;
+            request.target = beforeObj._id;
+            request.before = EJSON.stringify(beforeObj);
+            request.type = options?.upsertOnUniqueError ? TransactionType.UPSERT : TransactionType.REPLACE;
+            const updateObj = TransactionRequest.applyOperator(request, beforeObj, newObj);
+            if (JSON.stringify(updateObj).length >= MAX_OBJECT_SIZE) {
+              throw new DadgetError(ERROR.E2006, [MAX_OBJECT_SIZE]);
+            }
+            return updateObj;
+          } else {
+            throw error;
+          }
+        });
+    } else if (request.type === TransactionType.UPDATE) {
+      return (request.before ? Promise.resolve() : this._find(csn, request.target)
+        .then((result) => {
+          if (!result) {
+            throw new DadgetError(ERROR.E1104);
+          } else {
+            request.before = result;
+          }
+        }))
+        .then(() => {
+          const newObj = TransactionRequest.applyOperator(request);
+          if (JSON.stringify(newObj).length >= MAX_OBJECT_SIZE) {
+            throw new DadgetError(ERROR.E2006, [MAX_OBJECT_SIZE]);
+          }
+          return this._checkUniqueConstraint(csn, newObj, request.target)
+            .then(() => Promise.resolve(newObj));
+        })
+    } else if (request.type === TransactionType.UPSERT || request.type === TransactionType.REPLACE) {
+      const newObj = TransactionRequest.getNew(request);
+      if (newObj.hasOwnProperty("_id") || newObj.hasOwnProperty("csn")) {
+        throw new DadgetError(ERROR.E2002, ["new object must not contain _id or csn"]);
+      }
+      if (TransactionRequest.getNewStr(request).length >= MAX_OBJECT_SIZE) {
         throw new DadgetError(ERROR.E2006, [MAX_OBJECT_SIZE]);
       }
-      return this._checkUniqueConstraint(csn, newObj, request.target)
-        .then(() => Promise.resolve(newObj));
-    } else if (request.type === TransactionType.DELETE && request.before) {
-      const before = TransactionRequest.getBefore(request);
-      return Promise.resolve(before);
+      return this._find(csn, request.target)
+        .then((beforeObj) => {
+          if (beforeObj) {
+            request.before = EJSON.stringify(beforeObj);
+            const updateObj = TransactionRequest.applyOperator(request, beforeObj, newObj);
+            if (JSON.stringify(updateObj).length >= MAX_OBJECT_SIZE) {
+              throw new DadgetError(ERROR.E2006, [MAX_OBJECT_SIZE]);
+            }
+            return updateObj;
+          } else {
+            return newObj;
+          }
+        }).then((obj) => {
+          return this._checkUniqueConstraint(csn, obj, request.target)
+            .then(() => Promise.resolve(obj));
+        })
+    } else if (request.type === TransactionType.DELETE) {
+      return (request.before ? Promise.resolve() : this._find(csn, request.target)
+        .then((result) => {
+          if (!result) {
+            throw new DadgetError(ERROR.E1104);
+          } else {
+            request.before = result;
+          }
+        }))
+        .then(() => {
+          const before = TransactionRequest.getBefore(request);
+          return Promise.resolve(before);
+        })
     } else {
       throw new Error("checkConsistent error");
     }
+  }
+
+  private _find(csn: number, id?: string): Promise<object | null> {
+    return Dadget._query(this.getNode(), this.database, { _id: id }, undefined, undefined, undefined, csn, "strict")
+      .then((result) => {
+        if (result.restQuery) { throw new Error("The queryHandlers has been empty before completing queries."); }
+        if (result.resultSet.length === 0) { return null; }
+        return result.resultSet[0];
+      });
   }
 
   private _checkUniqueConstraint(csn: number, obj: { [field: string]: any }, exceptId?: string): Promise<void> {
@@ -1106,11 +1179,11 @@ export class ContextManager extends ServiceEngine {
         if (exceptId) {
           condition.push({ _id: { $ne: exceptId } });
         }
-        return Dadget._count(this.getNode(), this.database, { $and: condition }, csn, "strict")
+        return Dadget._query(this.getNode(), this.database, { $and: condition }, undefined, undefined, undefined, csn, "strict")
           .then((result) => {
             if (result.restQuery) { throw new Error("The queryHandlers has been empty before completing queries."); }
-            if (result.resultCount === 0) { return loopData; }
-            throw new UniqueError("duplicate data error: " + JSON.stringify(condition));
+            if (result.resultSet.length === 0) { return loopData; }
+            throw new UniqueError("duplicate data error: " + JSON.stringify(condition), result.resultSet[0]);
           });
       },
     ).then(() => { return; });
@@ -1122,6 +1195,16 @@ export class ExecOptions {
    * ユニーク制約エラーの場合にスキップして処理を継続する。（_idは不可）
    */
   continueOnUniqueError?: boolean;
+
+  /**
+   * ユニーク制約エラーの場合にupsertを実行する
+   */
+  upsertOnUniqueError?: boolean;
+
+  /**
+  * ユニーク制約エラーの場合にreplaceを実行する
+  */
+  replaceOnUniqueError?: boolean;
 
   static continueOnError(options: ExecOptions | undefined, e: any) {
     if (options?.continueOnUniqueError) {

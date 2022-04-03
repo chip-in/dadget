@@ -188,6 +188,9 @@ class UpdateProcessor extends Subscriber {
     } else if (type === TransactionType.UPDATE && transaction.before) {
       const updateObj = TransactionRequest.applyOperator(transaction);
       promise = promise.then(() => this.storage.getSubsetDb().update(transaction.target, updateObj));
+    } else if (type === TransactionType.UPSERT || type === TransactionType.REPLACE) {
+      const updateObj = TransactionRequest.applyOperator(transaction);
+      promise = promise.then(() => this.storage.getSubsetDb().update(transaction.target, updateObj));
     } else if (type === TransactionType.DELETE && transaction.before) {
       promise = promise.then(() => this.storage.getSubsetDb().deleteById(transaction.target));
     } else if (type === TransactionType.TRUNCATE) {
@@ -510,7 +513,7 @@ class UpdateListener extends Subscriber {
     if (!subsetDefinition.query) { return transaction; }
     const query = parser.parse(subsetDefinition.query);
 
-    if ((transaction.type === TransactionType.INSERT || transaction.type === TransactionType.RESTORE) && transaction.new) {
+    if (!transaction.before && transaction.new) {
       const newObj = TransactionRequest.getNew(transaction);
       if (query.matches(newObj, false)) {
         // insert to inner -> INSERT
@@ -521,7 +524,18 @@ class UpdateListener extends Subscriber {
       }
     }
 
-    if (transaction.type === TransactionType.UPDATE && transaction.before) {
+    if (transaction.type === TransactionType.DELETE) {
+      const before = TransactionRequest.getBefore(transaction);
+      if (query.matches(before, false)) {
+        // delete from inner -> DELETE
+        return transaction;
+      } else {
+        // delete from out -> NONE
+        return { ...transaction, type: TransactionType.NONE, before: undefined };
+      }
+    }
+
+    if (transaction.before) {
       const updateObj = TransactionRequest.applyOperator(transaction);
       const before = TransactionRequest.getBefore(transaction);
       if (query.matches(before, false)) {
@@ -543,16 +557,6 @@ class UpdateListener extends Subscriber {
       }
     }
 
-    if (transaction.type === TransactionType.DELETE && transaction.before) {
-      const before = TransactionRequest.getBefore(transaction);
-      if (query.matches(before, false)) {
-        // delete from inner -> DELETE
-        return transaction;
-      } else {
-        // delete from out -> NONE
-        return { ...transaction, type: TransactionType.NONE, before: undefined };
-      }
-    }
     throw new Error("Bad transaction data:" + JSON.stringify(transaction));
   }
 }

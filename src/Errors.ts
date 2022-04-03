@@ -211,6 +211,11 @@ export const ERROR = {
   E2011: { code: 2011, message: "%1 is required." },
 
   /**
+   * When using upsertOnUniqueError or replaceOnUniqueError, there must be exactly one unique index.
+   */
+  E2012: { code: 2012, message: "When using upsertOnUniqueError or replaceOnUniqueError, there must be exactly one unique index." },
+
+  /**
    * Dadget Config Error
    */
   E2101: { code: 2101, message: "Dadget Config Error: %1" },

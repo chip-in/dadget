@@ -27,6 +27,7 @@
     "makedoc": "typedoc --excludeExternals --module commonjs --out ./docs/ ./src/",
     "lint": "tslint --fix 'src/**/*.ts'",
     "test": "mocha",
+    "integration_test": "CNODE_LOG_LEVEL=ERROR mocha integration_test",
     "browser-test": "cd browser-test && browserify src/indexeddb-test.js -o dest/test.js && cp src/index.html dest/ && http-server dest -c-1"
   },
   "dependencies": {
