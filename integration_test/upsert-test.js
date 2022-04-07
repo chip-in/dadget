@@ -38,28 +38,25 @@ describe('dadget', function () {
             unique,
         };
         try {
-            let result = await dadget.exec(0, {
+            await dadget.exec(0, {
                 type: "insert",
                 target: id,
                 new: data
             });
-            let count = await dadget.count({}, result.csn);
-            chai.assert.equal(count, 1);
+            chai.assert.equal(await dadget.count({}), 1);
 
-            result = await dadget.exec(0, {
+            await dadget.exec(0, {
                 type: "update",
                 target: id,
                 operator: { $set: { name: "b" } }
             });
-            count = await dadget.count({ name: "b" }, result.csn);
-            chai.assert.equal(count, 1);
+            chai.assert.equal(await dadget.count({ name: "b" }), 1);
 
-            result = await dadget.exec(0, {
+            await dadget.exec(0, {
                 type: "delete",
                 target: id,
             });
-            count = await dadget.count({}, result.csn);
-            chai.assert.equal(count, 0);
+            chai.assert.equal(await dadget.count({}), 0);
         } catch (e) {
             throw e.toString();
         }
@@ -75,48 +72,42 @@ describe('dadget', function () {
             unique,
         };
         try {
-            let result = await dadget.exec(0, {
+            await dadget.exec(0, {
                 type: "insert",
                 target: id,
                 new: data
             });
-            let count = await dadget.count({}, result.csn);
-            chai.assert.equal(count, 1);
+            chai.assert.equal(await dadget.count({}), 1);
 
-            result = await dadget.exec(0, {
+            await dadget.exec(0, {
                 type: "upsert",
                 target: id,
                 operator: { $set: { name: "b", prop: "pp" } },
                 new: data,
             });
-            count = await dadget.count({ name: "b" }, result.csn);
-            chai.assert.equal(count, 1);
+            chai.assert.equal(await dadget.count({ name: "b" }), 1);
 
-            result = await dadget.exec(0, {
+            await dadget.exec(0, {
                 type: "upsert",
                 target: id,
                 new: data,
             });
-            count = await dadget.count({ name: "a" }, result.csn);
-            chai.assert.equal(count, 1);
-            count = await dadget.count({ prop: "pp" }, result.csn);
-            chai.assert.equal(count, 1);
+            chai.assert.equal(await dadget.count({ name: "a" }), 1);
+            chai.assert.equal(await dadget.count({ prop: "pp" }), 1);
 
             let id2 = Dadget.uuidGen();
             let data2 = {
                 name: "cc",
                 unique: Dadget.uuidGen(),
             };
-            result = await dadget.exec(0, {
+            await dadget.exec(0, {
                 type: "upsert",
                 target: id2,
                 operator: { $set: { name: "c" } },
                 new: data2,
             });
-            count = await dadget.count({ name: "cc" }, result.csn);
-            chai.assert.equal(count, 1);
-            count = await dadget.count({}, result.csn);
-            chai.assert.equal(count, 2);
+            chai.assert.equal(await dadget.count({ name: "cc" }), 1);
+            chai.assert.equal(await dadget.count({}), 2);
         } catch (e) {
             throw e.toString();
         }
@@ -133,24 +124,21 @@ describe('dadget', function () {
             unique,
         };
         try {
-            let result = await dadget.exec(0, {
+            await dadget.exec(0, {
                 type: "replace",
                 target: id,
                 new: data
             });
-            let count = await dadget.count({}, result.csn);
-            chai.assert.equal(count, 1);
+            chai.assert.equal(await dadget.count({}), 1);
 
             delete data.prop;
-            result = await dadget.exec(0, {
+            await dadget.exec(0, {
                 type: "replace",
                 target: id,
                 new: data,
             });
-            count = await dadget.count({ name: "aa" }, result.csn);
-            chai.assert.equal(count, 1);
-            count = await dadget.count({ prop: "pp" }, result.csn);
-            chai.assert.equal(count, 0);
+            chai.assert.equal(await dadget.count({ name: "aa" }), 1);
+            chai.assert.equal(await dadget.count({ prop: "pp" }), 0);
         } catch (e) {
             throw e.toString();
         }
@@ -166,37 +154,31 @@ describe('dadget', function () {
             unique,
         };
         try {
-            let result = await dadget.exec(0, {
+            await dadget.exec(0, {
                 type: "insert",
                 target: id,
                 new: data
             }, { upsertOnUniqueError: true });
-            let count = await dadget.count({}, result.csn);
-            chai.assert.equal(count, 1);
+            chai.assert.equal(await dadget.count({}), 1);
 
-            result = await dadget.exec(0, {
+            await dadget.exec(0, {
                 type: "insert",
                 target: Dadget.uuidGen(),
                 operator: { $set: { name: "b", prop: "pp" } },
                 new: data,
             }, { upsertOnUniqueError: true });
-            count = await dadget.count({ name: "b" }, result.csn);
-            chai.assert.equal(count, 1);
-            count = await dadget.count({}, result.csn);
-            chai.assert.equal(count, 1);
+            chai.assert.equal(await dadget.count({ name: "b" }), 1);
+            chai.assert.equal(await dadget.count({}), 1);
 
             data.name = "c";
-            result = await dadget.exec(0, {
+            await dadget.exec(0, {
                 type: "insert",
                 target: Dadget.uuidGen(),
                 new: data,
             }, { upsertOnUniqueError: true });
-            count = await dadget.count({ name: "c" }, result.csn);
-            chai.assert.equal(count, 1);
-            count = await dadget.count({ prop: "pp" }, result.csn);
-            chai.assert.equal(count, 1);
-            count = await dadget.count({}, result.csn);
-            chai.assert.equal(count, 1);
+            chai.assert.equal(await dadget.count({ name: "c" }), 1);
+            chai.assert.equal(await dadget.count({ prop: "pp" }), 1);
+            chai.assert.equal(await dadget.count({}), 1);
         } catch (e) {
             throw e.toString();
         }
@@ -213,26 +195,48 @@ describe('dadget', function () {
             unique,
         };
         try {
-            let result = await dadget.exec(0, {
+            await dadget.exec(0, {
                 type: "insert",
                 target: id,
                 new: data
             }, { replaceOnUniqueError: true });
-            let count = await dadget.count({}, result.csn);
-            chai.assert.equal(count, 1);
+            chai.assert.equal(await dadget.count({}), 1);
 
             delete data.prop;
-            result = await dadget.exec(0, {
+            await dadget.exec(0, {
                 type: "insert",
                 target: Dadget.uuidGen(),
                 new: data,
             }, { replaceOnUniqueError: true });
-            count = await dadget.count({ name: "aa" }, result.csn);
-            chai.assert.equal(count, 1);
-            count = await dadget.count({ prop: "pp" }, result.csn);
-            chai.assert.equal(count, 0);
+            chai.assert.equal(await dadget.count({ name: "aa" }), 1);
+            chai.assert.equal(await dadget.count({ prop: "pp" }), 0);
         } catch (e) {
             throw e.toString();
         }
+    });
+
+
+    it('transaction', async () => {
+        let dadget = Dadget.getDb(node, "test1");
+        await dadget.clear();
+        let id = Dadget.uuidGen();
+        let unique = Dadget.uuidGen();
+        let data = {
+            name: "a",
+            unique,
+        };
+        try {
+            await Dadget.execTransaction(node, ["test1"], async (test1) => {
+                await test1.exec(0, {
+                    type: "insert",
+                    target: id,
+                    new: data
+                });
+                chai.assert.equal(await test1.count({}), 1);
+                throw "test";
+            });
+        } catch (e) {
+        }
+        chai.assert.equal(await dadget.count({}), 0);
     });
 });
