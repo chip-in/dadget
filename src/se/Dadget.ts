@@ -20,6 +20,7 @@ import { UpdateManager } from "./UpdateManager";
 
 const QUERY_ERROR_RETRY_COUNT = 4;
 const QUERY_ERROR_WAIT_TIME = 5000;
+export const CLIENT_VERSION = 1;
 
 /**
  * Dadgetコンフィグレーションパラメータ
@@ -457,7 +458,7 @@ export default class Dadget extends ServiceEngine {
   _exec(csn: number, request: TransactionRequest, atomicId: string | undefined, options?: ExecOptions): Promise<object | null> {
     if (request.new) request.new = EJSON.stringify(request.new);
     if (request.before) request.before = EJSON.stringify(request.before);
-    const sendData = { csn, request, atomicId, options };
+    const sendData = { csn, request, atomicId, options, version: CLIENT_VERSION };
     return this.node.fetch(CORE_NODE.PATH_CONTEXT.replace(/:database\b/g, this.database) + CORE_NODE.PATH_EXEC, {
       method: "POST",
       headers: {
@@ -513,7 +514,7 @@ export default class Dadget extends ServiceEngine {
       if (request.new) request.new = EJSON.stringify(request.new);
       if (request.before) request.before = EJSON.stringify(request.before);
     }
-    const sendData = { csn, requests, atomicId, options };
+    const sendData = { csn, requests, atomicId, options, version: CLIENT_VERSION };
     return this.node.fetch(CORE_NODE.PATH_CONTEXT.replace(/:database\b/g, this.database) + CORE_NODE.PATH_EXEC_MANY, {
       method: "POST",
       headers: {
@@ -555,7 +556,7 @@ export default class Dadget extends ServiceEngine {
   }
 
   _updateMany(query: object, operator: object, atomicId: string | undefined): Promise<number> {
-    const sendData = { query, operator, atomicId };
+    const sendData = { query, operator, atomicId, version: CLIENT_VERSION };
     return this.node.fetch(CORE_NODE.PATH_CONTEXT.replace(/:database\b/g, this.database) + CORE_NODE.PATH_UPDATE_MANY, {
       method: "POST",
       headers: {

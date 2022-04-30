@@ -7,7 +7,7 @@ import { ERROR } from "../Errors";
 import { LOG_MESSAGES } from "../LogMessages";
 import { DadgetError } from "../util/DadgetError";
 import { Logger } from "../util/Logger";
-import { CountResult, CsnMode, QueryResult } from "./Dadget";
+import { CountResult, CsnMode, QueryResult, CLIENT_VERSION } from "./Dadget";
 import { DatabaseRegistry, SubsetDef } from "./DatabaseRegistry";
 
 /**
@@ -105,6 +105,7 @@ export class QueryHandler extends ServiceEngine {
       csnMode,
       projection: projection ? EJSON.stringify(projection) : undefined,
       offset,
+      version: CLIENT_VERSION,
     };
     return this.node.fetch(CORE_NODE.PATH_SUBSET
       .replace(/:database\b/g, this.database)
@@ -134,7 +135,7 @@ export class QueryHandler extends ServiceEngine {
   count(csn: number, query: object, csnMode?: CsnMode): Promise<CountResult> {
     this.logger.info(LOG_MESSAGES.COUNT_CSN, [csnMode || ""], [csn]);
     this.logger.debug(LOG_MESSAGES.COUNT, [JSON.stringify(query)]);
-    const request = { csn, query: EJSON.stringify(query), csnMode };
+    const request = { csn, query: EJSON.stringify(query), csnMode, version: CLIENT_VERSION };
     return this.node.fetch(CORE_NODE.PATH_SUBSET
       .replace(/:database\b/g, this.database)
       .replace(/:subset\b/g, this.subsetName) + CORE_NODE.PATH_COUNT, {

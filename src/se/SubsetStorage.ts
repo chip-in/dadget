@@ -20,7 +20,7 @@ import { Logger } from "../util/Logger";
 import { LogicalOperator } from "../util/LogicalOperator";
 import { ProxyHelper } from "../util/ProxyHelper";
 import { Util } from "../util/Util";
-import { CountResult, CsnMode, default as Dadget, QueryResult } from "./Dadget";
+import { CLIENT_VERSION, CountResult, CsnMode, default as Dadget, QueryResult } from "./Dadget";
 import { DatabaseRegistry, SubsetDef } from "./DatabaseRegistry";
 
 const MAX_RESPONSE_SIZE_OF_JOURNALS = 10485760;
@@ -969,6 +969,7 @@ export class SubsetStorage extends ServiceEngine implements Proxy {
       const limit = ProxyHelper.validateNumber(request.limit, "limit");
       const offset = ProxyHelper.validateNumber(request.offset, "offset");
       const projection = request.projection ? EJSON.parse(request.projection) : undefined;
+      if (request.version && Number(request.version) > CLIENT_VERSION) throw new DadgetError(ERROR.E3002);
       return this.query(csn, query, sort, limit, request.csnMode, projection, offset)
         .then((result) => {
           return { status: "OK", result };

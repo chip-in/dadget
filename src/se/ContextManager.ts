@@ -14,7 +14,7 @@ import * as EJSON from "../util/Ejson";
 import { Logger } from "../util/Logger";
 import { ProxyHelper } from "../util/ProxyHelper";
 import { Util } from "../util/Util";
-import Dadget from "./Dadget";
+import Dadget, { CLIENT_VERSION } from "./Dadget";
 import { DatabaseRegistry, IndexDef } from "./DatabaseRegistry";
 
 const KEEP_TIME_AFTER_CONTEXT_MANAGER_MASTER_ACQUIRED_MS = 3000; // 3000ms
@@ -212,6 +212,7 @@ class ContextManagementServer extends Proxy {
       return ProxyHelper.procPost(req, res, this.logger, (data) => {
         const csn = ProxyHelper.validateNumberRequired(data.csn, "csn");
         this.logger.info(LOG_MESSAGES.ON_RECEIVE_EXEC, [], [csn]);
+        if (data.version && Number(data.version) > CLIENT_VERSION) throw new DadgetError(ERROR.E3002);
         return this.exec(csn, data.request, data.atomicId, data.options)
           .catch((reason) => ({ status: "NG", reason }));
       })
@@ -223,6 +224,7 @@ class ContextManagementServer extends Proxy {
       return ProxyHelper.procPost(req, res, this.logger, (data) => {
         const csn = ProxyHelper.validateNumberRequired(data.csn, "csn");
         this.logger.info(LOG_MESSAGES.ON_RECEIVE_EXEC_MANY, [], [csn]);
+        if (data.version && Number(data.version) > CLIENT_VERSION) throw new DadgetError(ERROR.E3002);
         return this.execMany(csn, data.requests, data.atomicId, data.options)
           .catch((reason) => ({ status: "NG", reason }));
       })
@@ -233,6 +235,7 @@ class ContextManagementServer extends Proxy {
     } else if (url.pathname.endsWith(CORE_NODE.PATH_UPDATE_MANY) && method === "POST") {
       return ProxyHelper.procPost(req, res, this.logger, (data) => {
         this.logger.info(LOG_MESSAGES.ON_RECEIVE_UPDATE_MANY, [JSON.stringify(data.query), JSON.stringify(data.operator)], []);
+        if (data.version && Number(data.version) > CLIENT_VERSION) throw new DadgetError(ERROR.E3002);
         return this.updateMany(data.query, data.operator, data.atomicId)
           .catch((reason) => ({ status: "NG", reason }));
       })
@@ -1099,7 +1102,7 @@ export class ContextManager extends ServiceEngine {
           if (!result) {
             throw new DadgetError(ERROR.E1104);
           } else {
-            request.before = result;
+            request.before = EJSON.stringify(result);
           }
         }))
         .then(() => {
@@ -1140,7 +1143,7 @@ export class ContextManager extends ServiceEngine {
           if (!result) {
             throw new DadgetError(ERROR.E1104);
           } else {
-            request.before = result;
+            request.before = EJSON.stringify(result);
           }
         }))
         .then(() => {

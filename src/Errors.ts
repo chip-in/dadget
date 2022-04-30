@@ -279,4 +279,9 @@ export const ERROR = {
    * Undefined Error
    */
   E3001: { code: 3001, message: "Undefined Error: %1" },
-};
+
+  /**
+   * Client Version Error
+   */
+   E3002: { code: 3002, message: "Client Version Error" },
+  };

@@ -12,7 +12,7 @@ try {
         env[data[0]] = data[1];
     })
 } catch (e) { }
-const CORE_SERVER = process.env.CORE_SERVER ? process.env.CORE_SERVER : env.CORE_SERVER ? env.CORE_SERVER : "http://test-core.chip-in.net";
+const CORE_SERVER = process.env.CORE_SERVER ? process.env.CORE_SERVER : env.CORE_SERVER ? env.CORE_SERVER : "http://core";
 let node = new ResourceNode(CORE_SERVER, "test-client");
 if (process.env.ACCESS_TOKEN) {
     node.setJWTAuthorization(process.env.ACCESS_TOKEN);
@@ -215,7 +215,6 @@ describe('dadget', function () {
         }
     });
 
-
     it('transaction', async () => {
         let dadget = Dadget.getDb(node, "test1");
         await dadget.clear();
@@ -238,5 +237,43 @@ describe('dadget', function () {
         } catch (e) {
         }
         chai.assert.equal(await dadget.count({}), 0);
+    });
+
+    it('transaction update', async () => {
+        let dadget = Dadget.getDb(node, "test1");
+        await dadget.clear();
+        let id = Dadget.uuidGen();
+        let unique = Dadget.uuidGen();
+        let data = {
+            name: "a",
+            unique,
+        };
+        await dadget.exec(0, {
+            type: "insert",
+            target: id,
+            new: data
+        });
+        try {
+            await Dadget.execTransaction(node, ["test1"], async (test1) => {
+                await test1.exec(0, {
+                    type: "update",
+                    target: id,
+                    operator: {
+                        "$set": {
+                            "name": "b"
+                        }
+                    }
+                });
+                chai.assert.equal(await test1.count({ "name": "b" }), 1);
+                await test1.exec(0, {
+                    type: "delete",
+                    target: id
+                });
+                chai.assert.equal(await test1.count({ "name": "b" }), 0);
+                throw "test";
+            });
+        } catch (e) {
+        }
+        chai.assert.equal(await dadget.count({ "name": "b" }), 0);
     });
 });
