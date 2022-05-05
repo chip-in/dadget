@@ -19,7 +19,6 @@
     "mongodb": false
   },
   "scripts": {
-    "prepare": "npm run clean && npm run release_build",
     "clean": "rm -rf lib dest",
     "release_build": "tsc && babel dest --out-dir lib",
     "build": "tsc && babel dest --out-dir lib",

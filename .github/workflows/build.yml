@@ -13,6 +13,8 @@ jobs:
           registry-url: 'https://registry.npmjs.org'
           scope: '@chip-in'
       - run: npm install
+      - run: npm run clean
+      - run: npm run release_build
       - run: npm publish
         env:
           NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}

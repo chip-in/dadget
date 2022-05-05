@@ -4,8 +4,12 @@ ENV CI_HOME=/usr/local/chip-in
 
 RUN apk update
 COPY . ${CI_HOME}
-WORKDIR ${CI_HOME}/docker-server
 RUN npm set unsafe-perm true
+WORKDIR ${CI_HOME}
+RUN npm install
+RUN npm run clean
+RUN npm run release_build
+WORKDIR ${CI_HOME}/docker-server
 RUN npm install
 RUN npm run build
 ENTRYPOINT ["node", "lib/server.js"]
