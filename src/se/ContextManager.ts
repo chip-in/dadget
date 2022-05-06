@@ -1,5 +1,6 @@
 import { Proxy, ResourceNode, ServiceEngine, Subscriber } from "@chip-in/resource-node";
 import * as AsyncLock from "async-lock";
+import { serialize } from "bson";
 import * as http from "http";
 import * as URL from "url";
 import { CORE_NODE, MAX_OBJECT_SIZE } from "../Config";
@@ -525,7 +526,7 @@ class ContextManagementServer extends Proxy {
                             const request = new TransactionRequest();
                             request.type = TransactionType.UPDATE;
                             request.target = (obj as any)._id;
-                            request.before = EJSON.stringify(obj);
+                            request.before = obj;
                             request.operator = operator;
                             count++;
                             return this.procTransaction(0, request, atomicId)
@@ -552,7 +553,7 @@ class ContextManagementServer extends Proxy {
                                 const request = new TransactionRequest();
                                 request.type = TransactionType.UPDATE;
                                 request.target = (obj as any)._id;
-                                request.before = EJSON.stringify(obj);
+                                request.before = obj;
                                 request.operator = operator;
                                 count++;
                                 return this.procTransaction(0, request, atomicId)
@@ -1072,7 +1073,7 @@ export class ContextManager extends ServiceEngine {
       if (newObj.hasOwnProperty("_id") || newObj.hasOwnProperty("csn")) {
         throw new DadgetError(ERROR.E2002, ["new object must not contain _id or csn"]);
       }
-      if (TransactionRequest.getNewStr(request).length >= MAX_OBJECT_SIZE) {
+      if ((typeof request.new === "string" ? request.new : serialize(request.new)).length >= MAX_OBJECT_SIZE) {
         throw new DadgetError(ERROR.E2006, [MAX_OBJECT_SIZE]);
       }
       if (this.uniqueIndexes.length !== 1 &&
@@ -1085,10 +1086,10 @@ export class ContextManager extends ServiceEngine {
           if (error instanceof UniqueError && (options?.upsertOnUniqueError || options?.replaceOnUniqueError)) {
             const beforeObj = error.obj as any;
             request.target = beforeObj._id;
-            request.before = EJSON.stringify(beforeObj);
+            request.before = beforeObj;
             request.type = options?.upsertOnUniqueError ? TransactionType.UPSERT : TransactionType.REPLACE;
             const updateObj = TransactionRequest.applyOperator(request, beforeObj, newObj);
-            if (JSON.stringify(updateObj).length >= MAX_OBJECT_SIZE) {
+            if (serialize(updateObj).length >= MAX_OBJECT_SIZE) {
               throw new DadgetError(ERROR.E2006, [MAX_OBJECT_SIZE]);
             }
             return updateObj;
@@ -1102,31 +1103,31 @@ export class ContextManager extends ServiceEngine {
           if (!result) {
             throw new DadgetError(ERROR.E1104);
           } else {
-            request.before = EJSON.stringify(result);
+            request.before = result;
           }
         }))
         .then(() => {
           const newObj = TransactionRequest.applyOperator(request);
-          if (JSON.stringify(newObj).length >= MAX_OBJECT_SIZE) {
+          if (serialize(newObj).length >= MAX_OBJECT_SIZE) {
             throw new DadgetError(ERROR.E2006, [MAX_OBJECT_SIZE]);
           }
           return this._checkUniqueConstraint(csn, newObj, request.target)
             .then(() => Promise.resolve(newObj));
         })
-    } else if (request.type === TransactionType.UPSERT || request.type === TransactionType.REPLACE) {
+    } else if ((request.type === TransactionType.UPSERT || request.type === TransactionType.REPLACE) && request.new) {
       const newObj = TransactionRequest.getNew(request);
       if (newObj.hasOwnProperty("_id") || newObj.hasOwnProperty("csn")) {
         throw new DadgetError(ERROR.E2002, ["new object must not contain _id or csn"]);
       }
-      if (TransactionRequest.getNewStr(request).length >= MAX_OBJECT_SIZE) {
+      if ((typeof request.new === "string" ? request.new : serialize(request.new)).length >= MAX_OBJECT_SIZE) {
         throw new DadgetError(ERROR.E2006, [MAX_OBJECT_SIZE]);
       }
       return this._find(csn, request.target)
         .then((beforeObj) => {
           if (beforeObj) {
-            request.before = EJSON.stringify(beforeObj);
+            request.before = beforeObj;
             const updateObj = TransactionRequest.applyOperator(request, beforeObj, newObj);
-            if (JSON.stringify(updateObj).length >= MAX_OBJECT_SIZE) {
+            if (serialize(updateObj).length >= MAX_OBJECT_SIZE) {
               throw new DadgetError(ERROR.E2006, [MAX_OBJECT_SIZE]);
             }
             return updateObj;
@@ -1143,7 +1144,7 @@ export class ContextManager extends ServiceEngine {
           if (!result) {
             throw new DadgetError(ERROR.E1104);
           } else {
-            request.before = EJSON.stringify(result);
+            request.before = result;
           }
         }))
         .then(() => {

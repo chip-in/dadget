@@ -36,6 +36,11 @@ export class DadgetConfigDef {
    * 未使用サブセット自動削除フラグ
    */
   autoDeleteSubset?: boolean;
+
+  /**
+   * ジャーナルのnewデータの文字列化による高速化フラグ
+   */
+  useJournalStringification?: boolean;
 }
 
 export type CsnMode = "strict" | "latest";
@@ -456,8 +461,10 @@ export default class Dadget extends ServiceEngine {
   }
 
   _exec(csn: number, request: TransactionRequest, atomicId: string | undefined, options?: ExecOptions): Promise<object | null> {
-    if (request.new) request.new = EJSON.stringify(request.new);
-    if (request.before) request.before = EJSON.stringify(request.before);
+    if (this.option.useJournalStringification) {
+      if (request.new) request.new = EJSON.stringify(request.new);
+      if (request.before) request.before = EJSON.stringify(request.before);
+    }
     const sendData = { csn, request, atomicId, options, version: CLIENT_VERSION };
     return this.node.fetch(CORE_NODE.PATH_CONTEXT.replace(/:database\b/g, this.database) + CORE_NODE.PATH_EXEC, {
       method: "POST",
@@ -510,9 +517,11 @@ export default class Dadget extends ServiceEngine {
   }
 
   _execMany(csn: number, requests: TransactionRequest[], atomicId: string | undefined, options?: ExecOptions): Promise<void> {
-    for (const request of requests) {
-      if (request.new) request.new = EJSON.stringify(request.new);
-      if (request.before) request.before = EJSON.stringify(request.before);
+    if (this.option.useJournalStringification) {
+      for (const request of requests) {
+        if (request.new) request.new = EJSON.stringify(request.new);
+        if (request.before) request.before = EJSON.stringify(request.before);
+      }
     }
     const sendData = { csn, requests, atomicId, options, version: CLIENT_VERSION };
     return this.node.fetch(CORE_NODE.PATH_CONTEXT.replace(/:database\b/g, this.database) + CORE_NODE.PATH_EXEC_MANY, {

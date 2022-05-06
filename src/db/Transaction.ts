@@ -66,10 +66,6 @@ export class TransactionRequest {
     return typeof self.new === "string" ? EJSON.parse(self.new) : self.new;
   }
 
-  static getNewStr(self: TransactionRequest): string {
-    return typeof self.new === "string" ? self.new : EJSON.stringify(self.new);
-  }
-
   static getBefore(self: TransactionRequest): { [key: string]: any } {
     if (!self.before) { throw new Error("transaction.before is missing."); }
     return typeof self.before === "string" ? EJSON.parse(self.before) : self.before;
