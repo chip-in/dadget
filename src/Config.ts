@@ -1,9 +1,147 @@
+import { MongoClientOptions } from "mongodb";
+import * as fs from "fs";
+import * as path from "path";
+
+export const SPLIT_IN_SUBSET_DB = "--";
+export const SPLIT_IN_ONE_DB = "==";
+export const SPLIT_IN_INDEXED_DB = "__";
 
 export class Mongo {
+  static option: MongoClientOptions;
+  static url: [string, string | null];
+
+  static _getUrl() {
+    if (Mongo.url) return Mongo.url;
+    const baseUrl = (process.env.MONGODB_URL ? process.env.MONGODB_URL : "mongodb://localhost:27017/") as string;
+    const re = /^mongodb:\/\/(?<id_pw>[^:\s]+:[^@\s]*@)?(?<hosts>[^@\/\s]+)(\/(?<db>[^?\s]*)(?<query>\?[^\s\n]+)?)?$/;
+    const url = baseUrl.match(re);
+    if (!url || !url.groups) throw "Invalid mongodb URL:" + baseUrl;
+    const newUrl = "mongodb://" + (url.groups.id_pw || "") + url.groups.hosts + "/" + (url.groups.query || "");
+    if (!url.groups.db) {
+      Mongo.url = [newUrl, null];
+    } else {
+      Mongo.url = [newUrl, url.groups.db];
+    }
+    return Mongo.url;
+  }
+
   static getUrl() {
-    let url = (process.env.MONGODB_URL ? process.env.MONGODB_URL : "mongodb://localhost:27017/") as string;
-    if (url.slice(-1) !== "/") { url += "/"; }
-    return url;
+    return Mongo._getUrl()[0];
+  }
+
+  static isOneDb() {
+    return !!Mongo._getUrl()[1];
+  }
+
+  static getDbName(database: string) {
+    return Mongo._getUrl()[1] || database;
+  }
+
+  static getCollectionName(database: string, collection: string) {
+    if (Mongo._getUrl()[1]) {
+      return database + SPLIT_IN_ONE_DB + collection
+    } else {
+      return collection
+    }
+  }
+
+  static getOption(): MongoClientOptions {
+    if (Mongo.option) return Mongo.option;
+    const option: any = { useUnifiedTopology: true };
+    const env = process.env;
+    const intList = [
+      "poolSize",
+      "keepAlive",
+      "connectTimeoutMS",
+      "socketTimeoutMS",
+      "reconnectTries",
+      "reconnectInterval",
+      "haInterval",
+      "secondaryAcceptableLatencyMS",
+      "acceptableLatencyMS",
+      "w",
+      "wtimeout",
+      "bufferMaxEntries",
+      "maxStalenessSeconds",
+    ];
+    const boolList = [
+      "ssl",
+      "sslValidate",
+      "tls",
+      "tlsInsecure",
+      "autoReconnect",
+      "noDelay",
+      "ha",
+      "connectWithNoPrimary",
+      "j",
+      "forceServerObjectId",
+      "serializeFunctions",
+      "ignoreUndefined",
+      "raw",
+      "promoteLongs",
+      "promoteBuffers",
+      "promoteValues",
+      "domainsEnabled",
+    ];
+    const strList = [
+      "sslPass",
+      "tlsCAFile",
+      "tlsCertificateKeyFile",
+      "tlsCertificateKeyFilePassword",
+      "replicaSet",
+      "authSource",
+      "w",
+      "appname",
+      "loggerLevel",
+    ];
+    const fileList = [
+      "sslCA",
+      "sslCRL",
+      "sslCert",
+      "sslKey",
+    ];
+    block: for (const key of Object.keys(env)) {
+      if (key !== "MONGODB_URL" && key.startsWith("MONGODB_")) {
+        const val: any = env[key];
+        const lKey = key.substring("MONGODB_".length).replace('_', '').toLowerCase();
+        for (const name of intList) {
+          if (lKey === name.toLowerCase()) {
+            const v = parseInt(val, 10);
+            if (!isNaN(v)) {
+              option[name] = v;
+              continue block;
+            }
+          }
+        }
+        for (const name of boolList) {
+          if (lKey === name.toLowerCase()) {
+            const v = parseInt(val, 10);
+            option[name] = val.toLowerCase() === "true";
+            continue block;
+          }
+        }
+        for (const name of strList) {
+          if (lKey === name.toLowerCase()) {
+            option[name] = val;
+            continue block;
+          }
+        }
+        for (const name of fileList) {
+          if (lKey === name.toLowerCase()) {
+            if (fs.existsSync(val)) {
+              option[name] = val;
+            } else {
+              const filePath = path.join(process.cwd(), "." + name);
+              fs.writeFileSync(filePath, val, { mode: 0o660 });
+              option[name] = filePath;
+            }
+            continue block;
+          }
+        }
+      }
+    }
+    Mongo.option = option;
+    return option;
   }
 }
 
@@ -38,10 +176,16 @@ export const CORE_NODE = {
   PATH_SUBSET: "/d/:database/subset/:subset",
   PATH_SUBSET_UPDATOR: "/d/:database/updator/:subset",
   PATH_EXEC: "/exec",
-  PATH_GET_TRANSACTION: "/getTransactionJournal",
-  PATH_GET_TRANSACTIONS: "/getTransactionJournals",
-  PATH_QUERY: "/query",
-  PATH_COUNT: "/count",
+  PATH_EXEC_MANY: "/execMany",
+  PATH_UPDATE_MANY: "/updateMany",
+  PATH_GET_TRANSACTION: "/getTransactionJournal/_get",
+  PATH_GET_TRANSACTION_OLD: "/getTransactionJournal",
+  PATH_GET_TRANSACTIONS: "/getTransactionJournals/_get",
+  PATH_GET_TRANSACTIONS_OLD: "/getTransactionJournals",
+  PATH_QUERY: "/query/_get",
+  PATH_QUERY_OLD: "/query",
+  PATH_COUNT: "/count/_get",
+  PATH_COUNT_OLD: "/count",
 };
 
-export const MAX_OBJECT_SIZE = 8 * 1024 * 1024;
+export const MAX_OBJECT_SIZE = 8 * 1024 * 1024 - 2048;

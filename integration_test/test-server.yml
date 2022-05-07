@@ -1,0 +1,22 @@
+name: test-server
+serviceEngines:
+- class: DatabaseRegistry
+  database: test1
+  metadata:
+    subsets:
+      wholeContents:
+        priority: 0
+    indexes:
+      - index:
+          unique: 1
+        property:
+          unique: true
+- class: ContextManager
+  database: test1
+- class: QueryHandler
+  database: test1
+  subset: wholeContents
+- class: SubsetStorage
+  database: test1
+  subset: wholeContents
+  type: persistent

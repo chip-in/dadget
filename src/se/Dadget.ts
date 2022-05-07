@@ -1,16 +1,18 @@
 import * as parser from "mongo-parse";
 import { v1 as uuidv1 } from "uuid";
 
+import { Logger as ChipInLogger } from "@chip-in/logger";
 import { ResourceNode, ServiceEngine, Subscriber } from "@chip-in/resource-node";
-import { CORE_NODE, setAccessControlAllowOrigin } from "../Config";
+import { CORE_NODE, setAccessControlAllowOrigin, SPLIT_IN_INDEXED_DB, SPLIT_IN_SUBSET_DB } from "../Config";
 import { PersistentDb } from "../db/container/PersistentDb";
 import { TransactionObject, TransactionRequest, TransactionType } from "../db/Transaction";
 import { ERROR } from "../Errors";
-import { Maintenance } from "../Maintenance";
+import { LOG_MESSAGES } from "../LogMessages";
 import { DadgetError } from "../util/DadgetError";
 import * as EJSON from "../util/Ejson";
+import { Logger } from "../util/Logger";
 import { Util } from "../util/Util";
-import { ContextManager } from "./ContextManager";
+import { ATOMIC_OPERATION_MAX_LOCK_TIME, ContextManager, ExecOptions } from "./ContextManager";
 import { DatabaseRegistry } from "./DatabaseRegistry";
 import { QueryHandler } from "./QueryHandler";
 import { SubsetStorage } from "./SubsetStorage";
@@ -18,6 +20,7 @@ import { UpdateManager } from "./UpdateManager";
 
 const QUERY_ERROR_RETRY_COUNT = 4;
 const QUERY_ERROR_WAIT_TIME = 5000;
+export const CLIENT_VERSION = 1;
 
 /**
  * Dadgetコンフィグレーションパラメータ
@@ -33,6 +36,11 @@ export class DadgetConfigDef {
    * 未使用サブセット自動削除フラグ
    */
   autoDeleteSubset?: boolean;
+
+  /**
+   * ジャーナルのnewデータの文字列化による高速化フラグ
+   */
+  useJournalStringification?: boolean;
 }
 
 export type CsnMode = "strict" | "latest";
@@ -99,6 +107,7 @@ export default class Dadget extends ServiceEngine {
   public static enableDeleteSubset = true;
 
   public bootOrder = 60;
+  private logger: Logger;
   private option: DadgetConfigDef;
   private node: ResourceNode;
   private database: string;
@@ -112,7 +121,8 @@ export default class Dadget extends ServiceEngine {
 
   constructor(option: DadgetConfigDef) {
     super(option);
-    this.logger.debug(JSON.stringify(option));
+    this.logger = Logger.getLogger("Dadget", option.database);
+    this.logger.debug(LOG_MESSAGES.CREATED, ["Dadget"]);
     this.option = option;
   }
 
@@ -131,9 +141,51 @@ export default class Dadget extends ServiceEngine {
     });
   }
 
+  getDatabase() {
+    return this.option.database;
+  }
+
+  /**
+   * Dadgetの取得
+   */
+  static getDb(node: ResourceNode, database: string): Dadget {
+    const seList = node.searchServiceEngine("Dadget", { database });
+    if (seList.length !== 1) {
+      throw new Error("Dadget is missing:" + database);
+    }
+    return seList[0] as Dadget;
+  }
+
+  /**
+   * トランザクション実行
+   */
+  static async execTransaction(node: ResourceNode, databases: string[], callback: (...seList: Dadget[]) => Promise<void>) {
+    const seList = databases.map((database) => new DadgetTr(Dadget.getDb(node, database)));
+    const seMap: { [name: string]: DadgetTr } = seList.reduce((map: any, se: DadgetTr) => { map[se.getDatabase()] = se; return map; }, {});
+    const sorted = [...databases].sort();
+    let checkInterval;
+    try {
+      for (const db of sorted) {
+        await seMap[db]._begin();
+      }
+      // Time-out prevention
+      checkInterval = setInterval(() => seList.map((se) => se._check()), ATOMIC_OPERATION_MAX_LOCK_TIME / 2);
+      await callback.apply(null, seList);
+      seList.map((se) => se._fix());
+      clearInterval(checkInterval);
+      checkInterval = undefined;
+      await Promise.all(seList.map((se) => se._check()));
+      await Promise.all(seList.map((se) => se._commit()));
+    } catch (err) {
+      if (checkInterval) { clearInterval(checkInterval); }
+      await Promise.all(seList.map((se) => se._rollback()));
+      throw err;
+    }
+  }
+
   start(node: ResourceNode): Promise<void> {
     this.node = node;
-    this.logger.debug("Dadget is starting");
+    this.logger.debug(LOG_MESSAGES.STARTING, ["Dadget"]);
     if (!this.option.database) {
       throw new DadgetError(ERROR.E2101, ["Database name is missing."]);
     }
@@ -141,37 +193,35 @@ export default class Dadget extends ServiceEngine {
       throw new DadgetError(ERROR.E2101, ["Database name can not contain '--'."]);
     }
     const database = this.database = this.option.database;
-    this.logger.debug("Dadget is started");
 
     const subsetStorages = node.searchServiceEngine("SubsetStorage", { database }) as SubsetStorage[];
     // Delete unused persistent databases
-    PersistentDb.getAllStorage()
-      .then((storageList) => {
-        const subsetNames = subsetStorages
-          .filter((subset) => subset.getType() === "persistent")
-          .map((subset) => subset.getDbName());
-        for (const storageName of storageList) {
-          if (!storageName.startsWith(database + "--")) { continue; }
-          const [dbName] = storageName.split("__");
-          if (subsetNames.indexOf(dbName) < 0 && Dadget.enableDeleteSubset) {
-            if (this.option.autoDeleteSubset) {
-              this.logger.warn("Delete storage", storageName);
+    if (Dadget.enableDeleteSubset && this.option.autoDeleteSubset) {
+      PersistentDb.getAllStorage()
+        .then((storageList) => {
+          const subsetNames = subsetStorages
+            .filter((subset) => subset.getType() === "persistent")
+            .map((subset) => subset.getDbName());
+          for (const storageName of storageList) {
+            if (!storageName.startsWith(database + SPLIT_IN_SUBSET_DB)) { continue; }
+            const [dbName] = storageName.split(SPLIT_IN_INDEXED_DB);
+            if (subsetNames.indexOf(dbName) < 0) {
+              this.logger.warn(LOG_MESSAGES.DELETE_STORAGE, [storageName]);
               PersistentDb.deleteStorage(storageName);
-            } else {
-              this.logger.debug("Skip deleting storage", storageName);
             }
           }
-        }
-      })
-      .catch((reason) => {
-        this.logger.warn("Sweep storage:", reason.toString());
-      });
+        })
+        .catch((reason) => {
+          this.logger.warn(LOG_MESSAGES.FAILED_SWEEP_STORAGE, [reason.toString()]);
+        });
+    }
 
     if (subsetStorages.length > 0) {
       this.hasSubset = true;
       subsetStorages[0].notifyListener = this;
     }
 
+    this.logger.debug(LOG_MESSAGES.STARTED, ["Dadget"]);
     return Promise.resolve();
   }
 
@@ -224,7 +274,7 @@ export default class Dadget extends ServiceEngine {
       .then((result) => {
         const itemMap: { [id: string]: any } = {};
         let hasDupulicate = false;
-        for (const item of result.resultSet as Array<{ _id: string }>) {
+        for (const item of result.resultSet as { _id: string }[]) {
           if (itemMap[item._id]) {
             console.warn("hasDupulicate:" + item._id);
             hasDupulicate = true;
@@ -329,7 +379,7 @@ export default class Dadget extends ServiceEngine {
       })
       .catch((reason) => {
         const cause = reason instanceof DadgetError ? reason :
-          (reason.code ? DadgetError.from(reason) : new DadgetError(ERROR.E2102, [reason.toString()]));
+          (reason.code && reason.message ? DadgetError.from(reason) : new DadgetError(ERROR.E2102, [reason.toString()]));
         return Promise.reject(cause);
       });
   }
@@ -378,7 +428,7 @@ export default class Dadget extends ServiceEngine {
       })
       .catch((reason) => {
         const cause = reason instanceof DadgetError ? reason :
-          (reason.code ? DadgetError.from(reason) : new DadgetError(ERROR.E2102, [reason.toString()]));
+          (reason.code && reason.message ? DadgetError.from(reason) : new DadgetError(ERROR.E2102, [reason.toString()]));
         return Promise.reject(cause);
       });
   }
@@ -395,20 +445,27 @@ export default class Dadget extends ServiceEngine {
    *
    * @param csn トランザクションの前提となるコンテキスト通番(トランザクションの type が "insert" のときは 0 を指定でき、その場合は不整合チェックを行わない)
    * @param request トランザクションの内容を持つオブジェクト
-   * @return 更新されたオブジェクト
+   * @param options 更新オプション(任意)
+   * @return 更新されたオブジェクト(更新オプションが指定される場合、NULLの可能性がある)
    */
-  exec(csn: number, request: TransactionRequest): Promise<object> {
+  exec(csn: number, request: TransactionRequest, options?: ExecOptions): Promise<object | null> {
     request.type = request.type.toLowerCase() as TransactionType;
     if (request.type !== TransactionType.INSERT &&
       request.type !== TransactionType.UPDATE &&
+      request.type !== TransactionType.UPSERT &&
+      request.type !== TransactionType.REPLACE &&
       request.type !== TransactionType.DELETE) {
       return Promise.reject(new DadgetError(ERROR.E2104));
     }
-    return this._exec(csn, request);
+    return this._exec(csn, request, undefined, options);
   }
 
-  _exec(csn: number, request: TransactionRequest): Promise<object> {
-    const sendData = { csn, request };
+  _exec(csn: number, request: TransactionRequest, atomicId: string | undefined, options?: ExecOptions): Promise<object | null> {
+    if (this.option.useJournalStringification) {
+      if (request.new) request.new = EJSON.stringify(request.new);
+      if (request.before) request.before = EJSON.stringify(request.before);
+    }
+    const sendData = { csn, request, atomicId, options, version: CLIENT_VERSION };
     return this.node.fetch(CORE_NODE.PATH_CONTEXT.replace(/:database\b/g, this.database) + CORE_NODE.PATH_EXEC, {
       method: "POST",
       headers: {
@@ -429,13 +486,128 @@ export default class Dadget extends ServiceEngine {
           const reason = result.reason as DadgetError;
           throw new DadgetError({ code: reason.code, message: reason.message }, reason.inserts, reason.ns);
         } else {
-          throw JSON.stringify(result);
+          throw new Error(JSON.stringify(result));
         }
       })
       .catch((reason) => {
         const cause = reason instanceof DadgetError ? reason : new DadgetError(ERROR.E2103, [reason.toString()]);
         return Promise.reject(cause);
       });
+  }
+
+  /**
+   * execManyメソッドはコンテキストマネージャの Rest API を呼び出して複数のトランザクション要求を実行する。
+   *
+   * @param csn トランザクションの前提となるコンテキスト通番(トランザクションの type が "insert" のときは 0 を指定でき、その場合は不整合チェックを行わない)
+   * @param request トランザクションの内容を持つオブジェクトの配列
+   * @param options 更新オプション(任意)
+   */
+  execMany(csn: number, requests: TransactionRequest[], options?: ExecOptions): Promise<void> {
+    for (const request of requests) {
+      request.type = request.type.toLowerCase() as TransactionType;
+      if (request.type !== TransactionType.INSERT &&
+        request.type !== TransactionType.UPDATE &&
+        request.type !== TransactionType.UPSERT &&
+        request.type !== TransactionType.REPLACE &&
+        request.type !== TransactionType.DELETE) {
+        return Promise.reject(new DadgetError(ERROR.E2104));
+      }
+    }
+    return this._execMany(csn, requests, undefined, options);
+  }
+
+  _execMany(csn: number, requests: TransactionRequest[], atomicId: string | undefined, options?: ExecOptions): Promise<void> {
+    if (this.option.useJournalStringification) {
+      for (const request of requests) {
+        if (request.new) request.new = EJSON.stringify(request.new);
+        if (request.before) request.before = EJSON.stringify(request.before);
+      }
+    }
+    const sendData = { csn, requests, atomicId, options, version: CLIENT_VERSION };
+    return this.node.fetch(CORE_NODE.PATH_CONTEXT.replace(/:database\b/g, this.database) + CORE_NODE.PATH_EXEC_MANY, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+      },
+      body: EJSON.stringify(sendData),
+    })
+      .then((fetchResult) => {
+        if (typeof fetchResult.ok !== "undefined" && !fetchResult.ok) { throw Error(fetchResult.statusText); }
+        return fetchResult.json();
+      })
+      .then((_) => {
+        const result = EJSON.deserialize(_);
+        if (result.status === "OK") {
+          this.latestCsn = result.csn;
+        } else if (result.reason) {
+          if (result.csn) this.latestCsn = result.csn;
+          const reason = result.reason as DadgetError;
+          throw new DadgetError({ code: reason.code, message: reason.message }, reason.inserts, reason.ns);
+        } else {
+          throw new Error(JSON.stringify(result));
+        }
+      })
+      .catch((reason) => {
+        const cause = reason instanceof DadgetError ? reason : new DadgetError(ERROR.E2105, [reason.toString()]);
+        return Promise.reject(cause);
+      });
+  }
+
+  /**
+   * updateMany メソッドはクエリーで取得した結果に対し更新オペレーターを適用して更新する。
+   *
+   * @param query mongoDBと同じクエリーオブジェクト
+   * @param operator 更新内容を記述するオペレータ。意味はmongoDB に準ずる。
+   * @return 変更された行数
+   */
+  updateMany(query: object, operator: object): Promise<number> {
+    return this._updateMany(query, operator, undefined);
+  }
+
+  _updateMany(query: object, operator: object, atomicId: string | undefined): Promise<number> {
+    const sendData = { query, operator, atomicId, version: CLIENT_VERSION };
+    return this.node.fetch(CORE_NODE.PATH_CONTEXT.replace(/:database\b/g, this.database) + CORE_NODE.PATH_UPDATE_MANY, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+      },
+      body: EJSON.stringify(sendData),
+    })
+      .then((fetchResult) => {
+        if (typeof fetchResult.ok !== "undefined" && !fetchResult.ok) { throw Error(fetchResult.statusText); }
+        return fetchResult.json();
+      })
+      .then((_) => {
+        const result = EJSON.deserialize(_);
+        if (result.status === "OK") {
+          this.latestCsn = result.csn;
+          return result.count;
+        } else if (result.reason) {
+          if (result.csn) this.latestCsn = result.csn;
+          const reason = result.reason as DadgetError;
+          throw new DadgetError({ code: reason.code, message: reason.message }, reason.inserts, reason.ns);
+        } else {
+          throw new Error(JSON.stringify(result));
+        }
+      })
+      .catch((reason) => {
+        const cause = reason instanceof DadgetError ? reason : new DadgetError(ERROR.E2106, [reason.toString()]);
+        return Promise.reject(cause);
+      });
+  }
+
+  /**
+   * clearメソッドは全データの削除を実行する。
+   */
+  clear(): Promise<void> {
+    return this._clear();
+  }
+
+  _clear(force?: boolean): Promise<void> {
+    const request = new TransactionRequest();
+    request.type = force ? TransactionType.FORCE_ROLLBACK : TransactionType.TRUNCATE;
+    request.target = "";
+    return this._exec(0, request, undefined).then(() => { });
   }
 
   private notifyAll() {
@@ -461,25 +633,33 @@ export default class Dadget extends ServiceEngine {
       const listener = this.updateListeners[id];
       if (listener.csn !== PREQUERY_CSN && listener.csn > notifyCsn) {
         listener.csn = notifyCsn;
+        listener.listener(notifyCsn);
       }
     }
   }
 
   procNotify(transaction: TransactionObject) {
-    if (transaction.type === TransactionType.BEGIN_IMPORT || transaction.type === TransactionType.BEGIN_RESTORE) {
+    if (transaction.type === TransactionType.BEGIN ||
+      transaction.type === TransactionType.BEGIN_IMPORT ||
+      transaction.type === TransactionType.BEGIN_RESTORE) {
       this.lockNotify = true;
       return;
     }
-    if (transaction.type === TransactionType.ABORT_IMPORT || transaction.type === TransactionType.ABORT_RESTORE) {
+    if (transaction.type === TransactionType.ABORT ||
+      transaction.type === TransactionType.ABORT_IMPORT ||
+      transaction.type === TransactionType.ABORT_RESTORE) {
       this.lockNotify = false;
       return;
     }
-    if (transaction.type === TransactionType.END_IMPORT || transaction.type === TransactionType.END_RESTORE) {
+    if (transaction.type === TransactionType.END ||
+      transaction.type === TransactionType.END_IMPORT ||
+      transaction.type === TransactionType.END_RESTORE) {
       this.lockNotify = false;
     }
-    if (this.lockNotify) { return; }
-    if (transaction.type === TransactionType.ROLLBACK) {
+    if (this.lockNotify || transaction.committedCsn !== undefined) { return; }
+    if (transaction.type === TransactionType.FORCE_ROLLBACK) {
       this.notifyCsn = transaction.csn;
+      this.latestCsn = transaction.csn;
       this.notifyRollback(transaction.csn);
     } else if (transaction.csn > this.notifyCsn) {
       this.notifyCsn = transaction.csn;
@@ -499,16 +679,17 @@ export default class Dadget extends ServiceEngine {
     const parent = this;
     if (Object.keys(this.updateListeners).length === 0 && !this.hasSubset) {
       class NotifyListener extends Subscriber {
+        private logger: Logger;
 
         constructor() {
           super();
-          this.logger.category = "NotifyListener";
-          this.logger.debug("NotifyListener is created");
+          this.logger = Logger.getLogger("NotifyListener", parent.option.database);
+          this.logger.debug(LOG_MESSAGES.CREATED, ["NotifyListener"]);
         }
 
         onReceive(transctionJSON: string) {
           const transaction = EJSON.parse(transctionJSON) as TransactionObject;
-          this.logger.info("received:", transaction.type, transaction.csn);
+          this.logger.info(LOG_MESSAGES.RECEIVED_TYPE_CSN, [transaction.type], [transaction.csn]);
           parent.procNotify(transaction);
         }
       }
@@ -561,7 +742,98 @@ export default class Dadget extends ServiceEngine {
     setAccessControlAllowOrigin(origin);
   }
 
-  exportDb(fileName: string): Promise<void> {
-    return Maintenance.export(this, fileName);
+  static getLogger() {
+    return ChipInLogger;
+  }
+}
+
+class DadgetTr {
+  private atomicId?: string;
+  private fixFlag = false;
+
+  constructor(private dadget: Dadget) {
+  }
+
+  getDatabase() {
+    return this.dadget.getDatabase();
+  }
+
+  _fix() {
+    this.fixFlag = true;
+  }
+
+  _check(): Promise<void> {
+    if (this.atomicId === undefined) { return Promise.reject(new DadgetError(ERROR.E2107)); }
+    return this.dadget._exec(0, { type: TransactionType.CHECK, target: "" }, this.atomicId).then(() => { });
+  }
+
+  _begin(): Promise<void> {
+    if (this.atomicId) { return Promise.reject("transaction is running"); }
+    this.atomicId = Dadget.uuidGen();
+    return this.dadget._exec(0, { type: TransactionType.BEGIN, target: "" }, this.atomicId).then(() => { });
+  }
+
+  _commit(): Promise<void> {
+    if (this.atomicId === undefined) { return Promise.reject(new DadgetError(ERROR.E2107)); }
+    const atomicId = this.atomicId;
+    return this.dadget._exec(0, { type: TransactionType.END, target: "" }, this.atomicId).then(() => { });
+  }
+
+  _rollback(): Promise<void> {
+    if (this.atomicId === undefined) { return Promise.resolve(); }
+    const atomicId = this.atomicId;
+    return this.dadget._exec(0, { type: TransactionType.ABORT, target: "" }, this.atomicId).then(() => { });
+  }
+
+  exec(csn: number, request: TransactionRequest, options?: ExecOptions): Promise<object | null> {
+    if (this.fixFlag) { return Promise.reject(new DadgetError(ERROR.E2107)); }
+    request.type = request.type.toLowerCase() as TransactionType;
+    if (request.type !== TransactionType.INSERT &&
+      request.type !== TransactionType.UPDATE &&
+      request.type !== TransactionType.UPSERT &&
+      request.type !== TransactionType.REPLACE &&
+      request.type !== TransactionType.DELETE) {
+      return Promise.reject(new DadgetError(ERROR.E2104));
+    }
+    return this.dadget._exec(csn, request, this.atomicId, options);
+  }
+
+  execMany(csn: number, requests: TransactionRequest[], options?: ExecOptions): Promise<void> {
+    if (this.fixFlag) { return Promise.reject(new DadgetError(ERROR.E2107)); }
+    for (const request of requests) {
+      request.type = request.type.toLowerCase() as TransactionType;
+      if (request.type !== TransactionType.INSERT &&
+        request.type !== TransactionType.UPDATE &&
+        request.type !== TransactionType.UPSERT &&
+        request.type !== TransactionType.REPLACE &&
+        request.type !== TransactionType.DELETE) {
+        return Promise.reject(new DadgetError(ERROR.E2104));
+      }
+    }
+    return this.dadget._execMany(csn, requests, this.atomicId, options);
+  }
+
+  updateMany(query: object, operator: object): Promise<number> {
+    if (this.fixFlag) { return Promise.reject(new DadgetError(ERROR.E2107)); }
+    return this.dadget._updateMany(query, operator, this.atomicId);
+  }
+
+  query(query: object, sort?: object, limit?: number, offset?: number, csn?: number, csnMode?: CsnMode, projection?: object): Promise<QueryResult> {
+    return this.dadget.query(query, sort, limit, offset, csn, csnMode, projection);
+  }
+
+  count(query: object, csn?: number, csnMode?: CsnMode): Promise<number> {
+    return this.dadget.count(query, csn, csnMode);
+  }
+  addUpdateListener(listener: (csn: number) => void, minInterval?: number): string {
+    return this.dadget.addUpdateListener(listener, minInterval);
+  }
+
+  removeUpdateListener(id: string) {
+    return this.dadget.removeUpdateListener(id);
+  }
+
+  resetUpdateListener() {
+    return this.dadget.resetUpdateListener();
   }
 }

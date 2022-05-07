@@ -10,16 +10,20 @@ try {
     let data = row.split("=", 2);
     env[data[0]] = data[1];
   })
-} catch (e) {}
+} catch (e) { }
 
-const CORE_SERVER = process.env.CORE_SERVER ? process.env.CORE_SERVER : env.CORE_SERVER ? env.CORE_SERVER : "http://test-core.chip-in.net";
+const CORE_SERVER = process.env.CORE_SERVER ? process.env.CORE_SERVER : env.CORE_SERVER ? env.CORE_SERVER : "http://core";
 const RN_NAME = process.env.RN_NAME ? process.env.RN_NAME : env.RN_NAME ? env.RN_NAME : "db-server";
 
 let node = new ResourceNode(CORE_SERVER, RN_NAME);
+if (process.env.ACCESS_TOKEN) {
+  node.setJWTAuthorization(process.env.ACCESS_TOKEN);
+}
+Dadget.getLogger().setLogLevel('debug');
 Dadget.registerServiceClasses(node);
 node.start().then(() => {
   function sigHandle() {
-    node.stop().then(()=>{
+    node.stop().then(() => {
       process.exit()
     })
   }

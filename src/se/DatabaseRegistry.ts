@@ -1,6 +1,8 @@
 import { ResourceNode, ServiceEngine } from "@chip-in/resource-node";
 import { ERROR } from "../Errors";
+import { LOG_MESSAGES } from "../LogMessages";
 import { DadgetError } from "../util/DadgetError";
+import { Logger } from "../util/Logger";
 
 /**
  * サブセット定義
@@ -31,7 +33,7 @@ export class IndexDef {
   /**
    * インデックスの属性を指定する。その仕様はmongo db の createIndex の第二引数に準じる
    */
-  property?: { unique: boolean };
+  property?: { unique?: boolean };
 }
 
 /**
@@ -72,18 +74,20 @@ export class DatabaseRegistryConfigDef {
 export class DatabaseRegistry extends ServiceEngine {
 
   public bootOrder = 10;
+  private logger: Logger;
   private option: DatabaseRegistryConfigDef;
   private node: ResourceNode;
 
   constructor(option: DatabaseRegistryConfigDef) {
     super(option);
-    this.logger.debug(JSON.stringify(option));
+    this.logger = Logger.getLogger("DatabaseRegistry", option.database);
+    this.logger.debug(LOG_MESSAGES.CREATED, ["DatabaseRegistry"]);
     this.option = option;
   }
 
   start(node: ResourceNode): Promise<void> {
     this.node = node;
-    this.logger.debug("DatabaseRegistry is starting");
+    this.logger.debug(LOG_MESSAGES.STARTING, ["DatabaseRegistry"]);
     if (!this.option.database) {
       throw new DadgetError(ERROR.E2201, ["Database name is missing."]);
     }
@@ -93,7 +97,7 @@ export class DatabaseRegistry extends ServiceEngine {
     if (!this.option.metadata) {
       throw new DadgetError(ERROR.E2201, ["metadata is missing."]);
     }
-    this.logger.debug("DatabaseRegistry is started");
+    this.logger.debug(LOG_MESSAGES.STARTED, ["DatabaseRegistry"]);
     return Promise.resolve();
   }
 

@@ -1,9 +1,10 @@
-import { Logger } from "@chip-in/resource-node";
 import * as http from "http";
 import * as URL from "url";
 import { getAccessControlAllowOrigin } from "../Config";
 import { ERROR } from "../Errors";
+import { LOG_MESSAGES } from "../LogMessages";
 import * as EJSON from "../util/Ejson";
+import { Logger } from "../util/Logger";
 import { DadgetError } from "./DadgetError";
 
 export class ProxyHelper {
@@ -32,7 +33,7 @@ export class ProxyHelper {
         return res;
       })
       .catch((reason) => {
-        logger.warn("procGet error return", reason.toString());
+        logger.warn(LOG_MESSAGES.PROCGET_ERROR, [reason.toString()]);
         if (!(reason instanceof DadgetError)) {
           reason = new DadgetError(ERROR.E3001, [reason]);
         }
@@ -79,7 +80,7 @@ export class ProxyHelper {
         return res;
       })
       .catch((reason) => {
-        logger.warn("procPost error return", reason.toString());
+        logger.warn(LOG_MESSAGES.PROCPOST_ERROR, [reason.toString()]);
         if (!(reason instanceof DadgetError)) {
           reason = new DadgetError(ERROR.E3001, [reason]);
         }
@@ -94,7 +95,7 @@ export class ProxyHelper {
 
   static procOption(req: http.IncomingMessage, res: http.ServerResponse): Promise<http.ServerResponse> {
     const head: any = {
-      "Access-Control-Allow-Headers": "Content-Type",
+      "Access-Control-Allow-Headers": "Content-Type, authorization",
       "Access-Control-Allow-Methods": "POST, GET, OPTIONS",
     };
     const allowOrigin = getAccessControlAllowOrigin(req.headers.origin as string);

@@ -6,7 +6,7 @@ import * as URL from "url";
 import * as EJSON from "../util/Ejson";
 
 import { Proxy, ResourceNode, ServiceEngine, Subscriber } from "@chip-in/resource-node";
-import { CORE_NODE } from "../Config";
+import { CORE_NODE, SPLIT_IN_SUBSET_DB } from "../Config";
 import { CacheDb } from "../db/container/CacheDb";
 import { PersistentDb } from "../db/container/PersistentDb";
 import { JournalDb } from "../db/JournalDb";
@@ -14,11 +14,13 @@ import { SubsetDb } from "../db/SubsetDb";
 import { SystemDb } from "../db/SystemDb";
 import { TransactionObject, TransactionRequest, TransactionType } from "../db/Transaction";
 import { ERROR } from "../Errors";
+import { LOG_MESSAGES } from "../LogMessages";
 import { DadgetError } from "../util/DadgetError";
+import { Logger } from "../util/Logger";
 import { LogicalOperator } from "../util/LogicalOperator";
 import { ProxyHelper } from "../util/ProxyHelper";
 import { Util } from "../util/Util";
-import { CountResult, CsnMode, default as Dadget, QueryResult } from "./Dadget";
+import { CLIENT_VERSION, CountResult, CsnMode, default as Dadget, QueryResult } from "./Dadget";
 import { DatabaseRegistry, SubsetDef } from "./DatabaseRegistry";
 
 const MAX_RESPONSE_SIZE_OF_JOURNALS = 10485760;
@@ -26,6 +28,7 @@ const MAX_EXPORT_NUM = 100;
 
 class UpdateProcessor extends Subscriber {
 
+  private logger: Logger;
   private lock: ReadWriteLock;
 
   constructor(
@@ -35,7 +38,7 @@ class UpdateProcessor extends Subscriber {
     protected subsetDefinition: SubsetDef) {
 
     super();
-    this.logger.category = "UpdateProcessor";
+    this.logger = Logger.getLogger("UpdateProcessor", storage.getDbName());
     this.lock = new ReadWriteLock();
   }
 
@@ -45,16 +48,19 @@ class UpdateProcessor extends Subscriber {
     this.procTransaction(transaction);
   }
 
+  /**
+   * トランザクションの処理を行う
+   */
   procTransaction(transaction: TransactionObject) {
-    this.logger.info("procTransaction:", transaction.type, transaction.csn);
+    this.logger.info(LOG_MESSAGES.PROCTRANSACTION, [transaction.type], [transaction.csn]);
 
     if (transaction.protectedCsn) {
       if (this.storage.getJournalDb().getProtectedCsn() < transaction.protectedCsn) {
-        this.logger.info("CHECKPOINT protectedCsn: " + transaction.protectedCsn);
+        this.logger.info(LOG_MESSAGES.CHECKPOINT_PROTECTEDCSN, [], [transaction.protectedCsn]);
         this.storage.getJournalDb().setProtectedCsn(transaction.protectedCsn);
         this.storage.getJournalDb().deleteBeforeCsn(transaction.protectedCsn)
           .catch((err) => {
-            this.logger.error(err.toString());
+            this.logger.error(LOG_MESSAGES.ERROR_MSG, [err.toString()], [200]);
           });
       }
     }
@@ -83,7 +89,7 @@ class UpdateProcessor extends Subscriber {
                 return this.storage.getJournalDb().findByCsn(csn)
                   .then((journal) => {
                     if (journal && journal.digest === transaction.digest) {
-                      this.storage.setReady();
+                      this.storage.setReady(transaction);
                       release2();
                       release1();
                       return;
@@ -98,15 +104,14 @@ class UpdateProcessor extends Subscriber {
                   .then(() => { release2(); })
                   .then(() => { release1(); });
               }
-            } else if (csn > transaction.csn &&
-              (transaction.type === TransactionType.ROLLBACK || transaction.type === TransactionType.ABORT_IMPORT)) {
+            } else if (csn > transaction.csn && transaction.type === TransactionType.FORCE_ROLLBACK) {
               return this.fetchJournal(transaction.csn)
                 .then((fetchJournal) => {
-                  if (!fetchJournal) { throw new Error("can not rollback because journal isn't found: " + transaction.csn); }
-                  return this.rollbackSubsetDb(transaction.csn)
+                  if (transaction.csn === 0 || !fetchJournal) { return this.resetData(transaction.csn, true) }
+                  return this.rollbackSubsetDb(transaction.csn, true)
                     .catch((e) => {
-                      this.logger.warn(e.toString());
-                      return this.resetData(transaction.csn);
+                      this.logger.warn(LOG_MESSAGES.ERROR_MSG, [e.toString()], [201]);
+                      return this.resetData(transaction.csn, true);
                     });
                 })
                 .then(() => { release2(); })
@@ -119,7 +124,7 @@ class UpdateProcessor extends Subscriber {
               const doQueuedQuery = (csn: number) => {
                 let promise = Promise.resolve();
                 for (const query of this.storage.pullQueryWaitingList(csn)) {
-                  this.logger.info("do queued query: " + csn);
+                  this.logger.info(LOG_MESSAGES.QUEUED_QUERY, [], [csn]);
                   promise = promise.then(() => query());
                 }
                 return promise;
@@ -147,7 +152,7 @@ class UpdateProcessor extends Subscriber {
             }
           })
           .catch((e) => {
-            this.logger.error(e.toString());
+            this.logger.error(LOG_MESSAGES.ERROR_MSG, [e.toString()], [202]);
             release2();
             release1();
           });
@@ -174,62 +179,123 @@ class UpdateProcessor extends Subscriber {
         });
     }
 
-    this.logger.info("update subset db csn:", transaction.csn);
-    if ((transaction.type === TransactionType.INSERT || transaction.type === TransactionType.RESTORE) && transaction.new) {
-      const obj = { ...transaction.new, _id: transaction.target, csn: transaction.csn };
+    this.logger.info(LOG_MESSAGES.UPDATE_SUBSET_DB, [], [transaction.csn]);
+    const type = transaction.type;
+    if ((type === TransactionType.INSERT || type === TransactionType.RESTORE) && transaction.new) {
+      const newObj = TransactionRequest.getNew(transaction);
+      const obj = { ...newObj, _id: transaction.target, csn: transaction.csn };
       promise = promise.then(() => this.storage.getSubsetDb().insert(obj));
-    } else if (transaction.type === TransactionType.UPDATE && transaction.before) {
+    } else if (type === TransactionType.UPDATE && transaction.before) {
       const updateObj = TransactionRequest.applyOperator(transaction);
       promise = promise.then(() => this.storage.getSubsetDb().update(transaction.target, updateObj));
-    } else if (transaction.type === TransactionType.DELETE && transaction.before) {
+    } else if (type === TransactionType.UPSERT || type === TransactionType.REPLACE) {
+      const updateObj = TransactionRequest.applyOperator(transaction);
+      promise = promise.then(() => this.storage.getSubsetDb().update(transaction.target, updateObj));
+    } else if (type === TransactionType.DELETE && transaction.before) {
       promise = promise.then(() => this.storage.getSubsetDb().deleteById(transaction.target));
-    } else if (transaction.type === TransactionType.TRUNCATE) {
+    } else if (type === TransactionType.TRUNCATE) {
       promise = promise.then(() => this.storage.getSubsetDb().deleteAll());
-    } else if (transaction.type === TransactionType.BEGIN_IMPORT) {
-    } else if (transaction.type === TransactionType.END_IMPORT) {
-    } else if (transaction.type === TransactionType.ABORT_IMPORT) {
-    } else if (transaction.type === TransactionType.BEGIN_RESTORE) {
+    } else if (type === TransactionType.BEGIN || type === TransactionType.BEGIN_IMPORT) {
+      promise = promise.then(() => { this.storage.committedCsn = transaction.committedCsn; });
+    } else if (type === TransactionType.END || type === TransactionType.END_IMPORT) {
+      promise = promise.then(() => { this.storage.committedCsn = undefined; });
+    } else if (type === TransactionType.ABORT || type === TransactionType.ABORT_IMPORT) {
+      if (transaction.committedCsn === undefined) { throw new Error("committedCsn required"); }
+      const committedCsn = transaction.committedCsn;
+      promise = promise.then(() => {
+        return this.rollbackSubsetDb(committedCsn, false)
+          .catch((e) => {
+            this.logger.warn(LOG_MESSAGES.ERROR_MSG, [e.toString()], [203]);
+            return this.resetData(committedCsn, false);
+          });
+      });
+    } else if (type === TransactionType.FORCE_ROLLBACK) {
+      const committedCsn = transaction.csn;
+      promise = promise.then(() => {
+        if (committedCsn === 0) { return this.resetData0() }
+        return this.rollbackSubsetDb(committedCsn, true)
+          .catch((e) => {
+            this.logger.warn(LOG_MESSAGES.ERROR_MSG, [e.toString()], [204]);
+            return this.resetData(committedCsn, true);
+          });
+      });
+    } else if (type === TransactionType.BEGIN_RESTORE) {
       promise = promise.then(() => this.storage.getJournalDb().setProtectedCsn(transaction.csn));
-    } else if (transaction.type === TransactionType.END_RESTORE) {
-    } else if (transaction.type === TransactionType.ABORT_RESTORE) {
-    } else if (transaction.type !== TransactionType.NONE) {
-      throw new Error("Unsupported type: " + transaction.type);
+      promise = promise.then(() => { this.storage.committedCsn = transaction.committedCsn; });
+    } else if (type === TransactionType.END_RESTORE || type === TransactionType.ABORT_RESTORE) {
+      promise = promise.then(() => { this.storage.committedCsn = undefined; });
+    } else if (type !== TransactionType.NONE) {
+      promise = promise.then(() => { throw new Error("Unsupported type: " + type); });
     }
+    promise = promise.catch((e) => this.logger.warn(LOG_MESSAGES.UPDATE_SUBSET_ERROR, [e.toString()]));
     promise = promise.then(() => this.storage.getJournalDb().insert(transaction));
     promise = promise.then(() => this.storage.getSystemDb().updateCsn(transaction.csn));
     return promise;
   }
 
-  private rollbackSubsetDb(csn: number): Promise<void> {
-    this.logger.warn("ROLLBACK transactions, csn:", csn);
-    return this.storage.getJournalDb().findByCsnRange(csn, Number.MAX_VALUE)
+  private rollbackSubsetDb(csn: number, withJournal: boolean): Promise<void> {
+    this.logger.warn(LOG_MESSAGES.ROLLBACK_TRANSACTIONS, [], [csn]);
+    // Csn of the range is not csn + 1 for keeping last journal
+    const firstJournalCsn = withJournal ? csn : csn + 1;
+    return this.storage.getJournalDb().findByCsnRange(firstJournalCsn, Number.MAX_VALUE)
       .then((transactions) => {
         transactions.sort((a, b) => b.csn - a.csn);
-        if (transactions.length === 0 || transactions[transactions.length - 1].csn !== csn) {
+        if (transactions.length === 0 || transactions[transactions.length - 1].csn !== firstJournalCsn) {
           throw new Error("Lack of transactions");
         }
         let promise = Promise.resolve();
+        let committedCsn: number | undefined;
         transactions.forEach((transaction) => {
           if (transaction.csn === csn) { return; }
-          if (transaction.type === TransactionType.INSERT || transaction.type === TransactionType.RESTORE) {
+          if (committedCsn !== undefined && committedCsn < transaction.csn) { return; }
+          const type = transaction.type;
+          if (type === TransactionType.INSERT || type === TransactionType.RESTORE) {
             promise = promise.then(() => this.storage.getSubsetDb().deleteById(transaction.target));
-          } else if (transaction.type === TransactionType.UPDATE && transaction.before) {
-            promise = promise.then(() => this.storage.getSubsetDb().update(transaction.target, transaction.before as object));
-          } else if (transaction.type === TransactionType.DELETE && transaction.before) {
-            promise = promise.then(() => this.storage.getSubsetDb().insert(transaction.before as object));
-          } else if (transaction.type === TransactionType.TRUNCATE) {
+          } else if (type === TransactionType.UPDATE && transaction.before) {
+            const before = TransactionRequest.getBefore(transaction);
+            promise = promise.then(() => this.storage.getSubsetDb().update(transaction.target, before));
+          } else if (type === TransactionType.DELETE && transaction.before) {
+            const before = TransactionRequest.getBefore(transaction);
+            promise = promise.then(() => this.storage.getSubsetDb().insert(before));
+          } else if (type === TransactionType.TRUNCATE) {
             throw new Error("Cannot roll back TRUNCATE");
-          } else if (transaction.type === TransactionType.BEGIN_IMPORT) {
-          } else if (transaction.type === TransactionType.END_IMPORT) {
-          } else if (transaction.type === TransactionType.ABORT_IMPORT) {
-          } else if (transaction.type === TransactionType.BEGIN_RESTORE) {
-          } else if (transaction.type === TransactionType.END_RESTORE) {
-          } else if (transaction.type === TransactionType.ABORT_RESTORE) {
-          } else if (transaction.type !== TransactionType.NONE && transaction.type !== TransactionType.ROLLBACK) {
-            throw new Error("Unsupported type: " + transaction.type);
+          } else if (type === TransactionType.BEGIN) {
+          } else if (type === TransactionType.END) {
+          } else if (type === TransactionType.ABORT || type === TransactionType.ABORT_IMPORT) {
+            if (transaction.committedCsn === undefined) { throw new Error("committedCsn required"); }
+            committedCsn = transaction.committedCsn;
+            if (transaction.committedCsn < csn) {
+              const _committedCsn = transaction.committedCsn;
+              promise = promise.then(() => this.rollforwardSubsetDb(_committedCsn, csn));
+            }
+          } else if (type === TransactionType.BEGIN_IMPORT) {
+          } else if (type === TransactionType.END_IMPORT) {
+          } else if (type === TransactionType.BEGIN_RESTORE) {
+          } else if (type === TransactionType.END_RESTORE) {
+          } else if (type === TransactionType.ABORT_RESTORE) {
+          } else if (type !== TransactionType.NONE && type !== TransactionType.FORCE_ROLLBACK) {
+            throw new Error("Unsupported type: " + type);
           }
-          promise = promise.then(() => this.storage.getJournalDb().deleteAfterCsn(transaction.csn - 1));
-          promise = promise.then(() => this.storage.getSystemDb().updateCsn(transaction.csn - 1));
+        });
+        if (withJournal) {
+          promise = promise.then(() => this.storage.getJournalDb().deleteAfterCsn(csn));
+          promise = promise.then(() => this.storage.getSystemDb().updateCsn(csn));
+        }
+        return promise;
+      });
+  }
+
+  private rollforwardSubsetDb(fromCsn: number, toCsn: number): Promise<void> {
+    this.logger.warn(LOG_MESSAGES.ROLLFORWARD_TRANSACTIONS, [], [fromCsn, toCsn]);
+    return this.storage.getJournalDb().findByCsnRange(fromCsn + 1, toCsn)
+      .then((transactions) => {
+        transactions.sort((a, b) => a.csn - b.csn);
+        if (transactions.length !== toCsn - fromCsn) {
+          throw new Error("Lack of rollforward transactions");
+        }
+        let promise = Promise.resolve();
+        transactions.forEach((transaction) => {
+          promise = this.updateSubsetDb(promise, transaction);
         });
         return promise;
       });
@@ -254,11 +320,11 @@ class UpdateProcessor extends Subscriber {
   }
 
   private adjustData(csn: number, journals?: Map<number, TransactionObject>): Promise<void> {
-    this.logger.warn("adjustData:" + csn);
+    this.logger.warn(LOG_MESSAGES.ADJUST_DATA, [], [csn]);
     return Promise.resolve()
       .then(() => {
-        if (this.storage.getSystemDb().isNew()) {
-          return this.resetData(csn);
+        if (csn === 0 || this.storage.getSystemDb().isNew()) {
+          return this.resetData(csn, true);
         } else {
           return this.storage.getJournalDb().getLastJournal()
             .then((journal) => {
@@ -275,17 +341,17 @@ class UpdateProcessor extends Subscriber {
                         return loopData.csn !== 0;
                       },
                       (loopData) => {
-                        const nextCsn = loopData.csn - 1;
-                        return this.rollbackSubsetDb(nextCsn)
-                          .then(() => this.storage.getJournalDb().findByCsn(nextCsn))
+                        const prevCsn = loopData.csn - 1;
+                        return this.rollbackSubsetDb(prevCsn, true)
+                          .then(() => this.storage.getJournalDb().findByCsn(prevCsn))
                           .then((journal) => {
-                            if (!journal) { throw new Error("journal not found: " + nextCsn); }
+                            if (!journal) { throw new Error("journal not found: " + prevCsn); }
                             return this.fetchJournal(journal.csn, journals)
                               .then((fetchJournal) => {
                                 if (fetchJournal && fetchJournal.digest === journal.digest) {
                                   return { ...loopData, csn: 0 };
                                 } else {
-                                  return { ...loopData, csn: nextCsn };
+                                  return { ...loopData, csn: prevCsn };
                                 }
                               });
                           });
@@ -311,16 +377,17 @@ class UpdateProcessor extends Subscriber {
                 });
             })
             .catch((e) => {
-              this.logger.warn(e.toString());
-              return this.resetData(csn);
+              this.logger.warn(LOG_MESSAGES.ERROR_MSG, [e.toString()], [205]);
+              return this.resetData(csn, true);
             });
         }
       });
   }
 
-  private resetData(csn: number): Promise<void> {
+  private resetData(csn: number, withJournal: boolean): Promise<void> {
     if (csn === 0) { return this.resetData0(); }
-    this.logger.warn("resetData:", csn);
+    this.logger.warn(LOG_MESSAGES.RESET_DATA, [], [csn]);
+    this.storage.pause();
     const query = this.subsetDefinition.query ? this.subsetDefinition.query : {};
     return this.fetchJournal(csn)
       .then((fetchJournal) => {
@@ -362,43 +429,45 @@ class UpdateProcessor extends Subscriber {
                   });
               });
           })
-          .then(() => this.storage.getJournalDb().deleteAll())
-          .then(() => this.storage.getJournalDb().insert(subsetTransaction))
-          .then(() => this.storage.getSystemDb().updateCsn(csn))
-          .then(() => this.storage.getSystemDb().updateQueryHash())
-          .then(() => {
-            this.storage.setReady();
-          });
+          .then(() => { if (withJournal) { this.storage.getJournalDb().deleteAll(); } })
+          .then(() => { if (withJournal) { this.storage.getJournalDb().insert(subsetTransaction); } })
+          .then(() => { if (withJournal) { this.storage.getSystemDb().updateCsn(csn); } })
+          .then(() => { if (withJournal) { this.storage.getSystemDb().updateQueryHash(); } })
+          .then(() => { if (withJournal) { this.storage.setReady(subsetTransaction); } });
       })
       .catch((e) => {
-        this.logger.error("Error:", e.toString());
+        this.logger.error(LOG_MESSAGES.ERROR_MSG, [e.toString()], [206]);
         throw e;
       });
   }
 
   private resetData0(): Promise<void> {
-    this.logger.warn("resetData0");
+    this.logger.warn(LOG_MESSAGES.RESET_DATA0);
+    this.storage.pause();
     return Promise.resolve()
       .then(() => this.storage.getJournalDb().deleteAll())
       .then(() => this.storage.getSubsetDb().deleteAll())
       .then(() => this.storage.getSystemDb().updateCsn(0))
       .then(() => this.storage.getSystemDb().updateQueryHash())
       .then(() => {
+        this.storage.committedCsn = undefined;
         this.storage.setReady();
       })
       .catch((e) => {
-        this.logger.error("Error:", e.toString());
+        this.logger.error(LOG_MESSAGES.ERROR_MSG, [e.toString()], [207]);
         throw e;
       });
   }
 }
 
 /**
- * 更新マネージャ(UpdateManager)
+ * 更新リスナー(UpdateListener)
  *
- * 更新マネージャは、コンテキストマネージャが発信する更新情報（トランザクションオブジェクト）を受信して更新トランザクションをサブセットへのトランザクションに変換し更新レシーバに転送する。
+ * 更新リスナーは、コンテキストマネージャが発信する更新情報（トランザクションオブジェクト）を受信して更新トランザクションをサブセットへのトランザクションに変換し更新レシーバに転送する。
  */
 class UpdateListener extends Subscriber {
+
+  private logger: Logger;
 
   constructor(
     protected storage: SubsetStorage,
@@ -408,13 +477,13 @@ class UpdateListener extends Subscriber {
     protected exported: boolean,
   ) {
     super();
-    this.logger.category = "UpdateListener";
-    this.logger.debug("UpdateListener is created");
+    this.logger = Logger.getLogger("UpdateListener", storage.getDbName());
+    this.logger.debug(LOG_MESSAGES.CREATED, ["UpdateListener"]);
   }
 
   onReceive(transctionJSON: string) {
     const transaction = EJSON.parse(transctionJSON) as TransactionObject;
-    this.logger.info("received:", transaction.type, transaction.csn);
+    this.logger.info(LOG_MESSAGES.RECEIVED_TYPE_CSN, [transaction.type], [transaction.csn]);
     const subsetTransaction = UpdateListener.convertTransactionForSubset(this.subsetDefinition, transaction);
     if (this.exported) {
       this.storage.getNode().publish(CORE_NODE.PATH_SUBSET_TRANSACTION
@@ -427,8 +496,11 @@ class UpdateListener extends Subscriber {
   static convertTransactionForSubset(subsetDefinition: SubsetDef, transaction: TransactionObject): TransactionObject {
     // サブセット用のトランザクション内容に変換
 
-    if (transaction.type === TransactionType.ROLLBACK ||
+    if (transaction.type === TransactionType.FORCE_ROLLBACK ||
       transaction.type === TransactionType.TRUNCATE ||
+      transaction.type === TransactionType.BEGIN ||
+      transaction.type === TransactionType.END ||
+      transaction.type === TransactionType.ABORT ||
       transaction.type === TransactionType.BEGIN_IMPORT ||
       transaction.type === TransactionType.END_IMPORT ||
       transaction.type === TransactionType.ABORT_IMPORT ||
@@ -441,8 +513,9 @@ class UpdateListener extends Subscriber {
     if (!subsetDefinition.query) { return transaction; }
     const query = parser.parse(subsetDefinition.query);
 
-    if ((transaction.type === TransactionType.INSERT || transaction.type === TransactionType.RESTORE) && transaction.new) {
-      if (query.matches(transaction.new, false)) {
+    if (!transaction.before && transaction.new) {
+      const newObj = TransactionRequest.getNew(transaction);
+      if (query.matches(newObj, false)) {
         // insert to inner -> INSERT
         return transaction;
       } else {
@@ -451,9 +524,21 @@ class UpdateListener extends Subscriber {
       }
     }
 
-    if (transaction.type === TransactionType.UPDATE && transaction.before) {
+    if (transaction.type === TransactionType.DELETE) {
+      const before = TransactionRequest.getBefore(transaction);
+      if (query.matches(before, false)) {
+        // delete from inner -> DELETE
+        return transaction;
+      } else {
+        // delete from out -> NONE
+        return { ...transaction, type: TransactionType.NONE, before: undefined };
+      }
+    }
+
+    if (transaction.before) {
       const updateObj = TransactionRequest.applyOperator(transaction);
-      if (query.matches(transaction.before, false)) {
+      const before = TransactionRequest.getBefore(transaction);
+      if (query.matches(before, false)) {
         if (query.matches(updateObj, false)) {
           // update from inner to inner -> UPDATE
           return transaction;
@@ -472,25 +557,18 @@ class UpdateListener extends Subscriber {
       }
     }
 
-    if (transaction.type === TransactionType.DELETE && transaction.before) {
-      if (query.matches(transaction.before, false)) {
-        // delete from inner -> DELETE
-        return transaction;
-      } else {
-        // delete from out -> NONE
-        return { ...transaction, type: TransactionType.NONE, before: undefined };
-      }
-    }
     throw new Error("Bad transaction data:" + JSON.stringify(transaction));
   }
 }
 
 class SubsetUpdatorProxy extends Proxy {
 
+  private logger: Logger;
+
   constructor(protected storage: SubsetStorage) {
     super();
-    this.logger.category = "SubsetUpdatorProxy";
-    this.logger.debug("SubsetUpdatorProxy is created");
+    this.logger = Logger.getLogger("SubsetUpdatorProxy", storage.getDbName());
+    this.logger.debug(LOG_MESSAGES.CREATED, ["SubsetUpdatorProxy"]);
   }
 
   onReceive(req: http.IncomingMessage, res: http.ServerResponse): Promise<http.ServerResponse> {
@@ -499,24 +577,37 @@ class SubsetUpdatorProxy extends Proxy {
     const url = URL.parse(req.url);
     if (url.pathname == null) { throw new Error("pathname is required."); }
     const method = req.method.toUpperCase();
-    this.logger.debug(method, url.pathname);
+    this.logger.debug(LOG_MESSAGES.ON_RECEIVE, [method, url.pathname]);
     if (method === "OPTIONS") {
       return ProxyHelper.procOption(req, res);
-    } else if (url.pathname.endsWith(CORE_NODE.PATH_GET_TRANSACTION) && method === "GET") {
-      return ProxyHelper.procGet(req, res, this.logger, (request) => {
+    } else if (url.pathname.endsWith(CORE_NODE.PATH_GET_TRANSACTION) && method === "POST") {
+      return ProxyHelper.procPost(req, res, this.logger, (request) => {
         const csn = ProxyHelper.validateNumberRequired(request.csn, "csn");
-        this.logger.info(CORE_NODE.PATH_GET_TRANSACTION, "csn:", csn);
+        this.logger.info(LOG_MESSAGES.ON_RECEIVE_GET_TRANSACTION, [], [csn]);
         return this.getTransactionJournal(csn);
       });
-    } else if (url.pathname.endsWith(CORE_NODE.PATH_GET_TRANSACTIONS) && method === "GET") {
+    } else if (url.pathname.endsWith(CORE_NODE.PATH_GET_TRANSACTION_OLD) && method === "GET") {
+      return ProxyHelper.procGet(req, res, this.logger, (request) => {
+        const csn = ProxyHelper.validateNumberRequired(request.csn, "csn");
+        this.logger.info(LOG_MESSAGES.ON_RECEIVE_GET_TRANSACTION, [], [csn]);
+        return this.getTransactionJournal(csn);
+      });
+    } else if (url.pathname.endsWith(CORE_NODE.PATH_GET_TRANSACTIONS) && method === "POST") {
+      return ProxyHelper.procPost(req, res, this.logger, (request) => {
+        const fromCsn = ProxyHelper.validateNumberRequired(request.fromCsn, "fromCsn");
+        const toCsn = ProxyHelper.validateNumberRequired(request.toCsn, "toCsn");
+        this.logger.info(LOG_MESSAGES.ON_RECEIVE_GET_TRANSACTIONS, [], [fromCsn, toCsn]);
+        return this.getTransactionJournals(fromCsn, toCsn);
+      });
+    } else if (url.pathname.endsWith(CORE_NODE.PATH_GET_TRANSACTIONS_OLD) && method === "GET") {
       return ProxyHelper.procGet(req, res, this.logger, (request) => {
         const fromCsn = ProxyHelper.validateNumberRequired(request.fromCsn, "fromCsn");
         const toCsn = ProxyHelper.validateNumberRequired(request.toCsn, "toCsn");
-        this.logger.info(CORE_NODE.PATH_GET_TRANSACTIONS, "from:", fromCsn, "to:", toCsn);
+        this.logger.info(LOG_MESSAGES.ON_RECEIVE_GET_TRANSACTIONS, [], [fromCsn, toCsn]);
         return this.getTransactionJournals(fromCsn, toCsn);
       });
     } else {
-      this.logger.warn("server command not found!:", method, url.pathname);
+      this.logger.warn(LOG_MESSAGES.SERVER_COMMAND_NOT_FOUND, [method, url.pathname]);
       return ProxyHelper.procError(req, res);
     }
   }
@@ -611,6 +702,8 @@ export class SubsetStorageConfigDef {
 export class SubsetStorage extends ServiceEngine implements Proxy {
 
   public bootOrder = 50;
+  public committedCsn?: number;
+  private logger: Logger;
   private option: SubsetStorageConfigDef;
   private node: ResourceNode;
   private database: string;
@@ -621,24 +714,27 @@ export class SubsetStorage extends ServiceEngine implements Proxy {
   private journalDb: JournalDb;
   private systemDb: SystemDb;
   private mountHandle: string;
+  private mounted = false;
   private lock: ReadWriteLock;
-  private queryWaitingList: { [csn: number]: Array<() => Promise<any>> } = {};
-  private atomicWaitingList: { [csn: number]: Array<() => Promise<any>> } = {};
+  private queryWaitingList: { [csn: number]: (() => Promise<any>)[] } = {};
   private subscriberKey: string | null;
   private readyFlag: boolean = false;
   private updateProcessor: UpdateProcessor;
   private updateListener: UpdateListener;
   private updateListenerKey?: string;
   private updateListenerMountHandle?: string;
-  notifyListener?: { procNotify: (transaction: TransactionObject) => void };
+  public notifyListener?: { procNotify: (transaction: TransactionObject) => void };
 
   constructor(option: SubsetStorageConfigDef) {
     super(option);
     if (typeof option.exported === "undefined") {
       option = { ...option, exported: true };
     }
-    this.logger.debug(JSON.stringify(option));
     this.option = option;
+    this.database = option.database;
+    this.subsetName = option.subset;
+    this.logger = Logger.getLogger("SubsetStorage", this.getDbName());
+    this.logger.debug(LOG_MESSAGES.CREATED, ["SubsetStorage"]);
     this.lock = new ReadWriteLock();
   }
 
@@ -667,7 +763,7 @@ export class SubsetStorage extends ServiceEngine implements Proxy {
   }
 
   getDbName(): string {
-    return this.database + "--" + this.subsetName;
+    return this.database + SPLIT_IN_SUBSET_DB + this.subsetName;
   }
 
   getType(): string {
@@ -678,24 +774,34 @@ export class SubsetStorage extends ServiceEngine implements Proxy {
     return this.readyFlag;
   }
 
-  setReady(): void {
+  pause(): void {
+    this.readyFlag = false;
+  }
+
+  setReady(transaction?: TransactionObject): void {
+    if (transaction) {
+      this.committedCsn = transaction.committedCsn;
+    }
     if (this.readyFlag) {
       return;
     }
     this.readyFlag = true;
 
-    // Rest サービスを登録する。
-    const mountingMode = this.option.exported ? "loadBalancing" : "localOnly";
-    this.logger.info("mountingMode:", mountingMode);
-    this.node.mount(CORE_NODE.PATH_SUBSET
-      .replace(/:database\b/g, this.database)
-      .replace(/:subset\b/g, this.subsetName), mountingMode, this)
-      .then((value) => {
-        this.mountHandle = value;
-      });
+    if (!this.mounted) {
+      // Rest サービスを登録する。
+      this.mounted = true;
+      const mountingMode = this.option.exported ? "loadBalancing" : "localOnly";
+      this.logger.info(LOG_MESSAGES.MOUNTING_MODE, [mountingMode]);
+      this.node.mount(CORE_NODE.PATH_SUBSET
+        .replace(/:database\b/g, this.database)
+        .replace(/:subset\b/g, this.subsetName), mountingMode, this)
+        .then((value) => {
+          this.mountHandle = value;
+        });
+    }
   }
 
-  pullQueryWaitingList(csn: number): Array<() => Promise<any>> {
+  pullQueryWaitingList(csn: number): (() => Promise<any>)[] {
     const list = this.queryWaitingList[csn];
     if (list) {
       delete this.queryWaitingList[csn];
@@ -704,36 +810,23 @@ export class SubsetStorage extends ServiceEngine implements Proxy {
     return [];
   }
 
-  pullAtomicWaitingList(csn: number): Array<() => Promise<any>> {
-    const list = this.atomicWaitingList[csn];
-    if (list) {
-      delete this.atomicWaitingList[csn];
-      return list;
-    }
-    return [];
-  }
-
   start(node: ResourceNode): Promise<void> {
     this.node = node;
-    this.logger.debug("SubsetStorage is starting");
+    this.logger.debug(LOG_MESSAGES.STARTING, ["SubsetStorage"]);
 
-    if (!this.option.database) {
+    if (!this.database) {
       throw new DadgetError(ERROR.E2401, ["Database name is missing."]);
     }
-    if (this.option.database.match(/--/)) {
+    if (this.database.match(/--/)) {
       throw new DadgetError(ERROR.E2401, ["Database name can not contain '--'."]);
     }
-    this.database = this.option.database;
 
-    if (!this.option.subset) {
+    if (!this.subsetName) {
       throw new DadgetError(ERROR.E2401, ["Subset name is missing."]);
     }
-    if (this.option.subset.match(/--/)) {
+    if (this.subsetName.match(/--/)) {
       throw new DadgetError(ERROR.E2401, ["Subset name can not contain '--'."]);
     }
-    this.subsetName = this.option.subset;
-    this.logger.info("subsetName:", this.subsetName);
-    console.dir(this.option);
 
     // サブセットの定義を取得する
     const seList = node.searchServiceEngine("DatabaseRegistry", { database: this.database });
@@ -765,14 +858,13 @@ export class SubsetStorage extends ServiceEngine implements Proxy {
     this.updateProcessor = new UpdateProcessor(this, this.database, this.subsetName, this.subsetDefinition);
     this.updateListener = new UpdateListener(this, this.database, this.subsetDefinition, this.updateProcessor, !!this.option.exported);
     let promise = this.subsetDb.start();
-    promise = promise.then(() => { this.logger.debug("SubsetStorage is starting"); });
     promise = promise.then(() => this.journalDb.start());
     promise = promise.then(() => this.systemDb.start());
     promise = promise.then(() => {
       return this.systemDb.checkQueryHash(queryHash)
         .then((result) => {
           if (result) {
-            this.logger.warn("Subset Storage requires resetting because the query hash has been changed.");
+            this.logger.warn(LOG_MESSAGES.SUBSET_QUERY_WARN);
           }
         });
     });
@@ -784,7 +876,7 @@ export class SubsetStorage extends ServiceEngine implements Proxy {
       promise = promise.then(() => this.subscribeUpdateListener());
     }
     promise = promise.then(() => new Promise<void>((resolve) => setTimeout(resolve, 1)));
-    promise = promise.then(() => { this.logger.debug("SubsetStorage is started"); });
+    promise = promise.then(() => { this.logger.debug(LOG_MESSAGES.STARTED, ["SubsetStorage"]); });
     return promise;
   }
 
@@ -793,7 +885,7 @@ export class SubsetStorage extends ServiceEngine implements Proxy {
       .replace(/:database\b/g, this.database)
       .replace(/:subset\b/g, this.subsetName), "singletonMaster", new SubsetUpdatorProxy(this), {
       onDisconnect: () => {
-        this.logger.info("updator is disconnected");
+        this.logger.info(LOG_MESSAGES.DISCONNECTED, ["Updator"]);
         this.subscribeUpdateProcessor()
           .then(() => {
             if (this.updateListenerKey) { this.node.unsubscribe(this.updateListenerKey); }
@@ -801,7 +893,7 @@ export class SubsetStorage extends ServiceEngine implements Proxy {
           });
       },
       onRemount: (mountHandle: string) => {
-        this.logger.info("updator is remounted");
+        this.logger.info(LOG_MESSAGES.REMOUNTED, ["Updator"]);
         this.updateListenerMountHandle = mountHandle;
         this.subscribeUpdateListener()
           .then(() => {
@@ -811,7 +903,7 @@ export class SubsetStorage extends ServiceEngine implements Proxy {
     })
       .then((mountHandle) => {
         // マスターを取得した場合のみ実行される
-        this.logger.info("updator is connected");
+        this.logger.info(LOG_MESSAGES.CONNECTED, ["Updator"]);
         if (this.updateListenerMountHandle === "stopped") {
           setTimeout(() => { this.node.unmount(mountHandle); }, 1);
           return;
@@ -869,35 +961,40 @@ export class SubsetStorage extends ServiceEngine implements Proxy {
     const url = URL.parse(req.url);
     if (url.pathname == null) { throw new Error("pathname is required."); }
     const method = req.method.toUpperCase();
-    this.logger.debug(method, url.pathname);
+    this.logger.debug(LOG_MESSAGES.ON_RECEIVE, [method, url.pathname]);
+    const procQuery = (request: any) => {
+      const csn = ProxyHelper.validateNumberRequired(request.csn, "csn");
+      const query = EJSON.parse(request.query);
+      const sort = request.sort ? EJSON.parse(request.sort) : undefined;
+      const limit = ProxyHelper.validateNumber(request.limit, "limit");
+      const offset = ProxyHelper.validateNumber(request.offset, "offset");
+      const projection = request.projection ? EJSON.parse(request.projection) : undefined;
+      if (request.version && Number(request.version) > CLIENT_VERSION) throw new DadgetError(ERROR.E3002);
+      return this.query(csn, query, sort, limit, request.csnMode, projection, offset)
+        .then((result) => {
+          return { status: "OK", result };
+        });
+    };
+    const procCount = (request: any) => {
+      const csn = ProxyHelper.validateNumberRequired(request.csn, "csn");
+      const query = EJSON.parse(request.query);
+      return this.count(csn, query, request.csnMode)
+        .then((result) => {
+          return { status: "OK", result };
+        });
+    };
     if (method === "OPTIONS") {
       return ProxyHelper.procOption(req, res);
-    } else if (url.pathname.endsWith(CORE_NODE.PATH_QUERY) && method === "GET") {
-      return ProxyHelper.procGet(req, res, this.logger, (request) => {
-        this.logger.debug(CORE_NODE.PATH_QUERY);
-        const csn = ProxyHelper.validateNumberRequired(request.csn, "csn");
-        const query = EJSON.parse(request.query);
-        const sort = request.sort ? EJSON.parse(request.sort) : undefined;
-        const limit = ProxyHelper.validateNumber(request.limit, "limit");
-        const offset = ProxyHelper.validateNumber(request.offset, "offset");
-        const projection = request.projection ? EJSON.parse(request.projection) : undefined;
-        return this.query(csn, query, sort, limit, request.csnMode, projection, offset)
-          .then((result) => {
-            return { status: "OK", result };
-          });
-      });
-    } else if (url.pathname.endsWith(CORE_NODE.PATH_COUNT) && method === "GET") {
-      return ProxyHelper.procGet(req, res, this.logger, (request) => {
-        this.logger.debug(CORE_NODE.PATH_COUNT);
-        const csn = ProxyHelper.validateNumberRequired(request.csn, "csn");
-        const query = EJSON.parse(request.query);
-        return this.count(csn, query, request.csnMode)
-          .then((result) => {
-            return { status: "OK", result };
-          });
-      });
+    } else if (url.pathname.endsWith(CORE_NODE.PATH_QUERY) && method === "POST") {
+      return ProxyHelper.procPost(req, res, this.logger, procQuery);
+    } else if (url.pathname.endsWith(CORE_NODE.PATH_QUERY_OLD) && method === "GET") {
+      return ProxyHelper.procGet(req, res, this.logger, procQuery);
+    } else if (url.pathname.endsWith(CORE_NODE.PATH_COUNT) && method === "POST") {
+      return ProxyHelper.procPost(req, res, this.logger, procCount);
+    } else if (url.pathname.endsWith(CORE_NODE.PATH_COUNT_OLD) && method === "GET") {
+      return ProxyHelper.procGet(req, res, this.logger, procCount);
     } else {
-      this.logger.warn("server command not found!:", url.pathname);
+      this.logger.warn(LOG_MESSAGES.SERVER_COMMAND_NOT_FOUND, [method, url.pathname]);
       return ProxyHelper.procError(req, res);
     }
   }
@@ -911,12 +1008,14 @@ export class SubsetStorage extends ServiceEngine implements Proxy {
       return Promise.resolve({ csn, resultCount: 0, restQuery: query, csnMode });
     }
     const restQuery = LogicalOperator.getOutsideOfCache(query, this.subsetDefinition.query);
+    this.logger.info(LOG_MESSAGES.COUNT_CSN, [csnMode || ""], [csn]);
+    this.logger.debug(LOG_MESSAGES.COUNT, [JSON.stringify(query)]);
     let release: () => void;
     const promise = new Promise<void>((resolve, reject) => {
       this.getLock().readLock((unlock) => {
-        this.logger.debug("get readLock");
+        this.logger.debug(LOG_MESSAGES.GET_READLOCK);
         release = () => {
-          this.logger.debug("release readLock");
+          this.logger.debug(LOG_MESSAGES.RELEASE_READLOCK);
           unlock();
         };
         resolve();
@@ -928,7 +1027,10 @@ export class SubsetStorage extends ServiceEngine implements Proxy {
     return promise
       .then(() => this.getSystemDb().getCsn())
       .then((currentCsn) => {
-        if (csn === 0 || csn === currentCsn || (csn < currentCsn && csnMode === "latest")) {
+        if (csn === 0 || (csn < currentCsn && csnMode === "latest")) {
+          csn = Math.max(csn, this.committedCsn || currentCsn);
+        }
+        if (csn === currentCsn) {
           return this.getSubsetDb().count(innerQuery)
             .then((result) => {
               release();
@@ -937,13 +1039,13 @@ export class SubsetStorage extends ServiceEngine implements Proxy {
         } else if (csn < protectedCsn) {
           throw new DadgetError(ERROR.E2402, [csn, protectedCsn]);
         } else if (csn < currentCsn) {
-          this.logger.info("rollback transactions", csn, currentCsn);
+          this.logger.info(LOG_MESSAGES.ROLLBACK_TRANSACTIONS2, [], [csn, currentCsn]);
           // rollback transactions
           return this.getJournalDb().findByCsnRange(csn + 1, currentCsn)
             .then((transactions) => {
               if (transactions.length !== currentCsn - csn) {
                 release();
-                this.logger.info("not enough rollback transactions");
+                this.logger.info(LOG_MESSAGES.INSUFFICIENT_ROLLBACK_TRANSACTIONS);
                 return { csn, resultCount: 0, restQuery: query };
               }
               return this.getSubsetDb().count({ $and: [innerQuery, { csn: { $lte: csn } }] })
@@ -955,21 +1057,21 @@ export class SubsetStorage extends ServiceEngine implements Proxy {
                 });
             });
         } else {
-          this.logger.info("wait for transactions", csn, currentCsn);
-          // wait for transactions
+          this.logger.info(LOG_MESSAGES.WAIT_FOR_TRANSACTIONS, [], [csn, currentCsn]);
+          // wait for transaction journals
           return new Promise<CountResult>((resolve, reject) => {
             if (!this.queryWaitingList[csn]) { this.queryWaitingList[csn] = []; }
             this.queryWaitingList[csn].push(() => {
               return this.getSubsetDb().count(innerQuery)
                 .then((result) => {
                   resolve({ csn, resultCount: result, restQuery });
-                });
+                }).catch((reason) => reject(reason));
             });
             release();
           });
         }
       }).catch((e) => {
-        this.logger.warn("SubsetStorage query error: " + e.toString());
+        this.logger.warn(LOG_MESSAGES.ERROR_MSG, [e.toString()], [208]);
         release();
         return Promise.reject(e);
       });
@@ -988,13 +1090,14 @@ export class SubsetStorage extends ServiceEngine implements Proxy {
       return Promise.resolve({ csn, resultSet: [], restQuery: query, csnMode });
     }
     if (limit && limit < 0) { limit = this.option.exportMaxLines; }
-    this.logger.debug("query:" + JSON.stringify(query));
+    this.logger.info(LOG_MESSAGES.QUERY_CSN, [csnMode || ""], [csn]);
+    this.logger.debug(LOG_MESSAGES.QUERY, [JSON.stringify(query)]);
     let release: () => void;
     const promise = new Promise<void>((resolve, reject) => {
       this.getLock().readLock((unlock) => {
-        this.logger.debug("get readLock");
+        this.logger.debug(LOG_MESSAGES.GET_READLOCK);
         release = () => {
-          this.logger.debug("release readLock");
+          this.logger.debug(LOG_MESSAGES.RELEASE_READLOCK);
           unlock();
         };
         resolve();
@@ -1006,7 +1109,10 @@ export class SubsetStorage extends ServiceEngine implements Proxy {
     return promise
       .then(() => this.getSystemDb().getCsn())
       .then((currentCsn) => {
-        if (csn === 0 || csn === currentCsn || (csn < currentCsn && csnMode === "latest")) {
+        if (csn === 0 || (csn < currentCsn && csnMode === "latest")) {
+          csn = Math.max(csn, this.committedCsn || currentCsn);
+        }
+        if (csn === currentCsn) {
           return this.getSubsetDb().find(innerQuery, sort, limit, projection, offset)
             .then((result) => {
               release();
@@ -1015,13 +1121,13 @@ export class SubsetStorage extends ServiceEngine implements Proxy {
         } else if (csn < protectedCsn) {
           throw new DadgetError(ERROR.E2402, [csn, protectedCsn]);
         } else if (csn < currentCsn) {
-          this.logger.info("rollback transactions", csn, currentCsn);
+          this.logger.info(LOG_MESSAGES.ROLLBACK_TRANSACTIONS2, [], [csn, currentCsn]);
           // rollback transactions
           return this.getJournalDb().findByCsnRange(csn + 1, currentCsn)
             .then((transactions) => {
               if (transactions.length !== currentCsn - csn) {
                 release();
-                this.logger.info("not enough rollback transactions");
+                this.logger.info(LOG_MESSAGES.INSUFFICIENT_ROLLBACK_TRANSACTIONS);
                 return { csn, resultSet: [], restQuery: query };
               }
               const _offset = offset ? offset : 0;
@@ -1036,21 +1142,21 @@ export class SubsetStorage extends ServiceEngine implements Proxy {
                 });
             });
         } else {
-          this.logger.info("wait for transactions", csn, currentCsn);
-          // wait for transactions
+          this.logger.info(LOG_MESSAGES.WAIT_FOR_TRANSACTIONS, [], [csn, currentCsn]);
+          // wait for transaction journals
           return new Promise<QueryResult>((resolve, reject) => {
             if (!this.queryWaitingList[csn]) { this.queryWaitingList[csn] = []; }
             this.queryWaitingList[csn].push(() => {
               return this.getSubsetDb().find(innerQuery, sort, limit, projection, offset)
                 .then((result) => {
                   resolve({ csn, resultSet: result, restQuery });
-                });
+                }).catch((reason) => reject(reason));
             });
             release();
           });
         }
       }).catch((e) => {
-        this.logger.warn("SubsetStorage query error: " + e.toString());
+        this.logger.warn(LOG_MESSAGES.ERROR_MSG, [e.toString()], [209]);
         release();
         return Promise.reject(e);
       });
@@ -1065,9 +1171,16 @@ export class SubsetStorage extends ServiceEngine implements Proxy {
       dataMap[val._id] = val;
     });
 
+    let committedCsn: number | undefined;
     transactions.forEach((trans) => {
+      if (committedCsn !== undefined && committedCsn < trans.csn) { return; }
+      if (trans.type === TransactionType.ABORT || trans.type === TransactionType.ABORT_IMPORT) {
+        if (trans.committedCsn === undefined) { throw new Error("committedCsn required"); }
+        committedCsn = trans.committedCsn;
+        return;
+      }
       if (trans.before) {
-        dataMap[trans.target] = trans.before;
+        dataMap[trans.target] = TransactionRequest.getBefore(trans);
       } else if (trans.type === TransactionType.INSERT || trans.type === TransactionType.RESTORE) {
         delete dataMap[trans.target];
       }

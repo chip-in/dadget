@@ -17,7 +17,25 @@ export class Util {
     const whilst = (data: T): Promise<T> => {
       return condition(data) ? action(data).then(whilst) : Promise.resolve(data);
     };
-    return whilst(data);
+    try {
+      return whilst(data);
+    } catch (error) {
+      return Promise.reject(error);
+    }
+  }
+
+  static promiseEach<T>(
+    list: T[],
+    action: (data: T) => Promise<any>,
+  ): Promise<any> {
+    return Util.promiseWhile<T[]>(
+      [...list],
+      (list) => list.length > 0,
+      (list) => {
+        const row = list.shift();
+        return row ? action(row).then(() => list) : Promise.resolve([]);
+      },
+    );
   }
 
   static mongoSearch(documents: any[], query: object, sort?: any, validate?: boolean): any {
@@ -66,11 +84,13 @@ export class Util {
     const pathname = (subset ?
       CORE_NODE.PATH_SUBSET_UPDATOR.replace(/:database\b/g, database).replace(/:subset\b/g, subset) :
       CORE_NODE.PATH_CONTEXT.replace(/:database\b/g, database)) + CORE_NODE.PATH_GET_TRANSACTION;
-    const reqUrl = URL.format({
-      pathname,
-      query: { csn },
-    });
-    return node.fetch(reqUrl)
+    return node.fetch(pathname, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+      },
+      body: EJSON.stringify({ csn }),
+    })
       .then((fetchResult) => {
         if (typeof fetchResult.ok !== "undefined" && !fetchResult.ok) { throw Error(fetchResult.statusText); }
         return fetchResult.json();
@@ -86,7 +106,7 @@ export class Util {
           const reason = result.reason as DadgetError;
           throw new DadgetError({ code: reason.code, message: reason.message }, reason.inserts, reason.ns);
         } else {
-          throw JSON.stringify(result);
+          throw new Error(JSON.stringify(result));
         }
       });
   }
@@ -109,11 +129,13 @@ export class Util {
       mainLoop,
       (mainLoop) => mainLoop.csn <= toCsn,
       (mainLoop) => {
-        const reqUrl = URL.format({
-          pathname,
-          query: { fromCsn: mainLoop.csn, toCsn },
-        });
-        return node.fetch(reqUrl)
+        return node.fetch(pathname, {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+          },
+          body: EJSON.stringify({ fromCsn: mainLoop.csn, toCsn }),
+        })
           .then((fetchResult) => {
             if (typeof fetchResult.ok !== "undefined" && !fetchResult.ok) { throw Error(fetchResult.statusText); }
             return fetchResult.json();
@@ -161,8 +183,8 @@ export class Util {
   }
 
   static project(data: any, projection?: any): object {
-    if (!projection) { return data; }
-    let mode = 0;
+    if (!projection || Object.keys(projection).length === 0) { return data; }
+    let mode = projection._id;
     for (const key in projection) {
       if (key !== "_id") { mode = projection[key]; }
     }

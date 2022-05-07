@@ -1,33 +1,36 @@
-import * as byline from "byline";
+import * as readline from "readline";
 import * as fs from "fs";
-import { Db, MongoClient } from "mongodb";
+import { MongoClient } from "mongodb";
 import { promisify } from "util";
-import { Mongo } from "./Config";
-import { TransactionType } from "./db/Transaction";
+import * as split2 from "split2";
+import * as through2 from "through2";
+import { Mongo, SPLIT_IN_SUBSET_DB } from "./Config";
+import { TransactionRequest, TransactionType } from "./db/Transaction";
 import Dadget from "./se/Dadget";
 import { Util } from "./util/Util";
+import * as EJSON from "./util/Ejson";
 
 const MAX_EXPORT_NUM = 100;
+const MAX_UPLOAD_BYTES = 100 * 1024;
 
 export class Maintenance {
   static reset(target: string): void {
     console.info("reset DB:", target);
-    let db: Db;
-    const dbUrl = Mongo.getUrl() + target;
-    MongoClient.connect(dbUrl)
+    let client: MongoClient;
+    MongoClient.connect(Mongo.getUrl(), Mongo.getOption())
       .then((_) => {
-        db = _;
-        return db.admin().listDatabases();
+        client = _;
+        return client.db().admin().listDatabases();
       }).then((dbs) => {
-        let promise = Promise.resolve();
+        let promise = Promise.resolve(true);
         for (const curDb of dbs.databases) {
-          if (curDb.name.startsWith(target)) {
+          if (curDb.name === target || curDb.name.startsWith(target + SPLIT_IN_SUBSET_DB)) {
             console.info(curDb.name);
-            const targetDb = db.db(curDb.name);
+            const targetDb = client.db(curDb.name);
             promise = promise.then(() => targetDb.dropDatabase());
           }
         }
-        promise.then(() => db.close());
+        promise.then(() => client.close());
       });
   }
 
@@ -58,7 +61,7 @@ export class Maintenance {
                     if (rowData.resultSet.length === 0) { return whileData; }
                     let out = "";
                     for (const data of rowData.resultSet) {
-                      out += JSON.stringify(data) + "\n";
+                      out += EJSON.stringify(data) + "\n";
                       idMap.delete((data as any)._id);
                     }
                     for (const id of idMap.keys()) {
@@ -72,60 +75,89 @@ export class Maintenance {
       });
   }
 
-  static import(dadget: Dadget, fileName: string, idName: string): Promise<void> {
-    const stream = byline(fs.createReadStream(fileName));
-    const atomicId = Dadget.uuidGen();
-    return dadget._exec(0, { type: TransactionType.BEGIN_IMPORT, target: "", atomicId })
-      .then(() => {
-        return Util.promiseWhile<{ line: string }>(
-          { line: stream.read() as string },
-          (row) => {
-            return null !== row.line;
-          },
-          (row) => {
-            const data = JSON.parse(row.line);
+  private static async uploadStream(fileName: string, dadget: Dadget, type: TransactionType, idName: string, atomicId: string) {
+    let list: TransactionRequest[] = [];
+    let listSize = 0;
+    let promise1 = Promise.resolve();
+    let promise2 = Promise.resolve();
+    const func = async (list: TransactionRequest[]) => {
+      promise1 = dadget._execMany(0, list, atomicId);
+      await promise2;
+      promise2 = promise1;
+    }
+    return new Promise<void>((resolve, reject) => {
+      fs.createReadStream(fileName, { encoding: 'utf8' })
+        .pipe(split2())
+        .pipe(
+          through2((chunk, enc, callback) => {
+            const line = chunk.toString();
+            const data = EJSON.parse(line);
+            if (!data.hasOwnProperty(idName)) {
+              throw new Error("data has no " + idName + " property.");
+            }
             const target = data[idName];
             delete data._id;
             delete data.csn;
-            return dadget._exec(0, { type: TransactionType.INSERT, target, new: data, atomicId })
-              .then(() => ({ line: stream.read() as string }));
-          },
-        );
-      })
+            listSize += line.length;
+            list.push({ type, target, new: data });
+            if (listSize < MAX_UPLOAD_BYTES) {
+              callback(); //next step, no process
+            } else {
+              //call the method that creates a promise, and at the end
+              //just empty the buffer, and process the next chunk
+              func(list).finally(() => {
+                list = [];
+                listSize = 0;
+                callback();
+              });
+            }
+          }))
+        .on('error', error => {
+          reject(error);
+        })
+        .on('finish', () => {
+          //any remaining data still needs to be sent
+          //resolve the outer promise only when the final batch has completed processing
+          if (list.length > 0) {
+            func(list).then(() => promise2).finally(() => {
+              resolve();
+            });
+          } else {
+            promise2.finally(() => {
+              resolve();
+            });
+          }
+        });
+    });
+  }
+
+  static import(dadget: Dadget, fileName: string, idName: string): Promise<void> {
+    const atomicId = Dadget.uuidGen();
+    return dadget._exec(0, { type: TransactionType.BEGIN_IMPORT, target: "" }, atomicId)
+      .then(() => Maintenance.uploadStream(fileName, dadget, TransactionType.INSERT, idName, atomicId))
       .catch((reason) => {
-        return dadget._exec(0, { type: TransactionType.ABORT_IMPORT, target: "", atomicId })
+        return dadget._exec(0, { type: TransactionType.ABORT_IMPORT, target: "" }, atomicId)
           .then(() => { throw reason; });
       })
-      .then(() => dadget._exec(0, { type: TransactionType.END_IMPORT, target: "", atomicId }))
+      .then(() => dadget._exec(0, { type: TransactionType.END_IMPORT, target: "" }, atomicId))
       .then(() => { return; });
   }
 
   static restore(dadget: Dadget, fileName: string): Promise<void> {
-    const stream = byline(fs.createReadStream(fileName));
     const atomicId = Dadget.uuidGen();
-    return dadget._exec(0, { type: TransactionType.BEGIN_RESTORE, target: "", atomicId })
-      .then(() => dadget._exec(0, { type: TransactionType.TRUNCATE, target: "", atomicId }))
-      .then(() => {
-        return Util.promiseWhile<{ line: string }>(
-          { line: stream.read() as string },
-          (row) => {
-            return null !== row.line;
-          },
-          (row) => {
-            const data = JSON.parse(row.line);
-            const target = data._id;
-            delete data._id;
-            delete data.csn;
-            return dadget._exec(0, { type: TransactionType.RESTORE, target, new: data, atomicId })
-              .then(() => ({ line: stream.read() as string }));
-          },
-        );
-      })
+    return dadget._exec(0, { type: TransactionType.BEGIN_RESTORE, target: "" }, atomicId)
+      .then(() => dadget._exec(0, { type: TransactionType.TRUNCATE, target: "" }, atomicId))
+      .then(() => Maintenance.uploadStream(fileName, dadget, TransactionType.RESTORE, "_id", atomicId))
       .catch((reason) => {
-        return dadget._exec(0, { type: TransactionType.ABORT_RESTORE, target: "", atomicId })
+        return dadget._exec(0, { type: TransactionType.ABORT_RESTORE, target: "" }, atomicId)
           .then(() => { throw reason; });
       })
-      .then(() => dadget._exec(0, { type: TransactionType.END_RESTORE, target: "", atomicId }))
+      .then(() => dadget._exec(0, { type: TransactionType.END_RESTORE, target: "" }, atomicId))
+      .then(() => { return; });
+  }
+
+  static clear(dadget: Dadget, force: boolean): Promise<void> {
+    return dadget._clear(force)
       .then(() => { return; });
   }
 }

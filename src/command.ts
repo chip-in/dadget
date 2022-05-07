@@ -13,6 +13,8 @@ const usage = () => {
     {
       header: "Command List",
       content: [
+        { name: "reset", summary: "Delete local MongoDB data." },
+        { name: "clear", summary: "Delete all DB data." },
         { name: "export", summary: "Export DB data." },
         { name: "import", summary: "Import DB data." },
         { name: "backup", summary: "Backup DB data." },
@@ -67,6 +69,11 @@ const usage = () => {
           typeLabel: "{underline path}",
           description: "Refresh path for JWT authorization",
         },
+        {
+          name: "force",
+          type: Boolean,
+          description: "Forced execution",
+        },
       ],
     },
   ];
@@ -93,21 +100,28 @@ if (mainOptions.command === "reset") {
   }
   Maintenance.reset(target);
 
-} else if (mainOptions.command === "export" || mainOptions.command === "import" ||
+} else if (mainOptions.command === "clear" || mainOptions.command === "export" || mainOptions.command === "import" ||
   mainOptions.command === "backup" || mainOptions.command === "restore") {
-  const argsDefinitions = [
+  const argsDefinitions: any[] = [
     { name: "server" },
     { name: "rn" },
     { name: "name" },
-    { name: "file" },
-    { name: "id" },
     { name: "user" },
     { name: "password" },
     { name: "jwtToken" },
     { name: "jwtRefreshPath" },
   ];
+  if (mainOptions.command === "clear") {
+    argsDefinitions.push({ name: "force", type: Boolean });
+  } else {
+    argsDefinitions.push({ name: "file" });
+    argsDefinitions.push({ name: "id" });
+  }
   const options = commandLineArgs(argsDefinitions, { argv });
-  if (!options.server || !options.rn || !options.name || !options.file) {
+  if (!options.server || !options.rn || !options.name) {
+    usage();
+  }
+  if (mainOptions.command !== "clear" && !options.file) {
     usage();
   }
   if (mainOptions.command === "import" && !options.id) {
@@ -136,6 +150,8 @@ if (mainOptions.command === "reset") {
       return Maintenance.export(dadget, options.file);
     } else if (mainOptions.command === "restore") {
       return Maintenance.restore(dadget, options.file);
+    } else if (mainOptions.command === "clear") {
+      return Maintenance.clear(dadget, !!options.force);
     }
   })
     .then(() => node.stop().then(() => process.exit()))

@@ -1,3 +1,4 @@
+import { v1 as uuidv1 } from "uuid";
 import { Util } from "../../util/Util";
 import { TransactionRequest } from "../Transaction";
 import { IDb } from "./IDb";
@@ -41,8 +42,8 @@ export class CacheDb implements IDb {
     return Promise.resolve(null);
   }
 
-  findByRange(field: string, from: any, to: any, dir: number): Promise<any[]> {
-    return this.find({ $and: [{ [field]: { $gte: from } }, { [field]: { $lte: to } }] }, { [field]: dir });
+  findByRange(field: string, from: any, to: any, dir: number, projection?: object): Promise<any[]> {
+    return this.find({ $and: [{ [field]: { $gte: from } }, { [field]: { $lte: to } }] }, { [field]: dir }, undefined, undefined, projection);
   }
 
   findOneBySort(query: object, sort: object): Promise<any> {
@@ -88,12 +89,14 @@ export class CacheDb implements IDb {
   }
 
   insertOne(doc: { _id: string }): Promise<void> {
+    if (!(doc as any)._id) { (doc as any)._id = uuidv1(); }
     this.data[doc._id] = doc;
     return Promise.resolve();
   }
 
   insertMany(docs: Array<{ _id: string }>): Promise<void> {
     for (const doc of docs) {
+      if (!(doc as any)._id) { (doc as any)._id = uuidv1(); }
       this.data[doc._id] = doc;
     }
     return Promise.resolve();
@@ -122,12 +125,23 @@ export class CacheDb implements IDb {
   }
 
   replaceOneById(id: string, doc: object): Promise<void> {
+    (doc as any)._id = id;
     this.data[id] = doc;
     return Promise.resolve();
   }
 
   deleteOneById(id: string): Promise<void> {
     delete this.data[id];
+    return Promise.resolve();
+  }
+
+  deleteByRange(field: string, from: any, to: any): Promise<void> {
+    for (const id of Object.keys(this.data)) {
+      const val = (this.data[id] as any)[field];
+      if (from <= val && val <= to) {
+        delete this.data[id];
+      }
+    }
     return Promise.resolve();
   }
 

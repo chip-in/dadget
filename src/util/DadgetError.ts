@@ -4,7 +4,7 @@ export class DadgetError {
 
   constructor(
     err: { code: number, message: string },
-    public inserts: Array<object | string | number> = [],
+    public inserts: (object | string | number)[] = [],
     public ns: string = "dadget.chip-in.net") {
 
     this.code = err.code;
@@ -12,7 +12,8 @@ export class DadgetError {
   }
 
   static from(from: any): DadgetError {
-    return new DadgetError({ code: from.code, message: from.message }, from.inserts, from.ns);
+    const message = from.message ? from.message : (from.toString ? from.toString() : from.code);
+    return new DadgetError({ code: from.code, message }, from.inserts, from.ns);
   }
 
   convertInsertsToString() {
@@ -24,7 +25,16 @@ export class DadgetError {
   }
 
   toString(): string {
+    if (!this.message) { return this.code ? this.code.toString() : "no message"; }
+    if (!this.message.replace) { this.message = this.message.toString(); }
     this.convertInsertsToString();
     return this.message.replace(/%([\d]+)/g, (match, i) => this.inserts && this.inserts[i - 1] ? this.inserts[i - 1].toString() : "undefined");
+  }
+}
+
+export class UniqueError extends Error {
+  constructor(e: string, public obj: object) {
+    super(e);
+    this.name = new.target.name;
   }
 }

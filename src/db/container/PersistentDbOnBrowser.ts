@@ -1,6 +1,7 @@
 import * as parser from "mongo-parse";
 import * as hash from "object-hash";
 import { v1 as uuidv1 } from "uuid";
+import { SPLIT_IN_INDEXED_DB } from "../../Config";
 import { Util } from "../../util/Util";
 import { TransactionRequest } from "../Transaction";
 import { IDb } from "./IDb";
@@ -22,7 +23,7 @@ export class PersistentDb implements IDb {
 
   public static getAllStorage(): Promise<string[]> {
     const dbList: string[] = [];
-    return new Promise((resolve, reject) => {
+    return new Promise<void>((resolve, reject) => {
       const dadgetSchema = PersistentDb.openDadgetSchema(reject);
       dadgetSchema.onsuccess = (event) => {
         const schemaDb = (event.target as IDBRequest).result as IDBDatabase;
@@ -75,7 +76,7 @@ export class PersistentDb implements IDb {
 
   start(): Promise<void> {
     this.isStarted = true;
-    const storageName = this.database + "__" + this.collection;
+    const storageName = this.database + SPLIT_IN_INDEXED_DB + this.collection;
     const indexHash = this.indexMap ? hash(this.indexMap) : "";
     let dbVer = 1;
     return new Promise((resolve, reject) => {
@@ -121,7 +122,7 @@ export class PersistentDb implements IDb {
           request.onsuccess = (event) => {
             console.log("open: " + storageName);
             this.db = (event.target as IDBRequest).result;
-//            console.log(this.logAll());
+            // console.log(this.logAll());
 
             const transaction = this.db.transaction(OBJECT_STORE_NAME);
             transaction.onerror = (event) => {
@@ -195,7 +196,7 @@ export class PersistentDb implements IDb {
     transaction.onerror = (event) => {
       console.error("logAll error");
     };
-    return "logAll: " + this.database + "__" + this.collection;
+    return "logAll: " + this.database + SPLIT_IN_INDEXED_DB + this.collection;
   }
 
   findOne(query: object): Promise<object | null> {
@@ -232,7 +233,7 @@ export class PersistentDb implements IDb {
     });
   }
 
-  findByRange(field: string, from: any, to: any, dir: number): Promise<any[]> {
+  findByRange(field: string, from: any, to: any, dir: number, projection?: object): Promise<any[]> {
     const indexName = this.indexRevMap[field];
     if (!indexName) { return Promise.reject("Index is not defined for key: " + field); }
 
@@ -246,7 +247,7 @@ export class PersistentDb implements IDb {
       request.onsuccess = (event) => {
         const cursor = (event.target as IDBRequest).result;
         if (cursor) {
-          dataList.push(cursor.value);
+          dataList.push(Util.project(cursor.value, projection));
           cursor.continue();
         }
       };
@@ -519,6 +520,17 @@ export class PersistentDb implements IDb {
         reject("deleteOneById transaction error: " + transaction.error);
       };
     });
+  }
+
+  deleteByRange(field: string, from: any, to: any): Promise<void> {
+    return this.findByRange(field, from, to, -1, { _id: 1 })
+      .then((transactions) => {
+        let promise = Promise.resolve();
+        for (const transaction of transactions) {
+          promise = promise.then(() => this.deleteOneById((transaction as any)._id));
+        }
+        return promise;
+      });
   }
 
   deleteAll(): Promise<void> {

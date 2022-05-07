@@ -16,7 +16,7 @@ declare module "@chip-in/resource-node" {
     export class ResourceNode {
         coreNodeURL: string;
         isConnected: boolean;
-        logger: Logger;
+//        logger: Logger;
         mqttConnections: {};
         nodeClassName: string;
         password: string;
@@ -43,20 +43,20 @@ declare module "@chip-in/resource-node" {
     }
 
     export abstract class Proxy {
-        logger: Logger;
+//        logger: Logger;
         constructor()
         abstract onReceive(req: http.IncomingMessage, res: http.ServerResponse): Promise<http.ServerResponse>;
     }
 
     export abstract class ServiceEngine {
-        logger: Logger;
+//        logger: Logger;
         constructor(option?: {})
         abstract start(node: ResourceNode): Promise<void>;
         abstract stop(node: ResourceNode): Promise<void>;
     }
 
     export abstract class Subscriber {
-        logger: Logger;
+//        logger: Logger;
         constructor()
         abstract onReceive(msg: string): void;
     }

@@ -50,27 +50,41 @@ export class JournalDb {
       throw new DadgetError(ERROR.E1113, [postulatedCsn, this.protectedCsn]);
     }
     if (request.type === TransactionType.TRUNCATE) { return Promise.resolve(); }
+    if (request.type === TransactionType.BEGIN) { return Promise.resolve(); }
+    if (request.type === TransactionType.END) { return Promise.resolve(); }
+    if (request.type === TransactionType.ABORT) { return Promise.resolve(); }
     if (request.type === TransactionType.BEGIN_IMPORT) { return Promise.resolve(); }
     if (request.type === TransactionType.END_IMPORT) { return Promise.resolve(); }
     if (request.type === TransactionType.ABORT_IMPORT) { return Promise.resolve(); }
     if (request.type === TransactionType.BEGIN_RESTORE) { return Promise.resolve(); }
     if (request.type === TransactionType.END_RESTORE) { return Promise.resolve(); }
+    if (request.type === TransactionType.ABORT_RESTORE) { return Promise.resolve(); }
     if (request.type === TransactionType.RESTORE) { return Promise.resolve(); }
-    return this.db.findOneBySort({ target: request.target }, { csn: -1 })
+    if (request.type === TransactionType.FORCE_ROLLBACK) { return Promise.resolve(); }
+    return this.db.find({ target: { $in: [request.target, ""] } }, { csn: -1 })
+      .then((results) => {
+        let abort = false;
+        for (const row of results) {
+          if (!abort && row.target) return row;
+          if (!row.target) {
+            if (row.type == TransactionType.TRUNCATE) return;
+            abort = row.type == TransactionType.ABORT || row.type == TransactionType.ABORT_IMPORT;
+          }
+        }
+      })
       .then((result) => {
         if (request.type === TransactionType.INSERT && request.new) {
           if (!result || result.type === TransactionType.DELETE) { return; }
           throw new DadgetError(ERROR.E1102, [request.target]);
         } else if (request.before) {
+          const before = TransactionRequest.getRawBefore(request);
           if (!result) {
-            if (request.before.csn < this.protectedCsn) { return; }
+            if (before.csn < this.protectedCsn) { return; }
             throw new DadgetError(ERROR.E1103);
           }
           if (result.type === TransactionType.DELETE) { throw new DadgetError(ERROR.E1104); }
-          if (result.csn > request.before.csn) { throw new DadgetError(ERROR.E1105, [result.csn, request.before.csn]); }
+          if (result.csn > before.csn) { throw new DadgetError(ERROR.E1105, [result.csn, before.csn]); }
           return;
-        } else {
-          throw new DadgetError(ERROR.E1106);
         }
       });
   }
@@ -137,37 +151,23 @@ export class JournalDb {
       .catch((err) => Promise.reject(new DadgetError(ERROR.E1109, [err.toString()])));
   }
 
-  findByCsnRange(from: number, to: number): Promise<TransactionObject[]> {
+  findByCsnRange(from: number, to: number, projection?: object): Promise<TransactionObject[]> {
     console.log("findByCsnRange:", from, to);
-    return this.db.findByRange("csn", from, to, -1)
+    return this.db.findByRange("csn", from, to, -1, projection)
       .then((list) => list.map(JournalDb.deserializeTrans))
       .catch((err) => Promise.reject(new DadgetError(ERROR.E1110, [err.toString()])));
   }
 
   deleteAfterCsn(csn: number): Promise<void> {
     console.log("deleteAfterCsn:", csn);
-    return this.findByCsnRange(csn + 1, Number.MAX_VALUE)
-      .then((transactions) => {
-        let promise = Promise.resolve();
-        for (const transaction of transactions) {
-          promise = promise.then(() => this.db.deleteOneById((transaction as any)._id));
-        }
-        return promise;
-      })
+    return this.db.deleteByRange("csn", csn + 1, Number.MAX_VALUE)
       .catch((err) => Promise.reject(new DadgetError(ERROR.E1112, [err.toString()])));
   }
 
   deleteBeforeCsn(csn: number): Promise<void> {
     console.log("deleteBeforeCsn:", csn);
     if (!csn || csn <= 1) { return Promise.resolve(); }
-    return this.findByCsnRange(1, csn - 1)
-      .then((transactions) => {
-        let promise = Promise.resolve();
-        for (const transaction of transactions) {
-          promise = promise.then(() => this.db.deleteOneById((transaction as any)._id));
-        }
-        return promise;
-      })
+    return this.db.deleteByRange("csn", 1, csn - 1)
       .catch((err) => Promise.reject(new DadgetError(ERROR.E1112, [err.toString()])));
   }
 
