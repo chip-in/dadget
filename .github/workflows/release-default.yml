@@ -26,9 +26,9 @@ jobs:
 
       - name: build
         run: |
-          npm npm install
-          npm npm run clean
-          npm npm run release_build
+          npm install
+          npm run clean
+          npm run release_build
 
       - name: list all tag
         run: |
