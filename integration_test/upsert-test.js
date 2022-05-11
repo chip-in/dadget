@@ -265,6 +265,7 @@ describe('dadget', function () {
                     }
                 });
                 chai.assert.equal(await test1.count({ "name": "b" }), 1);
+                chai.assert.equal(await dadget.count({ "name": "b" }), 0);
                 await test1.exec(0, {
                     type: "delete",
                     target: id
@@ -273,6 +274,7 @@ describe('dadget', function () {
                 throw "test";
             });
         } catch (e) {
+            if (e != "test") throw e;
         }
         chai.assert.equal(await dadget.count({ "name": "b" }), 0);
     });

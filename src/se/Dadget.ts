@@ -145,6 +145,17 @@ export default class Dadget extends ServiceEngine {
     return this.option.database;
   }
 
+  _clone() {
+    const dadget = Object.assign(new Dadget(this.option), this);
+    dadget.updateListeners = {};
+    dadget.updateListenerKey = null;
+    return dadget;
+  }
+
+  _afterCommit(dadget: Dadget) {
+    if (this.latestCsn < dadget.latestCsn) this.latestCsn = dadget.latestCsn;
+  }
+
   /**
    * Dadgetの取得
    */
@@ -748,10 +759,14 @@ export default class Dadget extends ServiceEngine {
 }
 
 class DadgetTr {
+  private orgDadget: Dadget;
+  private dadget: Dadget;
   private atomicId?: string;
   private fixFlag = false;
 
-  constructor(private dadget: Dadget) {
+  constructor(dadget: Dadget) {
+    this.orgDadget = dadget;
+    this.dadget = dadget._clone();
   }
 
   getDatabase() {
@@ -775,13 +790,13 @@ class DadgetTr {
 
   _commit(): Promise<void> {
     if (this.atomicId === undefined) { return Promise.reject(new DadgetError(ERROR.E2107)); }
-    const atomicId = this.atomicId;
-    return this.dadget._exec(0, { type: TransactionType.END, target: "" }, this.atomicId).then(() => { });
+    return this.dadget._exec(0, { type: TransactionType.END, target: "" }, this.atomicId).then(() => {
+      this.orgDadget._afterCommit(this.dadget);
+    });
   }
 
   _rollback(): Promise<void> {
     if (this.atomicId === undefined) { return Promise.resolve(); }
-    const atomicId = this.atomicId;
     return this.dadget._exec(0, { type: TransactionType.ABORT, target: "" }, this.atomicId).then(() => { });
   }
 
@@ -824,16 +839,5 @@ class DadgetTr {
 
   count(query: object, csn?: number, csnMode?: CsnMode): Promise<number> {
     return this.dadget.count(query, csn, csnMode);
-  }
-  addUpdateListener(listener: (csn: number) => void, minInterval?: number): string {
-    return this.dadget.addUpdateListener(listener, minInterval);
-  }
-
-  removeUpdateListener(id: string) {
-    return this.dadget.removeUpdateListener(id);
-  }
-
-  resetUpdateListener() {
-    return this.dadget.resetUpdateListener();
   }
 }
