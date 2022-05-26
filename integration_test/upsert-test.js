@@ -108,6 +108,15 @@ describe('dadget', function () {
             });
             chai.assert.equal(await dadget.count({ name: "cc" }), 1);
             chai.assert.equal(await dadget.count({}), 2);
+
+            const before = await dadget.query({ _id: id2 });
+            await dadget.exec(0, {
+                type: "update",
+                target: id2,
+                operator: { $set: { name: "d" } },
+                before: before.resultSet[0]
+            });
+            chai.assert.equal(await dadget.count({ name: "d" }), 1);
         } catch (e) {
             throw e.toString();
         }
@@ -265,15 +274,48 @@ describe('dadget', function () {
                     }
                 });
                 chai.assert.equal(await test1.count({ "name": "b" }), 1);
+                chai.assert.equal(await dadget.count({ "name": "b" }), 0);
+
+                let data2 = {
+                    name: "cc",
+                    unique: Dadget.uuidGen(),
+                };
+                await test1.exec(0, {
+                    type: "upsert",
+                    target: id,
+                    operator: { $set: { name: "c" } },
+                    new: data2,
+                });
+                chai.assert.equal(await test1.count({ name: "c" }), 1);
+
+                const before = await test1.query({ _id: id });
+                await test1.exec(before.csn, {
+                    type: "update",
+                    target: id,
+                    operator: { $set: { name: "d" } },
+                });
+                chai.assert.equal(await test1.count({ name: "d" }), 1);
+
+                let id2 = Dadget.uuidGen();
+                await test1.exec(0, {
+                    type: "replace",
+                    target: id2,
+                    new: data2,
+                });
+                chai.assert.equal(await test1.count({ name: "cc" }), 1);
+
                 await test1.exec(0, {
                     type: "delete",
                     target: id
                 });
-                chai.assert.equal(await test1.count({ "name": "b" }), 0);
+                chai.assert.equal(await test1.count({ "name": "d" }), 0);
                 throw "test";
             });
         } catch (e) {
+            if (e != "test") throw e;
         }
-        chai.assert.equal(await dadget.count({ "name": "b" }), 0);
+        chai.assert.equal(await dadget.count({ "name": "a" }), 1);
+        chai.assert.equal(await dadget.count({ "name": "d" }), 0);
+        chai.assert.equal(await dadget.count({ "name": "cc" }), 0);
     });
 });

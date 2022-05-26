@@ -97,7 +97,6 @@ export class TransactionRequest {
     const before = beforeObj ? beforeObj : TransactionRequest.getBefore(transaction);
     const transactionObject = transaction as TransactionObject;
     const updateObj = TransactionRequest.applyMongodbUpdate(before, transaction.operator, transactionObject.datetime);
-    if (transactionObject.csn) { updateObj.csn = transactionObject.csn; }
     return updateObj;
   }
 
