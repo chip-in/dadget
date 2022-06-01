@@ -216,6 +216,11 @@ export const ERROR = {
   E2012: { code: 2012, message: "When using upsertOnUniqueError or replaceOnUniqueError, there must be exactly one unique index." },
 
   /**
+   * The required property is missing.
+   */
+  E2013: { code: 2013, message: "The required property is missing.: %1" },
+
+  /**
    * Dadget Config Error
    */
   E2101: { code: 2101, message: "Dadget Config Error: %1" },
@@ -276,6 +281,11 @@ export const ERROR = {
   E2501: { code: 2501, message: "UpdateManager Config Error: %1" },
 
   /**
+   * UniqueCache Config Error
+   */
+  E2601: { code: 2601, message: "UniqueCache Config Error: %1" },
+
+  /**
    * Undefined Error
    */
   E3001: { code: 3001, message: "Undefined Error: %1" },
@@ -283,5 +293,5 @@ export const ERROR = {
   /**
    * Client Version Error
    */
-   E3002: { code: 3002, message: "Client Version Error" },
-  };
+  E3002: { code: 3002, message: "Client Version Error" },
+};

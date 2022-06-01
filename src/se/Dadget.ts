@@ -17,6 +17,7 @@ import { DatabaseRegistry } from "./DatabaseRegistry";
 import { QueryHandler } from "./QueryHandler";
 import { SubsetStorage } from "./SubsetStorage";
 import { UpdateManager } from "./UpdateManager";
+import { UniqueCache } from "./UniqueCache";
 
 const QUERY_ERROR_RETRY_COUNT = 4;
 const QUERY_ERROR_WAIT_TIME = 5000;
@@ -138,6 +139,7 @@ export default class Dadget extends ServiceEngine {
       UpdateManager,
       QueryHandler,
       SubsetStorage,
+      UniqueCache,
     });
   }
 

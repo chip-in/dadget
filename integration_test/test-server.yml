@@ -13,6 +13,9 @@ serviceEngines:
           unique: true
 - class: ContextManager
   database: test1
+- class: UniqueCache
+  database: test1
+  field: unique
 - class: QueryHandler
   database: test1
   subset: wholeContents
