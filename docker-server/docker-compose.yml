@@ -6,7 +6,7 @@ services:
 #      restart_policy:
 #        condition: on-failure # version 3 required
     environment:
-      - CORE_SERVER=http://test-core.chip-in.net
+      - CORE_SERVER=http://core
       - RN_NAME=db-server
       - MONGODB_URL=mongodb://mongodb:27017/
 #      - ACCESS_CONTROL_ALLOW_ORIGIN=http://localhost:3000,http://localhost
@@ -15,12 +15,16 @@ services:
 #      - USE_LOG_UPLOADER=true
 #      - ACCESS_TOKEN=
 #      - TOKEN_UPDATE_PATH=
-    extra_hosts:
-      - "test-core.chip-in.net:172.17.0.1"
     depends_on:
       - mongodb
+    networks:
+      - default
+      - chipin_default
   mongodb:
     image: mongo:latest
     volumes:
       - ./data/db:/data/db
     command: mongod --logpath=/dev/null
+networks:
+  chipin_default:
+    external: true
