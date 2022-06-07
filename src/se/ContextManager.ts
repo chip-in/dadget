@@ -1183,6 +1183,8 @@ export class ContextManager extends ServiceEngine {
           if (val === undefined || val === null) {
             if (indexDef.required) {
               throw new DadgetError(ERROR.E2013, [field]);
+            } else {
+              return Promise.resolve(loopData);
             }
           } else {
             condition.push({ [field]: val });
