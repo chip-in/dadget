@@ -98,6 +98,72 @@ describe('unique', function () {
         }
     });
 
+    it.skip('complex', async () => {
+        let dadget = Dadget.getDb(node, "test1");
+        await dadget.clear();
+        let data = {
+            a: "a",
+            b: "a",
+        };
+        try {
+            await dadget.exec(0, {
+                type: "insert",
+                target: 1,
+                new: data
+            });
+            await expect(
+                dadget.exec(0, {
+                    type: "insert",
+                    target: 2,
+                    new: data
+                })
+            ).to.be.rejected;
+
+            data.b = "b";
+            await dadget.exec(0, {
+                type: "insert",
+                target: 2,
+                new: data
+            });
+            await dadget.exec(0, {
+                type: "update",
+                target: 2,
+                operator: { $set: { b: "b" } }
+            })
+            await expect(
+                dadget.exec(0, {
+                    type: "update",
+                    target: 2,
+                    operator: { $set: { b: "a" } }
+                })
+            ).to.be.rejected;
+            await dadget.exec(0, {
+                type: "delete",
+                target: 2
+            });
+            await dadget.exec(0, {
+                type: "insert",
+                target: 2,
+                new: data
+            });
+            chai.assert.equal(await dadget.count({}), 2);
+
+            data.b = null;
+            await dadget.exec(0, {
+                type: "insert",
+                target: 3,
+                new: data
+            });
+            await dadget.exec(0, {
+                type: "insert",
+                target: 4,
+                new: data
+            });
+        } catch (e) {
+            throw e.toString();
+        }
+    });
+
     it('2', async () => {
         let dadget = Dadget.getDb(node, "test1");
         await dadget.clear();

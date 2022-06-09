@@ -1179,7 +1179,7 @@ export class ContextManager extends ServiceEngine {
         const condition: { [field: string]: any }[] = [];
         for (const field in indexDef.index) {
           if (!indexDef.index.hasOwnProperty(field)) { continue; }
-          const val = typeof obj[field] === "undefined" ? null : obj[field];
+          const val = obj[field];
           if (val === undefined || val === null) {
             if (indexDef.required) {
               throw new DadgetError(ERROR.E2013, [field]);
@@ -1195,26 +1195,24 @@ export class ContextManager extends ServiceEngine {
           condition.push({ _id: { $ne: exceptId } });
         }
 
-        if (Object.keys(indexDef.index).length == 1) {
-          const field = Object.keys(indexDef.index)[0];
-          const val = obj[field] === undefined ? null : obj[field];
-          const beforeVal = (!before || before[field] === undefined) ? null : before[field];
-          if (!val || val === beforeVal) { return Promise.resolve(loopData); }
-          const seList = this.getNode().searchServiceEngine("UniqueCache", { database: this.database, field });
-          if (seList.length == 1) {
-            const se = seList[0] as UniqueCache;
-            return se.has(val, csn)
-              .then((result) => {
-                if (!result) { return loopData; }
-                // 検索不可の場合もtrueを返すので、再検索が必要
-                return Dadget._query(this.getNode(), this.database, { $and: condition }, undefined, undefined, undefined, csn, "strict")
-                  .then((result) => {
-                    if (result.restQuery) { throw new Error("The queryHandlers has been empty before completing queries."); }
-                    if (result.resultSet.length === 0) { return loopData; }
-                    throw new UniqueError("duplicate data error: " + JSON.stringify(condition), result.resultSet[0]);
-                  });
-              });
-          }
+        const fields = Object.keys(indexDef.index);
+        const val = UniqueCache._convertKey(fields, obj);;
+        const beforeVal = UniqueCache._convertKey(fields, before);;
+        if (!val || val === beforeVal) { return Promise.resolve(loopData); }
+        const seList = this.getNode().searchServiceEngine("UniqueCache", { database: this.database, field: fields.join(',') });
+        if (seList.length >= 1) {
+          const se = seList[0] as UniqueCache;
+          return se.has(val, csn)
+            .then((result) => {
+              if (!result) { return loopData; }
+              // 検索不可の場合もtrueを返すので、再検索が必要
+              return Dadget._query(this.getNode(), this.database, { $and: condition }, undefined, undefined, undefined, csn, "strict")
+                .then((result) => {
+                  if (result.restQuery) { throw new Error("The queryHandlers has been empty before completing queries."); }
+                  if (result.resultSet.length === 0) { return loopData; }
+                  throw new UniqueError("duplicate data error: " + JSON.stringify(condition), result.resultSet[0]);
+                });
+            });
         }
 
         return Dadget._query(this.getNode(), this.database, { $and: condition }, undefined, undefined, undefined, csn, "strict")

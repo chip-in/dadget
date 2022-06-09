@@ -103,6 +103,9 @@ export class UniqueCache extends ServiceEngine {
     if (!this.field) {
       throw new DadgetError(ERROR.E2601, ["Field name is missing."]);
     }
+    if (typeof this.field !== "string") {
+      throw new DadgetError(ERROR.E2601, ["Field type error"]);
+    }
 
     const seList = node.searchServiceEngine("ContextManager", { database: this.database });
     if (seList.length !== 1) {
@@ -118,8 +121,22 @@ export class UniqueCache extends ServiceEngine {
     return Promise.resolve();
   }
 
+  static _convertKey(fields: string | string[], obj: any) {
+    if (obj === undefined || obj === null) return null;
+    if (typeof fields === "string") {
+      fields = fields.split(',');
+    }
+    const v = [];
+    for (let field of fields) {
+      const val = obj[field];
+      if (val === undefined || val === null) return null;
+      v.push(val);
+    }
+    return JSON.stringify(v);
+  }
+
   private _insert(obj: any): Promise<void> {
-    const val = obj[this.field];
+    const val = UniqueCache._convertKey(this.field, obj);
     if (val !== undefined && val !== null) {
       if (this.index.has(val)) {
         this.errorFlag = true;
@@ -138,7 +155,7 @@ export class UniqueCache extends ServiceEngine {
   }
 
   private _update(before: any, obj: any): Promise<void> {
-    if (before[this.field] !== obj[this.field]) {
+    if (UniqueCache._convertKey(this.field, before) !== UniqueCache._convertKey(this.field, obj)) {
       this._delete(before);
       this._insert(obj);
     }
@@ -146,7 +163,7 @@ export class UniqueCache extends ServiceEngine {
   }
 
   private _delete(obj: any): Promise<void> {
-    const val = obj[this.field];
+    const val = UniqueCache._convertKey(this.field, obj);
     if (val !== undefined && val !== null) {
       this.index.delete(val);
     }
@@ -382,7 +399,11 @@ export class UniqueCache extends ServiceEngine {
     this.logger.warn(LOG_MESSAGES.RESET_DATA, [], [csn]);
     this.pause();
     const query = {};
-    return Dadget._query(this.getNode(), this.database, query, undefined, undefined, undefined, csn, "strict", { _id: 1, [this.field]: 1 })
+    const projection = { _id: 1 } as any;
+    for (let field of this.field.split(',')) {
+      projection[field] = 1;
+    }
+    return Dadget._query(this.getNode(), this.database, query, undefined, undefined, undefined, csn, "strict", projection)
       .then((result) => {
         if (result.restQuery) { throw new Error("The queryHandlers has been empty before completing queries."); }
         return this._deleteAll().then(() => result);
