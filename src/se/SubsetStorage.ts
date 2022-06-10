@@ -442,7 +442,7 @@ class UpdateProcessor extends Subscriber {
           .then(() => { if (withJournal) { this.storage.getJournalDb().insert(subsetTransaction); } })
           .then(() => { if (withJournal) { this.storage.getSystemDb().updateCsn(csn); } })
           .then(() => { if (withJournal) { this.storage.getSystemDb().updateQueryHash(); } })
-          .then(() => { if (withJournal) { this.storage.setReady(subsetTransaction); } });
+          .then(() => { this.storage.setReady(withJournal ? subsetTransaction : undefined); });
       })
       .catch((e) => {
         this.logger.error(LOG_MESSAGES.ERROR_MSG, [e.toString()], [206]);

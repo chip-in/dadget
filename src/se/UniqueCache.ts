@@ -78,9 +78,6 @@ export class UniqueCache extends ServiceEngine {
   }
 
   setReady(): void {
-    if (this.readyFlag) {
-      return;
-    }
     this.readyFlag = true;
   }
 
@@ -412,10 +409,9 @@ export class UniqueCache extends ServiceEngine {
         return this._insertMany(result.resultSet);
       })
       .then(() => { if (withJournal) { this.updateCsn(csn); } })
-      .then(() => { if (withJournal) { this.setReady(); } })
+      .then(() => { this.setReady(); })
       .catch((e) => {
-        this.logger.error(LOG_MESSAGES.ERROR_MSG, [e.toString()], [206]);
-        throw e;
+        this.logger.warn(LOG_MESSAGES.ERROR_MSG, [e.toString()], [206]);
       });
   }
 
@@ -425,12 +421,9 @@ export class UniqueCache extends ServiceEngine {
     return Promise.resolve()
       .then(() => this._deleteAll())
       .then(() => this.updateCsn(0))
-      .then(() => {
-        this.setReady();
-      })
+      .then(() => this.setReady())
       .catch((e) => {
         this.logger.error(LOG_MESSAGES.ERROR_MSG, [e.toString()], [207]);
-        throw e;
       });
   }
 
