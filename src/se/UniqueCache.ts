@@ -32,7 +32,7 @@ export class UniqueCacheConfigDef {
  */
 export class UniqueCache extends ServiceEngine {
 
-  public bootOrder = 50;
+  public bootOrder = 55;
   private currentCsn: number;
   private logger: Logger;
   private option: UniqueCacheConfigDef;
