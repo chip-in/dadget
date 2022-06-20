@@ -46,9 +46,9 @@ export const ERROR = {
   E1102: { code: 1102, message: "Consistent Error: already exists. target=%1" },
 
   /**
-   * Consistent Error: The before data not found
+   * An object csn is larger than the postulated csn.
    */
-  E1103: { code: 1103, message: "Consistent Error: The before data not found" },
+  E1103: { code: 1103, message: "Consistent Error: An object csn is larger than the postulated csn." },
 
   /**
    * Consistent Error: The object has already been deleted

@@ -430,7 +430,7 @@ class ContextManagementServer extends Proxy {
             return Util.promiseEach<TransactionRequest>(
               requests,
               (request) => {
-                return this.procTransaction(0, request, atomicId, options)
+                return this.procTransaction(postulatedCsn, request, atomicId, options)
                   .then(({ newCsn }) => {
                     _newCsn = newCsn;
                   })
@@ -441,7 +441,7 @@ class ContextManagementServer extends Proxy {
             );
           } else {
             atomicId = Dadget.uuidGen();
-            return this.procTransaction(postulatedCsn, { type: TransactionType.BEGIN, target: "" }, atomicId)
+            return this.procTransaction(0, { type: TransactionType.BEGIN, target: "" }, atomicId)
               .then(({ newCsn }) => {
                 _newCsn = newCsn;
                 return Util.promiseEach<TransactionRequest>(
@@ -530,7 +530,7 @@ class ContextManagementServer extends Proxy {
                             request.before = obj;
                             request.operator = operator;
                             count++;
-                            return this.procTransaction(0, request, atomicId)
+                            return this.procTransaction(result2.csn, request, atomicId)
                               .then(({ newCsn }) => {
                                 _newCsn = newCsn;
                               });
@@ -557,7 +557,7 @@ class ContextManagementServer extends Proxy {
                                 request.before = obj;
                                 request.operator = operator;
                                 count++;
-                                return this.procTransaction(0, request, atomicId)
+                                return this.procTransaction(result2.csn, request, atomicId)
                                   .then(({ newCsn }) => {
                                     _newCsn = newCsn;
                                   });

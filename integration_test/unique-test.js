@@ -319,4 +319,47 @@ describe('unique', function () {
             throw e.toString();
         }
     });
+
+    it('4', async () => {
+        let dadget = Dadget.getDb(node, "test1");
+        await dadget.clear();
+        let data = {
+            name: "a",
+        };
+        try {
+            await dadget.exec(0, {
+                type: "insert",
+                target: 1,
+                new: data
+            });
+            let res = await dadget.query({ target: 1 });
+            let csn = res.csn;
+            await expect(
+                dadget.exec(csn - 1, {
+                    type: "insert",
+                    target: 1,
+                    new: data
+                })
+            ).to.be.rejected;
+
+            const list = [];
+            for (let i = 0; i < 2; i++) {
+                list.push({
+                    type: "insert",
+                    target: Dadget.uuidGen(),
+                    new: data
+                });
+            }
+            await dadget.execMany(csn, list);
+            await dadget.updateMany({ _id: 1 }, {
+                "$set": {
+                    "name": "b",
+                }
+            });
+            chai.assert.equal(await dadget.count({}), 3);
+            chai.assert.equal(await dadget.count({ name: "b" }), 1);
+        } catch (e) {
+            throw e.toString();
+        }
+    });
 });
