@@ -34,6 +34,11 @@ export class IndexDef {
    * インデックスの属性を指定する。その仕様はmongo db の createIndex の第二引数に準じる
    */
   property?: { unique?: boolean };
+
+  /**
+   * ユニーク制約とともに指定される場合に必須チェックが行われる
+   */
+  required?: boolean;
 }
 
 /**

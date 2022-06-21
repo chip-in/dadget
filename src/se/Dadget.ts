@@ -17,6 +17,7 @@ import { DatabaseRegistry } from "./DatabaseRegistry";
 import { QueryHandler } from "./QueryHandler";
 import { SubsetStorage } from "./SubsetStorage";
 import { UpdateManager } from "./UpdateManager";
+import { UniqueCache } from "./UniqueCache";
 
 const QUERY_ERROR_RETRY_COUNT = 4;
 const QUERY_ERROR_WAIT_TIME = 5000;
@@ -138,6 +139,7 @@ export default class Dadget extends ServiceEngine {
       UpdateManager,
       QueryHandler,
       SubsetStorage,
+      UniqueCache,
     });
   }
 
@@ -454,7 +456,7 @@ export default class Dadget extends ServiceEngine {
   /**
    * execメソッドはコンテキストマネージャの Rest API を呼び出してトランザクション要求を実行する。
    *
-   * @param csn トランザクションの前提となるコンテキスト通番(トランザクションの type が "insert" のときは 0 を指定でき、その場合は不整合チェックを行わない)
+   * @param csn トランザクションの前提となるコンテキスト通番(トランザクションの type が "insert" で重複のない UUID の場合は 0 を指定できる。それ以外の場合は更新するオブジェクトを取得、または重複IDが存在ないことを確認した query メソッドを実行した時の結果オブジェクトのcsn。)
    * @param request トランザクションの内容を持つオブジェクト
    * @param options 更新オプション(任意)
    * @return 更新されたオブジェクト(更新オプションが指定される場合、NULLの可能性がある)
@@ -509,7 +511,7 @@ export default class Dadget extends ServiceEngine {
   /**
    * execManyメソッドはコンテキストマネージャの Rest API を呼び出して複数のトランザクション要求を実行する。
    *
-   * @param csn トランザクションの前提となるコンテキスト通番(トランザクションの type が "insert" のときは 0 を指定でき、その場合は不整合チェックを行わない)
+   * @param csn exec メソッドのcsnと同じ
    * @param request トランザクションの内容を持つオブジェクトの配列
    * @param options 更新オプション(任意)
    */

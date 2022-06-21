@@ -61,16 +61,20 @@ export class JournalDb {
     if (request.type === TransactionType.ABORT_RESTORE) { return Promise.resolve(); }
     if (request.type === TransactionType.RESTORE) { return Promise.resolve(); }
     if (request.type === TransactionType.FORCE_ROLLBACK) { return Promise.resolve(); }
-    return this.db.find({ target: { $in: [request.target, ""] } }, { csn: -1 })
-      .then((results) => {
-        let abort = false;
-        for (const row of results) {
-          if (!abort && row.target) return row;
-          if (!row.target) {
-            if (row.type == TransactionType.TRUNCATE) return;
-            abort = row.type == TransactionType.ABORT || row.type == TransactionType.ABORT_IMPORT;
-          }
-        }
+    return this.db.count({ target: request.target })
+      .then((count) => {
+        if (count == 0) return;
+        return this.db.find({ target: { $in: [request.target, ""] }, csn: { $gt: postulatedCsn } }, { csn: -1 })
+          .then((results) => {
+            let abort = false;
+            for (const row of results) {
+              if (!abort && row.target) return row;
+              if (!row.target) {
+                if (row.type == TransactionType.TRUNCATE) return;
+                abort = row.type == TransactionType.ABORT || row.type == TransactionType.ABORT_IMPORT;
+              }
+            }
+          })
       })
       .then((result) => {
         if (request.type === TransactionType.INSERT && request.new) {
@@ -79,7 +83,7 @@ export class JournalDb {
         } else if (request.before) {
           const before = TransactionRequest.getRawBefore(request);
           if (!result) {
-            if (before.csn < this.protectedCsn) { return; }
+            if (before.csn <= postulatedCsn) { return; }
             throw new DadgetError(ERROR.E1103);
           }
           if (result.type === TransactionType.DELETE) { throw new DadgetError(ERROR.E1104); }

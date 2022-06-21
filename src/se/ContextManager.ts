@@ -17,6 +17,7 @@ import { ProxyHelper } from "../util/ProxyHelper";
 import { Util } from "../util/Util";
 import Dadget, { CLIENT_VERSION } from "./Dadget";
 import { DatabaseRegistry, IndexDef } from "./DatabaseRegistry";
+import { UniqueCache } from "./UniqueCache";
 
 const KEEP_TIME_AFTER_CONTEXT_MANAGER_MASTER_ACQUIRED_MS = 3000; // 3000ms
 const KEEP_TIME_AFTER_SENDING_ROLLBACK_MS = 1000; // 1000ms
@@ -84,6 +85,7 @@ class TransactionJournalSubscriber extends Subscriber {
           .then((tr) => {
             return (transaction.csn > 0 ? this.context.getJournalDb().deleteAfterCsn(transaction.csn) : this.context.getJournalDb().deleteAll())
               .then(() => {
+                this.context.resetUniqueCache(transaction.csn);
                 if (transaction.csn === 0 || tr && tr.digest === transaction.digest) {
                   return this.context.getSystemDb().updateCsn(transaction.csn);
                 } else {
@@ -112,7 +114,10 @@ class TransactionJournalSubscriber extends Subscriber {
             if (!savedTransaction) {
               if (preTransaction && preTransaction.digest === transaction.beforeDigest) {
                 return this.context.getJournalDb().insert(transaction)
-                  .then(() => this.context.getSystemDb().updateCsn(transaction.csn));
+                  .then(() => {
+                    this.context.updateUniqueCache(transaction);
+                    return this.context.getSystemDb().updateCsn(transaction.csn);
+                  });
               }
             }
           })
@@ -319,7 +324,7 @@ class ContextManagementServer extends Proxy {
       }
     }
 
-    if (this.atomicLockId && this.atomicLockId !== atomicId) {
+    if (this.context.getLock().isBusy(MASTER_LOCK) || this.atomicLockId && this.atomicLockId !== atomicId) {
       return new Promise<object>((resolve, reject) => {
         this.queueWaitingList.push(() => {
           this.exec(postulatedCsn, request, atomicId, options)
@@ -351,14 +356,12 @@ class ContextManagementServer extends Proxy {
             request.type !== TransactionType.END) {
             this.lastBeforeObj = updateObject;
           }
-          this.notifyAllWaitingList();
           resolve({
             status: "OK",
             csn: newCsn,
             updateObject,
           });
         }, (reason) => {
-          this.notifyAllWaitingList();
           if (ExecOptions.continueOnError(options, reason)) {
             return this.context.getSystemDb().getCsn()
               .then((csn) => {
@@ -378,7 +381,7 @@ class ContextManagementServer extends Proxy {
             reason: cause,
           });
         });
-      });
+      }).then(() => this.notifyAllWaitingList());
     });
   }
 
@@ -410,7 +413,7 @@ class ContextManagementServer extends Proxy {
       }
     }
 
-    if (this.atomicLockId && this.atomicLockId !== atomicId) {
+    if (this.context.getLock().isBusy(MASTER_LOCK) || this.atomicLockId && this.atomicLockId !== atomicId) {
       return new Promise<object>((resolve, reject) => {
         this.queueWaitingList.push(() => {
           this.execMany(postulatedCsn, requests, atomicId, options)
@@ -427,7 +430,7 @@ class ContextManagementServer extends Proxy {
             return Util.promiseEach<TransactionRequest>(
               requests,
               (request) => {
-                return this.procTransaction(0, request, atomicId, options)
+                return this.procTransaction(postulatedCsn, request, atomicId, options)
                   .then(({ newCsn }) => {
                     _newCsn = newCsn;
                   })
@@ -438,7 +441,7 @@ class ContextManagementServer extends Proxy {
             );
           } else {
             atomicId = Dadget.uuidGen();
-            return this.procTransaction(postulatedCsn, { type: TransactionType.BEGIN, target: "" }, atomicId)
+            return this.procTransaction(0, { type: TransactionType.BEGIN, target: "" }, atomicId)
               .then(({ newCsn }) => {
                 _newCsn = newCsn;
                 return Util.promiseEach<TransactionRequest>(
@@ -471,13 +474,11 @@ class ContextManagementServer extends Proxy {
         }).then(() => {
           this.checkProtectedCsn();
           this.lastBeforeObj = undefined;
-          this.notifyAllWaitingList();
           resolve({
             status: "OK",
             csn: _newCsn,
           });
         }, (reason) => {
-          this.notifyAllWaitingList();
           let cause = reason instanceof DadgetError ? reason : new DadgetError(ERROR.E2003, [reason]);
           if (cause.code === ERROR.E1105.code) { cause = new DadgetError(ERROR.E2004, [cause]); }
           cause.convertInsertsToString();
@@ -487,13 +488,13 @@ class ContextManagementServer extends Proxy {
             csn: _newCsn,
             reason: cause,
           });
-        });
+        }).then(() => this.notifyAllWaitingList());
       });
     });
   }
 
   updateMany(query: object, operator: object, atomicId?: string): Promise<object> {
-    if (this.atomicLockId && this.atomicLockId !== atomicId) {
+    if (this.context.getLock().isBusy(MASTER_LOCK) || this.atomicLockId && this.atomicLockId !== atomicId) {
       return new Promise<object>((resolve, reject) => {
         this.queueWaitingList.push(() => {
           this.updateMany(query, operator, atomicId)
@@ -529,7 +530,7 @@ class ContextManagementServer extends Proxy {
                             request.before = obj;
                             request.operator = operator;
                             count++;
-                            return this.procTransaction(0, request, atomicId)
+                            return this.procTransaction(result2.csn, request, atomicId)
                               .then(({ newCsn }) => {
                                 _newCsn = newCsn;
                               });
@@ -556,7 +557,7 @@ class ContextManagementServer extends Proxy {
                                 request.before = obj;
                                 request.operator = operator;
                                 count++;
-                                return this.procTransaction(0, request, atomicId)
+                                return this.procTransaction(result2.csn, request, atomicId)
                                   .then(({ newCsn }) => {
                                     _newCsn = newCsn;
                                   });
@@ -583,14 +584,12 @@ class ContextManagementServer extends Proxy {
         }).then(() => {
           this.checkProtectedCsn();
           this.lastBeforeObj = undefined;
-          this.notifyAllWaitingList();
           resolve({
             status: "OK",
             csn: _newCsn,
             count,
           });
         }, (reason) => {
-          this.notifyAllWaitingList();
           let cause = reason instanceof DadgetError ? reason : new DadgetError(ERROR.E2003, [reason]);
           if (cause.code === ERROR.E1105.code) { cause = new DadgetError(ERROR.E2004, [cause]); }
           cause.convertInsertsToString();
@@ -600,7 +599,7 @@ class ContextManagementServer extends Proxy {
             csn: _newCsn,
             reason: cause,
           });
-        });
+        }).then(() => this.notifyAllWaitingList());
       });
     });
   }
@@ -643,6 +642,7 @@ class ContextManagementServer extends Proxy {
           ]));
       })
       .then(([a, b, pubData]) => {
+        this.context.updateUniqueCache(transaction);
         if (request.type !== TransactionType.FORCE_ROLLBACK && transaction.digest) {
           this.context.getDigestMap().set(transaction.csn, transaction.digest);
         }
@@ -756,21 +756,21 @@ class ContextManagementServer extends Proxy {
     } else if (request.type === TransactionType.TRUNCATE) {
       this.logger.warn(LOG_MESSAGES.EXEC_TRUNCATE);
     } else if (request.type === TransactionType.BEGIN) {
-      this.logger.warn(LOG_MESSAGES.EXEC_BEGIN);
+      this.logger.info(LOG_MESSAGES.EXEC_BEGIN);
     } else if (request.type === TransactionType.END) {
-      this.logger.warn(LOG_MESSAGES.EXEC_END);
+      this.logger.info(LOG_MESSAGES.EXEC_END);
     } else if (request.type === TransactionType.ABORT) {
-      this.logger.warn(LOG_MESSAGES.EXEC_ABORT);
+      this.logger.info(LOG_MESSAGES.EXEC_ABORT);
     } else if (request.type === TransactionType.BEGIN_IMPORT) {
-      this.logger.warn(LOG_MESSAGES.EXEC_BEGIN_IMPORT);
+      this.logger.info(LOG_MESSAGES.EXEC_BEGIN_IMPORT);
     } else if (request.type === TransactionType.END_IMPORT) {
-      this.logger.warn(LOG_MESSAGES.EXEC_END_IMPORT);
+      this.logger.info(LOG_MESSAGES.EXEC_END_IMPORT);
     } else if (request.type === TransactionType.ABORT_IMPORT) {
       this.logger.warn(LOG_MESSAGES.EXEC_ABORT_IMPORT);
     } else if (request.type === TransactionType.BEGIN_RESTORE) {
-      this.logger.warn(LOG_MESSAGES.EXEC_BEGIN_RESTORE);
+      this.logger.info(LOG_MESSAGES.EXEC_BEGIN_RESTORE);
     } else if (request.type === TransactionType.END_RESTORE) {
-      this.logger.warn(LOG_MESSAGES.EXEC_END_RESTORE);
+      this.logger.info(LOG_MESSAGES.EXEC_END_RESTORE);
     } else if (request.type === TransactionType.ABORT_RESTORE) {
       this.logger.warn(LOG_MESSAGES.EXEC_ABORT_RESTORE);
     } else if (request.type === TransactionType.FORCE_ROLLBACK) {
@@ -1092,7 +1092,8 @@ export class ContextManager extends ServiceEngine {
             if (serialize(updateObj).length >= MAX_OBJECT_SIZE) {
               throw new DadgetError(ERROR.E2006, [MAX_OBJECT_SIZE]);
             }
-            return updateObj;
+            return this._checkUniqueConstraint(csn, updateObj, request.target, beforeObj)
+              .then(() => Promise.resolve(updateObj));
           } else {
             throw error;
           }
@@ -1107,11 +1108,12 @@ export class ContextManager extends ServiceEngine {
           }
         }))
         .then(() => {
-          const newObj = TransactionRequest.applyOperator(request);
+          const before = TransactionRequest.getBefore(request);
+          const newObj = TransactionRequest.applyOperator(request, before);
           if (serialize(newObj).length >= MAX_OBJECT_SIZE) {
             throw new DadgetError(ERROR.E2006, [MAX_OBJECT_SIZE]);
           }
-          return this._checkUniqueConstraint(csn, newObj, request.target)
+          return this._checkUniqueConstraint(csn, newObj, request.target, before)
             .then(() => Promise.resolve(newObj));
         })
     } else if ((request.type === TransactionType.UPSERT || request.type === TransactionType.REPLACE) && request.new) {
@@ -1130,12 +1132,12 @@ export class ContextManager extends ServiceEngine {
             if (serialize(updateObj).length >= MAX_OBJECT_SIZE) {
               throw new DadgetError(ERROR.E2006, [MAX_OBJECT_SIZE]);
             }
-            return updateObj;
+            return [updateObj, newObj];
           } else {
-            return newObj;
+            return [newObj, undefined];
           }
-        }).then((obj) => {
-          return this._checkUniqueConstraint(csn, obj, request.target)
+        }).then(([obj, before]) => {
+          return this._checkUniqueConstraint(csn, obj!, request.target, before)
             .then(() => Promise.resolve(obj));
         })
     } else if (request.type === TransactionType.DELETE) {
@@ -1165,7 +1167,7 @@ export class ContextManager extends ServiceEngine {
       });
   }
 
-  private _checkUniqueConstraint(csn: number, obj: { [field: string]: any }, exceptId?: string): Promise<void> {
+  private _checkUniqueConstraint(csn: number, obj: { [field: string]: any }, exceptId?: string, before?: { [field: string]: any }): Promise<void> {
     const loopData = { count: 0 };
     return Util.promiseWhile<{ count: number }>(
       loopData,
@@ -1177,12 +1179,42 @@ export class ContextManager extends ServiceEngine {
         const condition: { [field: string]: any }[] = [];
         for (const field in indexDef.index) {
           if (!indexDef.index.hasOwnProperty(field)) { continue; }
-          const val = typeof obj[field] === "undefined" ? null : obj[field];
-          condition.push({ [field]: val });
+          const val = obj[field];
+          if (val === undefined || val === null) {
+            if (indexDef.required) {
+              throw new DadgetError(ERROR.E2013, [field]);
+            } else {
+              return Promise.resolve(loopData);
+            }
+          } else {
+            condition.push({ [field]: val });
+          }
         }
+        if (Object.keys(condition).length == 0) { return Promise.resolve(loopData); }
         if (exceptId) {
           condition.push({ _id: { $ne: exceptId } });
         }
+
+        const fields = Object.keys(indexDef.index);
+        const val = UniqueCache._convertKey(fields, obj);;
+        const beforeVal = UniqueCache._convertKey(fields, before);;
+        if (!val || val === beforeVal) { return Promise.resolve(loopData); }
+        const seList = this.getNode().searchServiceEngine("UniqueCache", { database: this.database, field: fields.join(',') });
+        if (seList.length >= 1) {
+          const se = seList[0] as UniqueCache;
+          return se.has(val, csn)
+            .then((result) => {
+              if (!result) { return loopData; }
+              // 検索不可の場合もtrueを返すので、再検索が必要
+              return Dadget._query(this.getNode(), this.database, { $and: condition }, undefined, undefined, undefined, csn, "strict")
+                .then((result) => {
+                  if (result.restQuery) { throw new Error("The queryHandlers has been empty before completing queries."); }
+                  if (result.resultSet.length === 0) { return loopData; }
+                  throw new UniqueError("duplicate data error: " + JSON.stringify(condition), result.resultSet[0]);
+                });
+            });
+        }
+
         return Dadget._query(this.getNode(), this.database, { $and: condition }, undefined, undefined, undefined, csn, "strict")
           .then((result) => {
             if (result.restQuery) { throw new Error("The queryHandlers has been empty before completing queries."); }
@@ -1191,6 +1223,20 @@ export class ContextManager extends ServiceEngine {
           });
       },
     ).then(() => { return; });
+  }
+
+  updateUniqueCache(transaction: TransactionObject) {
+    const seList = this.getNode().searchServiceEngine("UniqueCache", { database: this.getDatabase() }) as UniqueCache[];
+    for (const se of seList) {
+      se.procTransaction(transaction);
+    }
+  }
+
+  resetUniqueCache(csn: number) {
+    const seList = this.getNode().searchServiceEngine("UniqueCache", { database: this.getDatabase() }) as UniqueCache[];
+    for (const se of seList) {
+      se.resetData(csn, true);
+    }
   }
 }
 
