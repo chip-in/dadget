@@ -64,6 +64,7 @@ export const LOG_MESSAGES = {
   TIME_OF_EXEC: { code: 63, msg: "time of exec: %d1 ms" },
   UPDATE_SUBSET_ERROR: { code: 64, msg: "update subset db error: %1" }, // メッセージ変更禁止
   EXEC_FORCE_ROLLBACK: { code: 65, msg: "FORCE_ROLLBACK" },
+  ON_RECEIVE_GET_UPDATE_DATA: { code: 66, msg: "/getUpdateData csn %d1" },
 };
 
 Logger.checkLogType(LOG_MESSAGES);

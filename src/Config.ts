@@ -182,6 +182,7 @@ export const CORE_NODE = {
   PATH_GET_TRANSACTION_OLD: "/getTransactionJournal",
   PATH_GET_TRANSACTIONS: "/getTransactionJournals/_get",
   PATH_GET_TRANSACTIONS_OLD: "/getTransactionJournals",
+  PATH_GET_UPDATE_DATA: "/getUpdateData/_get",
   PATH_QUERY: "/query/_get",
   PATH_QUERY_OLD: "/query",
   PATH_COUNT: "/count/_get",

@@ -12,7 +12,7 @@ import { DadgetError } from "../util/DadgetError";
 import * as EJSON from "../util/Ejson";
 import { Logger } from "../util/Logger";
 import { Util } from "../util/Util";
-import { ATOMIC_OPERATION_MAX_LOCK_TIME, ContextManager, ExecOptions } from "./ContextManager";
+import { ATOMIC_OPERATION_MAX_LOCK_TIME, ContextManager, ExecOptions, TransactionUpdateDetail } from "./ContextManager";
 import { DatabaseRegistry } from "./DatabaseRegistry";
 import { QueryHandler } from "./QueryHandler";
 import { SubsetStorage } from "./SubsetStorage";
@@ -746,6 +746,36 @@ export default class Dadget extends ServiceEngine {
       this.node.unsubscribe(this.updateListenerKey);
       this.updateListenerKey = null;
     }
+  }
+
+  /**
+   * 指定されたcsnでの更新内容を取得
+   */
+  fetchUpdateDetails(csn: number): Promise<TransactionUpdateDetail[]> {
+    const sendData = { csn };
+    return this.node.fetch(CORE_NODE.PATH_CONTEXT.replace(/:database\b/g, this.database) + CORE_NODE.PATH_GET_UPDATE_DATA, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+      },
+      body: EJSON.stringify(sendData),
+    })
+      .then((fetchResult) => {
+        if (typeof fetchResult.ok !== "undefined" && !fetchResult.ok) { throw Error(fetchResult.statusText); }
+        return fetchResult.json();
+      })
+      .then((_) => {
+        const result = EJSON.deserialize(_);
+        if (result.status === "OK") {
+          return result.list;
+        } else {
+          throw new Error("The specified journal data does not exist.");
+        }
+      })
+      .catch((reason) => {
+        const cause = new DadgetError(ERROR.E2108, [reason.toString()]);
+        return Promise.reject(cause);
+      });
   }
 
   /**

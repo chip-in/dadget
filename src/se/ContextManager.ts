@@ -295,6 +295,17 @@ class ContextManagementServer extends Proxy {
           this.logger.info(LOG_MESSAGES.TIME_OF_EXEC, [], [Date.now() - time]);
           return result;
         });
+    } else if (url.pathname.endsWith(CORE_NODE.PATH_GET_UPDATE_DATA) && method === "POST") {
+      return ProxyHelper.procPost(req, res, this.logger, (data) => {
+        const csn = ProxyHelper.validateNumberRequired(data.csn, "csn");
+        this.logger.info(LOG_MESSAGES.ON_RECEIVE_GET_UPDATE_DATA, [], [csn]);
+        return this.getUpdateData(csn)
+          .catch((reason) => ({ status: "NG", reason }));
+      })
+        .then((result) => {
+          this.logger.info(LOG_MESSAGES.TIME_OF_EXEC, [], [Date.now() - time]);
+          return result;
+        });
     } else {
       this.logger.warn(LOG_MESSAGES.SERVER_COMMAND_NOT_FOUND, [method, url.pathname]);
       return ProxyHelper.procError(req, res);
@@ -858,6 +869,47 @@ class ContextManagementServer extends Proxy {
         journals,
       }));
   }
+
+  async getUpdateData(csn: number): Promise<object> {
+    const journal = await this.context.getJournalDb().findByCsn(csn);
+    if (!journal) { return { status: "NG" }; }
+    if (journal.type == TransactionType.END) {
+      const journal = await this.context.getJournalDb().findByCsn(csn - 1);
+      if (!journal) { return { status: "NG" }; }
+      const committedCsn = journal.committedCsn!;
+      const journals = await this.context.getJournalDb().findByCsnRange(committedCsn + 2, csn - 1);
+      if (journals.length < csn - committedCsn - 2) { return { status: "NG" }; }
+      const rows = [];
+      for (const journal of journals.reverse()) {
+        const row: TransactionUpdateDetail = {
+          type: journal.type,
+          target: journal.target,
+          csn: journal.csn,
+        };
+        if (journal.new || journal.before) {
+          row.data = TransactionRequest.applyOperator(journal);
+        }
+        rows.push(row);
+      }
+      return {
+        status: "OK",
+        list: rows,
+      };
+    } else {
+      const row: TransactionUpdateDetail = {
+        type: journal.type,
+        target: journal.target,
+        csn: journal.csn,
+      };
+      if (journal.new || journal.before) {
+        row.data = TransactionRequest.applyOperator(journal);
+      }
+      return {
+        status: "OK",
+        list: [row],
+      };
+    }
+  }
 }
 
 /**
@@ -1262,4 +1314,11 @@ export class ExecOptions {
     }
     return false;
   }
+}
+
+export class TransactionUpdateDetail {
+  type: TransactionType;
+  target: string;
+  csn: number;
+  data?: object;
 }
