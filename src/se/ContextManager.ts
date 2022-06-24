@@ -886,8 +886,13 @@ class ContextManagementServer extends Proxy {
           target: journal.target,
           csn: journal.csn,
         };
-        if (journal.new || journal.before) {
-          row.data = TransactionRequest.applyOperator(journal);
+        if ((journal.new || journal.before) && journal.type != TransactionType.DELETE) {
+          const data = TransactionRequest.applyOperator(journal);
+          if (data) {
+            if (!data._id && journal.target) data._id = journal.target;
+            data.csn = journal.csn;
+            row.data = data;
+          }
         }
         rows.push(row);
       }
@@ -901,8 +906,13 @@ class ContextManagementServer extends Proxy {
         target: journal.target,
         csn: journal.csn,
       };
-      if (journal.new || journal.before) {
-        row.data = TransactionRequest.applyOperator(journal);
+      if ((journal.new || journal.before) && journal.type != TransactionType.DELETE) {
+        const data = TransactionRequest.applyOperator(journal);
+        if (data) {
+          if (!data._id && journal.target) data._id = journal.target;
+          data.csn = journal.csn;
+          row.data = data;
+        }
       }
       return {
         status: "OK",
