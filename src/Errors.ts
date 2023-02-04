@@ -256,6 +256,11 @@ export const ERROR = {
   E2107: { code: 2107, message: "transaction is not running" },
 
   /**
+   * Dadget fetchUpdateDetails Error
+   */
+  E2108: { code: 2108, message: "Dadget fetchUpdateDetails Error: %1" },
+
+  /**
    * DatabaseRegistry Config Error
    */
   E2201: { code: 2201, message: "DatabaseRegistry Config Error: %1" },
