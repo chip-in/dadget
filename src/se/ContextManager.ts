@@ -646,13 +646,11 @@ class ContextManagementServer extends Proxy {
             transaction.protectedCsn = this.context.getJournalDb().getProtectedCsn();
             return this.procTransactionCtrl(transaction, newCsn, atomicId);
           })
-          .then(() => Promise.all([
-            this.context.getJournalDb().insert(transaction),
-            this.context.getSystemDb().updateCsn(newCsn),
-            EJSON.stringify(transaction),
-          ]));
+          .then(() => this.context.getJournalDb().insert(transaction))
+          .then(() => this.context.getSystemDb().updateCsn(newCsn))
+          .then(() => EJSON.stringify(transaction));
       })
-      .then(([a, b, pubData]) => {
+      .then((pubData) => {
         this.context.updateUniqueCache(transaction);
         if (request.type !== TransactionType.FORCE_ROLLBACK && transaction.digest) {
           this.context.getDigestMap().set(transaction.csn, transaction.digest);

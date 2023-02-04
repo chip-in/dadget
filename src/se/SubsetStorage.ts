@@ -376,7 +376,10 @@ class UpdateProcessor extends Subscriber {
                     };
                     if (journal.csn + 1 === csn) {
                       return this.fetchJournal(csn, journals)
-                        .then(callback)
+                        .then((j) => {
+                          if (!j) { throw new Error("journal not found: " + csn); }
+                          return callback(j);
+                        })
                         .then(() => { this.storage.setReady(); });
                     } else {
                       return this.fetchJournals(journal.csn + 1, csn, callback)
@@ -438,10 +441,10 @@ class UpdateProcessor extends Subscriber {
                   });
               });
           })
-          .then(() => { if (withJournal) { this.storage.getJournalDb().deleteAll(); } })
-          .then(() => { if (withJournal) { this.storage.getJournalDb().insert(subsetTransaction); } })
-          .then(() => { if (withJournal) { this.storage.getSystemDb().updateCsn(csn); } })
-          .then(() => { if (withJournal) { this.storage.getSystemDb().updateQueryHash(); } })
+          .then(() => { if (withJournal) { return this.storage.getJournalDb().deleteAll(); } })
+          .then(() => { if (withJournal) { return this.storage.getJournalDb().insert(subsetTransaction); } })
+          .then(() => { if (withJournal) { return this.storage.getSystemDb().updateCsn(csn); } })
+          .then(() => { if (withJournal) { return this.storage.getSystemDb().updateQueryHash(); } })
           .then(() => { this.storage.setReady(withJournal ? subsetTransaction : undefined); });
       })
       .catch((e) => {
