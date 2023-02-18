@@ -11,6 +11,15 @@ export class CacheDb implements IDb {
     console.log("CacheDb is created");
   }
 
+  async startTransaction() {
+  }
+
+  async commitTransaction(session?: any) {
+  }
+
+  async abortTransaction(session?: any) {
+  }
+
   setCollection(collection: string) {
     if (!CacheDb.dataMap[this.database]) {
       CacheDb.dataMap[this.database] = {};
@@ -30,7 +39,7 @@ export class CacheDb implements IDb {
     return Promise.resolve();
   }
 
-  findOne(query: object): Promise<object | null> {
+  findOne(query: object, session?: any): Promise<object | null> {
     const dataList = [];
     for (const _id of Object.keys(this.data)) {
       dataList.push(this.data[_id]);
@@ -42,7 +51,7 @@ export class CacheDb implements IDb {
     return Promise.resolve(null);
   }
 
-  findByRange(field: string, from: any, to: any, dir: number, projection?: object): Promise<any[]> {
+  findByRange(field: string, from: any, to: any, dir: number, projection?: object, session?: any): Promise<any[]> {
     return this.find({ $and: [{ [field]: { $gte: from } }, { [field]: { $lte: to } }] }, { [field]: dir }, undefined, undefined, projection);
   }
 
@@ -58,7 +67,7 @@ export class CacheDb implements IDb {
     return Promise.resolve(null);
   }
 
-  find(query: object, sort?: object, limit?: number, offset?: number, projection?: object): Promise<any[]> {
+  find(query: object, sort?: object, limit?: number, offset?: number, projection?: object, session?: any): Promise<any[]> {
     const dataList = [];
     for (const _id of Object.keys(this.data)) {
       dataList.push(this.data[_id]);
@@ -88,13 +97,13 @@ export class CacheDb implements IDb {
     return Promise.resolve(count);
   }
 
-  insertOne(doc: { _id: string }): Promise<void> {
+  insertOne(doc: { _id: string }, session?: any): Promise<void> {
     if (!(doc as any)._id) { (doc as any)._id = uuidv1(); }
     this.data[doc._id] = doc;
     return Promise.resolve();
   }
 
-  insertMany(docs: Array<{ _id: string }>): Promise<void> {
+  insertMany(docs: Array<{ _id: string }>, session?: any): Promise<void> {
     for (const doc of docs) {
       if (!(doc as any)._id) { (doc as any)._id = uuidv1(); }
       this.data[doc._id] = doc;
@@ -109,13 +118,13 @@ export class CacheDb implements IDb {
     return Promise.resolve(row[field]);
   }
 
-  updateOneById(id: string, update: object): Promise<void> {
+  updateOneById(id: string, update: object, session?: any): Promise<void> {
     const row = this.data[id] as any;
     this.data[id] = TransactionRequest.applyMongodbUpdate(row, update as any);
     return Promise.resolve();
   }
 
-  updateOne(filter: object, update: object): Promise<void> {
+  updateOne(filter: object, update: object, session?: any): Promise<void> {
     return this.findOne(filter).then((row) => {
       if (row) {
         const obj = row as any;
@@ -124,18 +133,18 @@ export class CacheDb implements IDb {
     });
   }
 
-  replaceOneById(id: string, doc: object): Promise<void> {
+  replaceOneById(id: string, doc: object, session?: any): Promise<void> {
     (doc as any)._id = id;
     this.data[id] = doc;
     return Promise.resolve();
   }
 
-  deleteOneById(id: string): Promise<void> {
+  deleteOneById(id: string, session?: any): Promise<void> {
     delete this.data[id];
     return Promise.resolve();
   }
 
-  deleteByRange(field: string, from: any, to: any): Promise<void> {
+  deleteByRange(field: string, from: any, to: any, session?: any): Promise<void> {
     for (const id of Object.keys(this.data)) {
       const val = (this.data[id] as any)[field];
       if (from <= val && val <= to) {
@@ -145,7 +154,7 @@ export class CacheDb implements IDb {
     return Promise.resolve();
   }
 
-  deleteAll(): Promise<void> {
+  deleteAll(session?: any): Promise<void> {
     for (const id of Object.keys(this.data)) {
       delete this.data[id];
     }

@@ -65,6 +65,15 @@ export class PersistentDb implements IDb {
     console.log("PersistentDbOnBrowser is created");
   }
 
+  async startTransaction() {
+  }
+
+  async commitTransaction(session?: any) {
+  }
+
+  async abortTransaction(session?: any) {
+  }
+
   setCollection(collection: string) {
     this.collection = collection;
   }
@@ -199,7 +208,7 @@ export class PersistentDb implements IDb {
     return "logAll: " + this.database + SPLIT_IN_INDEXED_DB + this.collection;
   }
 
-  findOne(query: object): Promise<object | null> {
+  findOne(query: object, session?: any): Promise<object | null> {
     const fields = Object.keys(query);
     if (fields.length !== 1) { return Promise.reject("not supported query for findOne: " + JSON.stringify(query)); }
 
@@ -233,7 +242,7 @@ export class PersistentDb implements IDb {
     });
   }
 
-  findByRange(field: string, from: any, to: any, dir: number, projection?: object): Promise<any[]> {
+  findByRange(field: string, from: any, to: any, dir: number, projection?: object, session?: any): Promise<any[]> {
     const indexName = this.indexRevMap[field];
     if (!indexName) { return Promise.reject("Index is not defined for key: " + field); }
 
@@ -324,7 +333,7 @@ export class PersistentDb implements IDb {
     });
   }
 
-  find(query: object, sort?: object, limit?: number, offset?: number, projection?: object): Promise<any[]> {
+  find(query: object, sort?: object, limit?: number, offset?: number, projection?: object, session?: any): Promise<any[]> {
     const sortFields = sort ? Object.keys(sort) : [];
     const parserQuery = parser.parse(query);
 
@@ -378,7 +387,7 @@ export class PersistentDb implements IDb {
     return this.find(query).then((list) => list.length);
   }
 
-  insertOne(doc: object): Promise<void> {
+  insertOne(doc: object, session?: any): Promise<void> {
     return new Promise((resolve, reject) => {
       const transaction = this.db.transaction(OBJECT_STORE_NAME, "readwrite");
       if (!(doc as any)._id) { (doc as any)._id = uuidv1(); }
@@ -392,7 +401,7 @@ export class PersistentDb implements IDb {
     });
   }
 
-  insertMany(docs: object[]): Promise<void> {
+  insertMany(docs: object[], session?: any): Promise<void> {
     return new Promise((resolve, reject) => {
       const transaction = this.db.transaction(OBJECT_STORE_NAME, "readwrite");
       const objectStore = transaction.objectStore(OBJECT_STORE_NAME);
@@ -435,7 +444,7 @@ export class PersistentDb implements IDb {
     });
   }
 
-  updateOneById(id: string, update: object): Promise<void> {
+  updateOneById(id: string, update: object, session?: any): Promise<void> {
     return new Promise((resolve, reject) => {
       const transaction = this.db.transaction(OBJECT_STORE_NAME, "readwrite");
       const request = transaction.objectStore(OBJECT_STORE_NAME).get(id);
@@ -459,7 +468,7 @@ export class PersistentDb implements IDb {
     });
   }
 
-  updateOne(query: object, update: object): Promise<void> {
+  updateOne(query: object, update: object, session?: any): Promise<void> {
     const fields = Object.keys(query);
     if (fields.length !== 1) { return Promise.reject("not supported query for updateOne: " + JSON.stringify(query)); }
 
@@ -495,7 +504,7 @@ export class PersistentDb implements IDb {
     });
   }
 
-  replaceOneById(id: string, doc: object): Promise<void> {
+  replaceOneById(id: string, doc: object, session?: any): Promise<void> {
     return new Promise((resolve, reject) => {
       const transaction = this.db.transaction(OBJECT_STORE_NAME, "readwrite");
       (doc as any)._id = id;
@@ -509,7 +518,7 @@ export class PersistentDb implements IDb {
     });
   }
 
-  deleteOneById(id: string): Promise<void> {
+  deleteOneById(id: string, session?: any): Promise<void> {
     return new Promise((resolve, reject) => {
       const transaction = this.db.transaction(OBJECT_STORE_NAME, "readwrite");
       transaction.objectStore(OBJECT_STORE_NAME).delete(id);
@@ -522,7 +531,7 @@ export class PersistentDb implements IDb {
     });
   }
 
-  deleteByRange(field: string, from: any, to: any): Promise<void> {
+  deleteByRange(field: string, from: any, to: any, session?: any): Promise<void> {
     return this.findByRange(field, from, to, -1, { _id: 1 })
       .then((transactions) => {
         let promise = Promise.resolve();
@@ -533,7 +542,7 @@ export class PersistentDb implements IDb {
       });
   }
 
-  deleteAll(): Promise<void> {
+  deleteAll(session?: any): Promise<void> {
     return new Promise((resolve, reject) => {
       const transaction = this.db.transaction(OBJECT_STORE_NAME, "readwrite");
       transaction.objectStore(OBJECT_STORE_NAME).clear();

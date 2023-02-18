@@ -1,11 +1,13 @@
-import { Db, MongoClient } from "mongodb";
+import { ClientSession, Db, MongoClient } from "mongodb";
 import { Mongo, SPLIT_IN_ONE_DB } from "../../Config";
 import { IDb } from "./IDb";
 import { Logger } from "../../util/Logger";
 import { LOG_MESSAGES } from "../../LogMessages";
+import * as AsyncLock from "async-lock";
 
 export class PersistentDb implements IDb {
   private static connection: MongoClient;
+  private static lock = new AsyncLock();
   private db: Db;
   private database: string;
   private subsetName: string;
@@ -24,10 +26,16 @@ export class PersistentDb implements IDb {
   }
 
   private static async getConnection() {
-    if (!PersistentDb.connection) {
-      PersistentDb.connection = await MongoClient.connect(Mongo.getUrl(), Mongo.getOption())
-    }
-    return PersistentDb.connection;
+    return PersistentDb.lock.acquire("getConnection", async () => {
+      if (!PersistentDb.connection) {
+        PersistentDb.connection = await MongoClient.connect(Mongo.getUrl(), Mongo.getOption())
+        if (Mongo.useTransaction()) {
+          const logger = Logger.getLoggerWoDB("PersistentDb");
+          logger.info(LOG_MESSAGES.USE_TRANSACTION);
+        }
+      }
+      return PersistentDb.connection;
+    });
   }
 
   private static errorExit(error: any, num: number): any {
@@ -86,6 +94,28 @@ export class PersistentDb implements IDb {
     console.log("PersistentDb is created");
   }
 
+  async startTransaction() {
+    if (!Mongo.useTransaction()) {
+      return undefined;
+    }
+    let client = await PersistentDb.getConnection();
+    const session = client.startSession();
+    session.startTransaction();
+    return session;
+  }
+
+  async commitTransaction(session?: ClientSession) {
+    if (session) {
+      await session.commitTransaction();
+    }
+  }
+
+  async abortTransaction(session?: ClientSession) {
+    if (session) {
+      await session.abortTransaction();
+    }
+  }
+
   setCollection(collection: string) {
     this.collection = Mongo.getCollectionName(this.subsetName, collection);
   }
@@ -103,13 +133,13 @@ export class PersistentDb implements IDb {
       .catch((error) => PersistentDb.errorExit(error, 3));
   }
 
-  findOne(query: object): Promise<object | null> {
-    return this.db.collection(this.collection).findOne(PersistentDb.convertQuery(query))
+  findOne(query: object, session?: ClientSession): Promise<object | null> {
+    return this.db.collection(this.collection).findOne(PersistentDb.convertQuery(query), { session })
       .catch((error) => PersistentDb.errorExit(error, 4));
   }
 
-  findByRange(field: string, from: any, to: any, dir: number, projection?: object): Promise<any[]> {
-    return this.find({ $and: [{ [field]: { $gte: from } }, { [field]: { $lte: to } }] }, { [field]: dir }, undefined, undefined, projection)
+  findByRange(field: string, from: any, to: any, dir: number, projection?: object, session?: ClientSession): Promise<any[]> {
+    return this.find({ $and: [{ [field]: { $gte: from } }, { [field]: { $lte: to } }] }, { [field]: dir }, undefined, undefined, projection, session)
       .catch((error) => PersistentDb.errorExit(error, 5));
   }
 
@@ -118,8 +148,8 @@ export class PersistentDb implements IDb {
       .catch((error) => PersistentDb.errorExit(error, 6));
   }
 
-  find(query: object, sort?: object, limit?: number, offset?: number, projection?: object): Promise<any[]> {
-    let cursor = this.db.collection(this.collection).find(PersistentDb.convertQuery(query), { allowDiskUse: true, projection })
+  find(query: object, sort?: object, limit?: number, offset?: number, projection?: object, session?: ClientSession): Promise<any[]> {
+    let cursor = this.db.collection(this.collection).find(PersistentDb.convertQuery(query), { allowDiskUse: true, projection, session })
     if (sort) { cursor = cursor.sort(sort as any); }
     if (offset) { cursor = cursor.skip(offset); }
     if (limit) { cursor = cursor.limit(limit); }
@@ -132,13 +162,13 @@ export class PersistentDb implements IDb {
       .catch((error) => PersistentDb.errorExit(error, 8));
   }
 
-  insertOne(doc: object): Promise<void> {
-    return this.db.collection(this.collection).insertOne(doc).then(() => { })
+  insertOne(doc: object, session?: ClientSession): Promise<void> {
+    return this.db.collection(this.collection).insertOne(doc, { session }).then(() => { })
       .catch((error) => PersistentDb.errorExit(error, 9));
   }
 
-  insertMany(docs: object[]): Promise<void> {
-    return this.db.collection(this.collection).insertMany(docs).then(() => { })
+  insertMany(docs: object[], session?: ClientSession): Promise<void> {
+    return this.db.collection(this.collection).insertMany(docs, { session }).then(() => { })
       .catch((error) => PersistentDb.errorExit(error, 10));
   }
 
@@ -155,35 +185,35 @@ export class PersistentDb implements IDb {
       .catch((error) => PersistentDb.errorExit(error, 11));
   }
 
-  updateOneById(id: string, update: object): Promise<void> {
-    return this.db.collection(this.collection).updateOne({ _id: id }, update)
+  updateOneById(id: string, update: object, session?: ClientSession): Promise<void> {
+    return this.db.collection(this.collection).updateOne({ _id: id }, update, { session })
       .catch((error) => PersistentDb.errorExit(error, 12));
   }
 
-  updateOne(filter: object, update: object): Promise<void> {
-    return this.db.collection(this.collection).updateOne(filter, update)
+  updateOne(filter: object, update: object, session?: ClientSession): Promise<void> {
+    return this.db.collection(this.collection).updateOne(filter, update, { session })
       .catch((error) => PersistentDb.errorExit(error, 13));
   }
 
-  replaceOneById(id: string, doc: object): Promise<void> {
+  replaceOneById(id: string, doc: object, session?: ClientSession): Promise<void> {
     (doc as any)._id = id;
-    return this.db.collection(this.collection).replaceOne({ _id: id }, doc, { upsert: true })
+    return this.db.collection(this.collection).replaceOne({ _id: id }, doc, { upsert: true, session })
       .catch((error) => PersistentDb.errorExit(error, 14));
   }
 
-  deleteOneById(id: string): Promise<void> {
-    return this.db.collection(this.collection).deleteOne({ _id: id })
+  deleteOneById(id: string, session?: ClientSession): Promise<void> {
+    return this.db.collection(this.collection).deleteOne({ _id: id }, { session })
       .catch((error) => PersistentDb.errorExit(error, 15));
   }
 
-  deleteByRange(field: string, from: any, to: any): Promise<void> {
+  deleteByRange(field: string, from: any, to: any, session?: ClientSession): Promise<void> {
     const query = { $and: [{ [field]: { $gte: from } }, { [field]: { $lte: to } }] };
-    return this.db.collection(this.collection).deleteMany(PersistentDb.convertQuery(query))
+    return this.db.collection(this.collection).deleteMany(PersistentDb.convertQuery(query), { session })
       .catch((error) => PersistentDb.errorExit(error, 16));
   }
 
-  deleteAll(): Promise<void> {
-    return this.db.collection(this.collection).deleteMany({})
+  deleteAll(session?: ClientSession): Promise<void> {
+    return this.db.collection(this.collection).deleteMany({}, { session })
       .catch((error) => PersistentDb.errorExit(error, 17));
   }
 

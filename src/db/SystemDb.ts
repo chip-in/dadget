@@ -43,6 +43,18 @@ export class SystemDb {
       .catch((err) => Promise.reject(new DadgetError(ERROR.E1001, [err.toString()])));
   }
 
+  async startTransaction() {
+    return await this.db.startTransaction();
+  }
+
+  async commitTransaction(session: any) {
+    return await this.db.commitTransaction(session);
+  }
+
+  async abortTransaction(session: any) {
+    return await this.db.abortTransaction(session);
+  }
+
   checkQueryHash(hash: string): Promise<boolean> {
     this.queryHash = hash;
     return this.db.findOne({ _id: QUERY_HASH_ID })
@@ -59,23 +71,23 @@ export class SystemDb {
       .catch((err) => Promise.reject(new DadgetError(ERROR.E1005, [err.toString()])));
   }
 
-  updateQueryHash(): Promise<void> {
-    return this.db.updateOneById(QUERY_HASH_ID, { $set: { hash: this.queryHash } }).then(() => { })
+  updateQueryHash(session?: any): Promise<void> {
+    return this.db.updateOneById(QUERY_HASH_ID, { $set: { hash: this.queryHash } }, session).then(() => { })
       .catch((err) => Promise.reject(new DadgetError(ERROR.E1006, [err.toString()])));
   }
 
-  private prepareCsn(): Promise<void> {
+  private prepareCsn(session?: any): Promise<void> {
     if (!this.isFirstCsnAccess) { return Promise.resolve(); }
     this.isFirstCsnAccess = false;
-    return this.db.findOne({ _id: CSN_ID })
+    return this.db.findOne({ _id: CSN_ID }, session)
       .then((result) => {
         if (result) {
           if (this.isNewDb) {
-            return this.db.updateOneById(CSN_ID, { $set: { seq: 0 } });
+            return this.db.updateOneById(CSN_ID, { $set: { seq: 0 } }, session);
           }
           return;
         }
-        return this.db.insertOne({ _id: CSN_ID, seq: 0 }).then(() => { });
+        return this.db.insertOne({ _id: CSN_ID, seq: 0 }, session).then(() => { });
       })
       .catch((err) => Promise.reject(new DadgetError(ERROR.E1007, [err.toString()])));
   }
@@ -97,9 +109,9 @@ export class SystemDb {
       .catch((reason) => Promise.reject(new DadgetError(ERROR.E1003, [reason.toString()])));
   }
 
-  updateCsn(seq: number): Promise<void> {
-    return this.prepareCsn()
-      .then(() => this.db.updateOneById(CSN_ID, { $set: { seq } }))
+  updateCsn(seq: number, session?: any): Promise<void> {
+    return this.prepareCsn(session)
+      .then(() => this.db.updateOneById(CSN_ID, { $set: { seq } }, session))
       .then(() => {
         this.isNewDb = false;
         this.csn = seq;
