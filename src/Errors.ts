@@ -261,6 +261,11 @@ export const ERROR = {
   E2108: { code: 2108, message: "Dadget fetchUpdateDetails Error: %1" },
 
   /**
+   * Dadget fetchLatestCsn Error
+   */
+  E2109: { code: 2109, message: "Dadget fetchLatestCsn Error: %1" },
+
+  /**
    * DatabaseRegistry Config Error
    */
   E2201: { code: 2201, message: "DatabaseRegistry Config Error: %1" },

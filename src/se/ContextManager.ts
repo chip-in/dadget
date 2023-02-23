@@ -303,6 +303,17 @@ class ContextManagementServer extends Proxy {
           this.logger.info(LOG_MESSAGES.TIME_OF_EXEC, [], [Date.now() - time]);
           return result;
         });
+    } else if (url.pathname.endsWith(CORE_NODE.PATH_GET_LATEST_CSN) && method === "POST") {
+      return ProxyHelper.procPost(req, res, this.logger, (_data) => {
+        this.logger.info(LOG_MESSAGES.ON_RECEIVE_GET_LATEST_CSN);
+        return this.getCommitedCsn()
+          .then((csn) => ({ status: "OK", csn }))
+          .catch((reason) => ({ status: "NG", reason }));
+      })
+        .then((result) => {
+          this.logger.info(LOG_MESSAGES.TIME_OF_EXEC, [], [Date.now() - time]);
+          return result;
+        });
     } else {
       this.logger.warn(LOG_MESSAGES.SERVER_COMMAND_NOT_FOUND, [method, url.pathname]);
       return ProxyHelper.procError(req, res);
@@ -910,6 +921,15 @@ class ContextManagementServer extends Proxy {
         list: [row],
       };
     }
+  }
+
+  async getCommitedCsn(): Promise<number> {
+    let csn = await this.context.getSystemDb().getCsn();
+    if (csn == 0) return 0;
+    let journal = await this.context.getJournalDb().findByCsn(csn);
+    if (!journal) return 0;
+    if (journal.committedCsn !== undefined) return journal.committedCsn;
+    return csn;
   }
 }
 

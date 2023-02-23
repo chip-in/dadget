@@ -779,6 +779,36 @@ export default class Dadget extends ServiceEngine {
   }
 
   /**
+   * 最新CSNの取得
+   */
+  fetchLatestCsn(): Promise<number> {
+    const sendData = {};
+    return this.node.fetch(CORE_NODE.PATH_CONTEXT.replace(/:database\b/g, this.database) + CORE_NODE.PATH_GET_LATEST_CSN, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+      },
+      body: EJSON.stringify(sendData),
+    })
+      .then((fetchResult) => {
+        if (typeof fetchResult.ok !== "undefined" && !fetchResult.ok) { throw Error(fetchResult.statusText); }
+        return fetchResult.json();
+      })
+      .then((_) => {
+        const result = EJSON.deserialize(_);
+        if (result.status === "OK") {
+          return result.csn;
+        } else {
+          throw new Error("The csn data does not exist.");
+        }
+      })
+      .catch((reason) => {
+        const cause = new DadgetError(ERROR.E2109, [reason.toString()]);
+        return Promise.reject(cause);
+      });
+  }
+
+  /**
    * Access-Control-Allow-Origin を設定する
    */
   static setServerAccessControlAllowOrigin(origin: string) {
