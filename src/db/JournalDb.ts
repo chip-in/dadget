@@ -134,14 +134,14 @@ export class JournalDb {
     return transaction;
   }
 
-  insert(transaction: TransactionObject): Promise<void> {
-    return this.db.insertOne(JournalDb.serializeTrans(transaction))
+  insert(transaction: TransactionObject, session?: any): Promise<void> {
+    return this.db.insertOne(JournalDb.serializeTrans(transaction), session)
       .catch((err) => Promise.reject(new DadgetError(ERROR.E1108, [err.toString()])));
   }
 
-  findByCsn(csn: number): Promise<TransactionObject | null> {
+  findByCsn(csn: number, session?: any): Promise<TransactionObject | null> {
     console.log("findByCsn:", csn);
-    return this.db.findOne({ csn })
+    return this.db.findOne({ csn }, session)
       .then((result) => {
         if (result) {
           const transaction = JournalDb.deserializeTrans(result);
@@ -155,16 +155,16 @@ export class JournalDb {
       .catch((err) => Promise.reject(new DadgetError(ERROR.E1109, [err.toString()])));
   }
 
-  findByCsnRange(from: number, to: number, projection?: object): Promise<TransactionObject[]> {
+  findByCsnRange(from: number, to: number, projection?: object, session?: any): Promise<TransactionObject[]> {
     console.log("findByCsnRange:", from, to);
-    return this.db.findByRange("csn", from, to, -1, projection)
+    return this.db.findByRange("csn", from, to, -1, projection, session)
       .then((list) => list.map(JournalDb.deserializeTrans))
       .catch((err) => Promise.reject(new DadgetError(ERROR.E1110, [err.toString()])));
   }
 
-  deleteAfterCsn(csn: number): Promise<void> {
+  deleteAfterCsn(csn: number, session?: any): Promise<void> {
     console.log("deleteAfterCsn:", csn);
-    return this.db.deleteByRange("csn", csn + 1, Number.MAX_VALUE)
+    return this.db.deleteByRange("csn", csn + 1, Number.MAX_VALUE, session)
       .catch((err) => Promise.reject(new DadgetError(ERROR.E1112, [err.toString()])));
   }
 
@@ -175,15 +175,15 @@ export class JournalDb {
       .catch((err) => Promise.reject(new DadgetError(ERROR.E1112, [err.toString()])));
   }
 
-  deleteAll(): Promise<void> {
+  deleteAll(session?: any): Promise<void> {
     console.log("deleteAll");
-    return this.db.deleteAll()
+    return this.db.deleteAll(session)
       .catch((err) => Promise.reject(new DadgetError(ERROR.E1112, [err.toString()])));
   }
 
-  replace(oldTransaction: TransactionObject, newTransaction: TransactionObject): Promise<void> {
+  replace(oldTransaction: TransactionObject, newTransaction: TransactionObject, session?: any): Promise<void> {
     console.log("replace:", (oldTransaction as any)._id);
-    return this.db.replaceOneById((oldTransaction as any)._id, JournalDb.serializeTrans(newTransaction))
+    return this.db.replaceOneById((oldTransaction as any)._id, JournalDb.serializeTrans(newTransaction), session)
       .catch((err) => Promise.reject(new DadgetError(ERROR.E1117, [err.toString()])));
   }
 

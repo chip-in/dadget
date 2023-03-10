@@ -65,6 +65,8 @@ export const LOG_MESSAGES = {
   UPDATE_SUBSET_ERROR: { code: 64, msg: "update subset db error: %1" }, // メッセージ変更禁止
   EXEC_FORCE_ROLLBACK: { code: 65, msg: "FORCE_ROLLBACK" },
   ON_RECEIVE_GET_UPDATE_DATA: { code: 66, msg: "/getUpdateData csn %d1" },
+  USE_TRANSACTION: { code: 67, msg: "use mongodb transaction" },
+  ON_RECEIVE_GET_LATEST_CSN: { code: 68, msg: "/getLatestCsn" },
 };
 
 Logger.checkLogType(LOG_MESSAGES);

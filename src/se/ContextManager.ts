@@ -132,45 +132,42 @@ class TransactionJournalSubscriber extends Subscriber {
     return Util.fetchJournal(csn, this.context.getDatabase(), this.context.getNode());
   }
 
-  adjustData(csn: number): Promise<any> {
+  async adjustData(csn: number): Promise<void> {
     this.logger.warn(LOG_MESSAGES.ADJUST_DATA, [], [csn]);
     let csnUpdated = false;
     const loopData = { csn };
-    return Util.promiseWhile<{ csn: number }>(
-      loopData,
-      (loopData) => {
-        return loopData.csn !== 0;
-      },
-      (loopData) => {
-        return this.context.getJournalDb().findByCsn(loopData.csn)
-          .then((journal) => {
-            return this.fetchJournal(loopData.csn)
-              .then((fetchJournal) => {
-                if (!fetchJournal) { return { ...loopData, csn: 0 }; }
-                let promise = Promise.resolve();
-                if (!csnUpdated) {
-                  promise = promise.then(() => this.context.getSystemDb().updateCsn(csn));
-                  csnUpdated = true;
-                }
-                return promise.then(() => {
-                  if (!journal) {
-                    return this.context.getJournalDb().insert(fetchJournal)
-                      .then(() => ({ ...loopData, csn: loopData.csn - 1 }));
-                  }
-                  if (fetchJournal.digest === journal.digest) {
-                    return { ...loopData, csn: 0 };
-                  } else {
-                    return this.context.getJournalDb().replace(journal, fetchJournal)
-                      .then(() => ({ ...loopData, csn: loopData.csn - 1 }));
-                  }
-                });
-              });
-          });
-      },
-    )
-      .catch((err) => {
-        this.logger.error(LOG_MESSAGES.ERROR_MSG, [err.toString()], [103]);
-      });
+    const session = await this.context.getSystemDb().startTransaction();
+    try {
+      await Util.promiseWhile<{ csn: number; }>(
+        loopData,
+        (loopData) => {
+          return loopData.csn !== 0;
+        },
+        async (loopData) => {
+          const journal = await this.context.getJournalDb().findByCsn(loopData.csn, session);
+          const fetchJournal = await this.fetchJournal(loopData.csn);
+          if (!fetchJournal) { return { ...loopData, csn: 0 }; }
+          if (!csnUpdated) {
+            await this.context.getSystemDb().updateCsn(csn, session);
+            csnUpdated = true;
+          }
+          if (!journal) {
+            return this.context.getJournalDb().insert(fetchJournal, session)
+              .then(() => ({ ...loopData, csn: loopData.csn - 1 }));
+          }
+          if (fetchJournal.digest === journal.digest) {
+            return { ...loopData, csn: 0 };
+          } else {
+            return this.context.getJournalDb().replace(journal, fetchJournal, session)
+              .then(() => ({ ...loopData, csn: loopData.csn - 1 }));
+          }
+        });
+      await this.context.getSystemDb().commitTransaction(session);
+    } catch (err) {
+      this.logger.error(LOG_MESSAGES.ERROR_MSG, [err.toString()], [103]);
+      await this.context.getSystemDb().abortTransaction(session);
+      throw err;
+    }
   }
 }
 
@@ -300,6 +297,17 @@ class ContextManagementServer extends Proxy {
         const csn = ProxyHelper.validateNumberRequired(data.csn, "csn");
         this.logger.info(LOG_MESSAGES.ON_RECEIVE_GET_UPDATE_DATA, [], [csn]);
         return this.getUpdateData(csn)
+          .catch((reason) => ({ status: "NG", reason }));
+      })
+        .then((result) => {
+          this.logger.info(LOG_MESSAGES.TIME_OF_EXEC, [], [Date.now() - time]);
+          return result;
+        });
+    } else if (url.pathname.endsWith(CORE_NODE.PATH_GET_LATEST_CSN) && method === "POST") {
+      return ProxyHelper.procPost(req, res, this.logger, (_data) => {
+        this.logger.info(LOG_MESSAGES.ON_RECEIVE_GET_LATEST_CSN);
+        return this.getCommitedCsn()
+          .then((csn) => ({ status: "OK", csn }))
           .catch((reason) => ({ status: "NG", reason }));
       })
         .then((result) => {
@@ -615,10 +623,7 @@ class ContextManagementServer extends Proxy {
     });
   }
 
-  private procTransaction(postulatedCsn: number, request: TransactionRequest, atomicId?: string, options?: ExecOptions) {
-    let transaction: TransactionObject;
-    let newCsn: number;
-    let updateObject: { _id?: string, csn?: number } | undefined;
+  private async procTransaction(postulatedCsn: number, request: TransactionRequest, atomicId?: string, options?: ExecOptions) {
     const _request = { ...request, datetime: new Date() };
     if (this.lastBeforeObj && request.before && this.lastBeforeObj._id === request.target) {
       const before = TransactionRequest.getBefore(request);
@@ -630,52 +635,49 @@ class ContextManagementServer extends Proxy {
         this.logger.debug(LOG_MESSAGES.LASTBEFOREOBJ_CHECK_PASSED);
       }
     }
-    return this.context.getJournalDb().checkConsistent(postulatedCsn, _request)
-      .then(() => this.context.getSystemDb().getCsn())
-      .then((currentCsn) => this.context.checkUniqueConstraint(currentCsn, _request, options))
-      .then((_) => {
-        updateObject = _;
-        return Promise.all([this.context.getSystemDb().getCsn(), this.context.getJournalDb().getLastDigest()])
-          .then((values) => {
-            newCsn = values[0] + 1;
-            if (request.type === TransactionType.FORCE_ROLLBACK) { newCsn = 0; }
-            this.logger.info(LOG_MESSAGES.EXEC_NEWCSN, [], [newCsn]);
-            const lastDigest = values[1];
-            transaction = { ..._request, csn: newCsn, beforeDigest: lastDigest };
-            transaction.digest = TransactionObject.calcDigest(transaction);
-            transaction.protectedCsn = this.context.getJournalDb().getProtectedCsn();
-            return this.procTransactionCtrl(transaction, newCsn, atomicId);
-          })
-          .then(() => Promise.all([
-            this.context.getJournalDb().insert(transaction),
-            this.context.getSystemDb().updateCsn(newCsn),
-            EJSON.stringify(transaction),
-          ]));
-      })
-      .then(([a, b, pubData]) => {
-        this.context.updateUniqueCache(transaction);
-        if (request.type !== TransactionType.FORCE_ROLLBACK && transaction.digest) {
-          this.context.getDigestMap().set(transaction.csn, transaction.digest);
-        }
-        this.pubDataList.push(pubData);
-        if (!this.context.getLock().isBusy(PUBLISH_LOCK)) {
-          this.context.getLock().acquire(PUBLISH_LOCK, () => {
-            return Util.promiseWhile<string[]>(
-              this.pubDataList,
-              (data) => {
-                return data.length !== 0;
-              },
-              (data) => {
-                const pubData = data.shift();
-                if (!pubData) { throw new Error("empty data error"); }
-                return this.context.getNode().publish(
-                  CORE_NODE.PATH_TRANSACTION.replace(/:database\b/g, this.context.getDatabase()), pubData)
-                  .then(() => this.pubDataList);
-              });
+    await this.context.getJournalDb().checkConsistent(postulatedCsn, _request);
+    const currentCsn = await this.context.getSystemDb().getCsn();
+    const updateObject: { _id?: string, csn?: number } | undefined = await this.context.checkUniqueConstraint(currentCsn, _request, options);
+    let newCsn = await this.context.getSystemDb().getCsn() + 1;
+    const lastDigest = await this.context.getJournalDb().getLastDigest();
+    if (request.type === TransactionType.FORCE_ROLLBACK) { newCsn = 0; }
+    this.logger.info(LOG_MESSAGES.EXEC_NEWCSN, [], [newCsn]);
+    const transaction: TransactionObject = { ..._request, csn: newCsn, beforeDigest: lastDigest };
+    transaction.digest = TransactionObject.calcDigest(transaction);
+    transaction.protectedCsn = this.context.getJournalDb().getProtectedCsn();
+    this.procTransactionCtrl(transaction, newCsn, atomicId);
+    const session = await this.context.getSystemDb().startTransaction();
+    try {
+      await this.context.getJournalDb().insert(transaction, session);
+      await this.context.getSystemDb().updateCsn(newCsn, session);
+      await this.context.getSystemDb().commitTransaction(session);
+    } catch (err) {
+      await this.context.getSystemDb().abortTransaction(session);
+      throw err;
+    }
+    const pubData = EJSON.stringify(transaction);
+    this.context.updateUniqueCache(transaction);
+    if (request.type !== TransactionType.FORCE_ROLLBACK && transaction.digest) {
+      this.context.getDigestMap().set(transaction.csn, transaction.digest);
+    }
+    this.pubDataList.push(pubData);
+    if (!this.context.getLock().isBusy(PUBLISH_LOCK)) {
+      this.context.getLock().acquire(PUBLISH_LOCK, () => {
+        return Util.promiseWhile<string[]>(
+          this.pubDataList,
+          (data) => {
+            return data.length !== 0;
+          },
+          async (data) => {
+            const pubData = data.shift();
+            if (!pubData) { throw new Error("empty data error"); }
+            await this.context.getNode().publish(
+              CORE_NODE.PATH_TRANSACTION.replace(/:database\b/g, this.context.getDatabase()), pubData);
+            return this.pubDataList;
           });
-        }
-        return { transaction, newCsn, updateObject };
       });
+    }
+    return { transaction, newCsn, updateObject };
   }
 
   private setTransactionTimeout() {
@@ -919,6 +921,15 @@ class ContextManagementServer extends Proxy {
         list: [row],
       };
     }
+  }
+
+  async getCommitedCsn(): Promise<number> {
+    let csn = await this.context.getSystemDb().getCsn();
+    if (csn == 0) return 0;
+    let journal = await this.context.getJournalDb().findByCsn(csn);
+    if (!journal) return 0;
+    if (journal.committedCsn !== undefined) return journal.committedCsn;
+    return csn;
   }
 }
 

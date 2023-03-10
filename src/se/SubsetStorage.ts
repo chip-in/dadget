@@ -143,7 +143,7 @@ class UpdateProcessor extends Subscriber {
                 promise = promise.then(() => this.adjustData(_csn, journals));
                 promise = promise.then(() => doQueuedQuery(_csn));
               }
-              promise = this.updateSubsetDb(promise, transaction);
+              promise = promise.then(() => this.updateSubsetDb(transaction));
               promise = promise.then(() => doQueuedQuery(transaction.csn));
               return promise.then(() => {
                 release2();
@@ -160,154 +160,167 @@ class UpdateProcessor extends Subscriber {
     });
   }
 
-  private updateSubsetDb(promise: Promise<void>, transaction: TransactionObject): Promise<void> {
+  private async updateSubsetDb(transaction: TransactionObject, session?: any): Promise<void> {
+    const innerSession = !session;
+    if (innerSession) {
+      session = await this.storage.getSystemDb().startTransaction();
+    }
     if (transaction.csn > 1) {
-      promise = promise.then(() => this.storage.getJournalDb().findByCsn(transaction.csn - 1))
-        .then((journal) => {
-          if (!journal) {
-            throw new Error("journal not found, csn:" + (transaction.csn - 1)
-              + ", database:" + this.database
-              + ", subset:" + this.subsetName);
-          }
-          if (journal.digest !== transaction.beforeDigest) {
-            throw new Error("beforeDigest mismatch, csn:" + transaction.csn
-              + ", database:" + this.database
-              + ", subset:" + this.subsetName
-              + ", journal digest:" + journal.digest
-              + ", transaction beforeDigest:" + transaction.beforeDigest);
-          }
-        });
+      const journal = await this.storage.getJournalDb().findByCsn(transaction.csn - 1, session);
+      if (!journal) {
+        throw new Error("journal not found, csn:" + (transaction.csn - 1)
+          + ", database:" + this.database
+          + ", subset:" + this.subsetName);
+      }
+      if (journal.digest !== transaction.beforeDigest) {
+        throw new Error("beforeDigest mismatch, csn:" + transaction.csn
+          + ", database:" + this.database
+          + ", subset:" + this.subsetName
+          + ", journal digest:" + journal.digest
+          + ", transaction beforeDigest:" + transaction.beforeDigest);
+      }
     }
 
     this.logger.info(LOG_MESSAGES.UPDATE_SUBSET_DB, [], [transaction.csn]);
-    const type = transaction.type;
-    if ((type === TransactionType.INSERT || type === TransactionType.RESTORE) && transaction.new) {
-      const newObj = TransactionRequest.getNew(transaction);
-      const obj = { ...newObj, _id: transaction.target, csn: transaction.csn };
-      promise = promise.then(() => this.storage.getSubsetDb().insert(obj));
-    } else if (type === TransactionType.UPDATE && transaction.before) {
-      const updateObj = TransactionRequest.applyOperator(transaction);
-      updateObj.csn = transaction.csn;
-      promise = promise.then(() => this.storage.getSubsetDb().update(transaction.target, updateObj));
-    } else if (type === TransactionType.UPSERT || type === TransactionType.REPLACE) {
-      const updateObj = TransactionRequest.applyOperator(transaction);
-      updateObj.csn = transaction.csn;
-      promise = promise.then(() => this.storage.getSubsetDb().update(transaction.target, updateObj));
-    } else if (type === TransactionType.DELETE && transaction.before) {
-      promise = promise.then(() => this.storage.getSubsetDb().deleteById(transaction.target));
-    } else if (type === TransactionType.TRUNCATE) {
-      promise = promise.then(() => this.storage.getSubsetDb().deleteAll());
-    } else if (type === TransactionType.BEGIN || type === TransactionType.BEGIN_IMPORT) {
-      promise = promise.then(() => { this.storage.committedCsn = transaction.committedCsn; });
-    } else if (type === TransactionType.END || type === TransactionType.END_IMPORT) {
-      promise = promise.then(() => { this.storage.committedCsn = undefined; });
-    } else if (type === TransactionType.ABORT || type === TransactionType.ABORT_IMPORT) {
-      if (transaction.committedCsn === undefined) { throw new Error("committedCsn required"); }
-      const committedCsn = transaction.committedCsn;
-      promise = promise.then(() => {
-        return this.rollbackSubsetDb(committedCsn, false)
-          .catch((e) => {
+    try {
+      try {
+        const type = transaction.type;
+        if ((type === TransactionType.INSERT || type === TransactionType.RESTORE) && transaction.new) {
+          const newObj = TransactionRequest.getNew(transaction);
+          const obj = { ...newObj, _id: transaction.target, csn: transaction.csn };
+          await this.storage.getSubsetDb().insert(obj, session);
+        } else if (type === TransactionType.UPDATE && transaction.before) {
+          const updateObj = TransactionRequest.applyOperator(transaction);
+          updateObj.csn = transaction.csn;
+          await this.storage.getSubsetDb().update(transaction.target, updateObj, session);
+        } else if (type === TransactionType.UPSERT || type === TransactionType.REPLACE) {
+          const updateObj = TransactionRequest.applyOperator(transaction);
+          updateObj.csn = transaction.csn;
+          await this.storage.getSubsetDb().update(transaction.target, updateObj, session);
+        } else if (type === TransactionType.DELETE && transaction.before) {
+          await this.storage.getSubsetDb().deleteById(transaction.target, session);
+        } else if (type === TransactionType.TRUNCATE) {
+          await this.storage.getSubsetDb().deleteAll(session);
+        } else if (type === TransactionType.BEGIN || type === TransactionType.BEGIN_IMPORT) {
+          this.storage.committedCsn = transaction.committedCsn;
+        } else if (type === TransactionType.END || type === TransactionType.END_IMPORT) {
+          this.storage.committedCsn = undefined;
+        } else if (type === TransactionType.ABORT || type === TransactionType.ABORT_IMPORT) {
+          if (transaction.committedCsn === undefined) { throw new Error("committedCsn required"); }
+          const committedCsn = transaction.committedCsn;
+          try {
+            await this.rollbackSubsetDb(committedCsn, false, session);
+          } catch (e) {
             this.logger.warn(LOG_MESSAGES.ERROR_MSG, [e.toString()], [203]);
-            return this.resetData(committedCsn, false);
-          });
-      });
-    } else if (type === TransactionType.FORCE_ROLLBACK) {
-      const committedCsn = transaction.csn;
-      promise = promise.then(() => {
-        if (committedCsn === 0) { return this.resetData0() }
-        return this.rollbackSubsetDb(committedCsn, true)
-          .catch((e) => {
-            this.logger.warn(LOG_MESSAGES.ERROR_MSG, [e.toString()], [204]);
-            return this.resetData(committedCsn, true);
-          });
-      });
-    } else if (type === TransactionType.BEGIN_RESTORE) {
-      promise = promise.then(() => this.storage.getJournalDb().setProtectedCsn(transaction.csn));
-      promise = promise.then(() => { this.storage.committedCsn = transaction.committedCsn; });
-    } else if (type === TransactionType.END_RESTORE || type === TransactionType.ABORT_RESTORE) {
-      promise = promise.then(() => { this.storage.committedCsn = undefined; });
-    } else if (type !== TransactionType.NONE) {
-      promise = promise.then(() => { throw new Error("Unsupported type: " + type); });
+            await this.resetData(committedCsn, false, session);
+          }
+        } else if (type === TransactionType.FORCE_ROLLBACK) {
+          const committedCsn = transaction.csn;
+          if (committedCsn === 0) {
+            await this.resetData0(session);
+          } else {
+            try {
+              await this.rollbackSubsetDb(committedCsn, true, session);
+            } catch (e) {
+              this.logger.warn(LOG_MESSAGES.ERROR_MSG, [e.toString()], [204]);
+              await this.resetData(committedCsn, true, session);
+            }
+          }
+        } else if (type === TransactionType.BEGIN_RESTORE) {
+          this.storage.getJournalDb().setProtectedCsn(transaction.csn);
+          this.storage.committedCsn = transaction.committedCsn;
+        } else if (type === TransactionType.END_RESTORE || type === TransactionType.ABORT_RESTORE) {
+          this.storage.committedCsn = undefined;
+        } else if (type !== TransactionType.NONE) {
+          throw new Error("Unsupported type: " + type);
+        }
+      } catch (e) {
+        // ContextManagerで受付済みのトランザクションなので、ログを出力して処理は正常系動作で通す
+        this.logger.warn(LOG_MESSAGES.UPDATE_SUBSET_ERROR, [e.toString()]);
+      }
+      await this.storage.getJournalDb().insert(transaction, session);
+      await this.storage.getSystemDb().updateCsn(transaction.csn, session);
+      if (innerSession) await this.storage.getSystemDb().commitTransaction(session);
+    } catch (err) {
+      if (innerSession) await this.storage.getSystemDb().abortTransaction(session);
+      throw err;
     }
-    promise = promise.catch((e) => this.logger.warn(LOG_MESSAGES.UPDATE_SUBSET_ERROR, [e.toString()]));
-    promise = promise.then(() => this.storage.getJournalDb().insert(transaction));
-    promise = promise.then(() => this.storage.getSystemDb().updateCsn(transaction.csn));
-    return promise;
   }
 
-  private rollbackSubsetDb(csn: number, withJournal: boolean): Promise<void> {
+  private async rollbackSubsetDb(csn: number, withJournal: boolean, session?: any): Promise<void> {
     this.logger.warn(LOG_MESSAGES.ROLLBACK_TRANSACTIONS, [], [csn]);
+    const innerSession = !session;
+    if (innerSession) {
+      session = await this.storage.getSystemDb().startTransaction();
+    }
     // Csn of the range is not csn + 1 for keeping last journal
     const firstJournalCsn = withJournal ? csn : csn + 1;
-    return this.storage.getJournalDb().findByCsnRange(firstJournalCsn, Number.MAX_VALUE)
-      .then((transactions) => {
-        transactions.sort((a, b) => b.csn - a.csn);
-        if (transactions.length === 0 || transactions[transactions.length - 1].csn !== firstJournalCsn) {
-          throw new Error("Lack of transactions");
-        }
-        let promise = Promise.resolve();
-        let committedCsn: number | undefined;
-        transactions.forEach((transaction) => {
-          if (transaction.csn === csn) { return; }
-          if (committedCsn !== undefined && committedCsn < transaction.csn) { return; }
-          const type = transaction.type;
-          if (type === TransactionType.INSERT || type === TransactionType.RESTORE) {
-            promise = promise.then(() => this.storage.getSubsetDb().deleteById(transaction.target));
-          } else if (type === TransactionType.UPDATE && transaction.before) {
+    const transactions = await this.storage.getJournalDb().findByCsnRange(firstJournalCsn, Number.MAX_VALUE, undefined, session);
+    transactions.sort((a, b) => b.csn - a.csn);
+    if (transactions.length === 0 || transactions[transactions.length - 1].csn !== firstJournalCsn) {
+      throw new Error("Lack of transactions");
+    }
+    try {
+      let committedCsn: number | undefined;
+      for (const transaction of transactions) {
+        if (transaction.csn === csn) { continue; }
+        if (committedCsn !== undefined && committedCsn < transaction.csn) { continue; }
+        const type = transaction.type;
+        if (type === TransactionType.INSERT || type === TransactionType.RESTORE) {
+          await this.storage.getSubsetDb().deleteById(transaction.target, session);
+        } else if (type === TransactionType.UPDATE && transaction.before) {
+          const before = TransactionRequest.getBefore(transaction);
+          await this.storage.getSubsetDb().update(transaction.target, before, session);
+        } else if (type === TransactionType.UPSERT || type === TransactionType.REPLACE) {
+          if (transaction.before) {
             const before = TransactionRequest.getBefore(transaction);
-            promise = promise.then(() => this.storage.getSubsetDb().update(transaction.target, before));
-          } else if (type === TransactionType.UPSERT || type === TransactionType.REPLACE) {
-            if (transaction.before) {
-              const before = TransactionRequest.getBefore(transaction);
-              promise = promise.then(() => this.storage.getSubsetDb().update(transaction.target, before));
-            } else {
-              promise = promise.then(() => this.storage.getSubsetDb().deleteById(transaction.target));
-            }
-          } else if (type === TransactionType.DELETE && transaction.before) {
-            const before = TransactionRequest.getBefore(transaction);
-            promise = promise.then(() => this.storage.getSubsetDb().insert(before));
-          } else if (type === TransactionType.TRUNCATE) {
-            throw new Error("Cannot roll back TRUNCATE");
-          } else if (type === TransactionType.BEGIN) {
-          } else if (type === TransactionType.END) {
-          } else if (type === TransactionType.ABORT || type === TransactionType.ABORT_IMPORT) {
-            if (transaction.committedCsn === undefined) { throw new Error("committedCsn required"); }
-            committedCsn = transaction.committedCsn;
-            if (transaction.committedCsn < csn) {
-              const _committedCsn = transaction.committedCsn;
-              promise = promise.then(() => this.rollforwardSubsetDb(_committedCsn, csn));
-            }
-          } else if (type === TransactionType.BEGIN_IMPORT) {
-          } else if (type === TransactionType.END_IMPORT) {
-          } else if (type === TransactionType.BEGIN_RESTORE) {
-          } else if (type === TransactionType.END_RESTORE) {
-          } else if (type === TransactionType.ABORT_RESTORE) {
-          } else if (type !== TransactionType.NONE && type !== TransactionType.FORCE_ROLLBACK) {
-            throw new Error("Unsupported type: " + type);
+            await this.storage.getSubsetDb().update(transaction.target, before, session);
+          } else {
+            await this.storage.getSubsetDb().deleteById(transaction.target, session);
           }
-        });
-        if (withJournal) {
-          promise = promise.then(() => this.storage.getJournalDb().deleteAfterCsn(csn));
-          promise = promise.then(() => this.storage.getSystemDb().updateCsn(csn));
+        } else if (type === TransactionType.DELETE && transaction.before) {
+          const before = TransactionRequest.getBefore(transaction);
+          await this.storage.getSubsetDb().insert(before, session);
+        } else if (type === TransactionType.TRUNCATE) {
+          throw new Error("Cannot roll back TRUNCATE");
+        } else if (type === TransactionType.BEGIN) {
+        } else if (type === TransactionType.END) {
+        } else if (type === TransactionType.ABORT || type === TransactionType.ABORT_IMPORT) {
+          if (transaction.committedCsn === undefined) { throw new Error("committedCsn required"); }
+          committedCsn = transaction.committedCsn;
+          if (transaction.committedCsn < csn) {
+            await this.rollforwardSubsetDb(transaction.committedCsn, csn, session);
+          }
+        } else if (type === TransactionType.BEGIN_IMPORT) {
+        } else if (type === TransactionType.END_IMPORT) {
+        } else if (type === TransactionType.BEGIN_RESTORE) {
+        } else if (type === TransactionType.END_RESTORE) {
+        } else if (type === TransactionType.ABORT_RESTORE) {
+        } else if (type !== TransactionType.NONE && type !== TransactionType.FORCE_ROLLBACK) {
+          throw new Error("Unsupported type: " + type);
         }
-        return promise;
-      });
+      }
+      if (withJournal) {
+        await this.storage.getJournalDb().deleteAfterCsn(csn, session);
+        await this.storage.getSystemDb().updateCsn(csn, session);
+      }
+      if (innerSession) await this.storage.getSystemDb().commitTransaction(session);
+    } catch (err) {
+      if (innerSession) await this.storage.getSystemDb().abortTransaction(session);
+      throw err;
+    }
   }
 
-  private rollforwardSubsetDb(fromCsn: number, toCsn: number): Promise<void> {
+  private async rollforwardSubsetDb(fromCsn: number, toCsn: number, session?: any): Promise<void> {
     this.logger.warn(LOG_MESSAGES.ROLLFORWARD_TRANSACTIONS, [], [fromCsn, toCsn]);
-    return this.storage.getJournalDb().findByCsnRange(fromCsn + 1, toCsn)
-      .then((transactions) => {
-        transactions.sort((a, b) => a.csn - b.csn);
-        if (transactions.length !== toCsn - fromCsn) {
-          throw new Error("Lack of rollforward transactions");
-        }
-        let promise = Promise.resolve();
-        transactions.forEach((transaction) => {
-          promise = this.updateSubsetDb(promise, transaction);
-        });
-        return promise;
-      });
+    const transactions = await this.storage.getJournalDb().findByCsnRange(fromCsn + 1, toCsn, undefined, session);
+    transactions.sort((a, b) => a.csn - b.csn);
+    if (transactions.length !== toCsn - fromCsn) {
+      throw new Error("Lack of rollforward transactions");
+    }
+    for (const transaction of transactions) {
+      await this.updateSubsetDb(transaction, session);
+    }
   }
 
   fetchJournal(csn: number, journals?: Map<number, TransactionObject>): Promise<TransactionObject | null> {
@@ -372,11 +385,14 @@ class UpdateProcessor extends Subscriber {
                   } else {
                     const callback = (fetchJournal: TransactionObject) => {
                       const subsetTransaction = UpdateListener.convertTransactionForSubset(this.subsetDefinition, fetchJournal);
-                      return this.updateSubsetDb(Promise.resolve(), subsetTransaction);
+                      return this.updateSubsetDb(subsetTransaction);
                     };
                     if (journal.csn + 1 === csn) {
                       return this.fetchJournal(csn, journals)
-                        .then(callback)
+                        .then((j) => {
+                          if (!j) { throw new Error("journal not found: " + csn); }
+                          return callback(j);
+                        })
                         .then(() => { this.storage.setReady(); });
                     } else {
                       return this.fetchJournals(journal.csn + 1, csn, callback)
@@ -393,79 +409,86 @@ class UpdateProcessor extends Subscriber {
       });
   }
 
-  private resetData(csn: number, withJournal: boolean): Promise<void> {
-    if (csn === 0) { return this.resetData0(); }
+  private async resetData(csn: number, withJournal: boolean, session?: any): Promise<void> {
+    if (csn === 0) { return this.resetData0(session); }
     this.logger.warn(LOG_MESSAGES.RESET_DATA, [], [csn]);
     this.storage.pause();
     const query = this.subsetDefinition.query ? this.subsetDefinition.query : {};
-    return this.fetchJournal(csn)
-      .then((fetchJournal) => {
-        if (!fetchJournal) { throw new Error("journal not found: " + csn); }
-        const subsetTransaction = UpdateListener.convertTransactionForSubset(this.subsetDefinition, fetchJournal);
-        return Dadget._query(this.storage.getNode(), this.database, query, undefined, undefined, undefined, csn, "strict", { _id: 1 })
-          .then((result) => {
-            if (result.restQuery) { throw new Error("The queryHandlers has been empty before completing queries."); }
-            return this.storage.getSubsetDb().deleteAll().then(() => result);
-          })
-          .then((result) => {
-            return Util.promiseWhile<{ ids: object[] }>(
-              { ids: [...result.resultSet] },
-              (whileData) => {
-                return whileData.ids.length !== 0;
-              },
-              (whileData) => {
-                const idMap = new Map();
-                const ids = [];
-                for (let i = 0; i < MAX_EXPORT_NUM; i++) {
-                  const row = whileData.ids.shift();
-                  if (row) {
-                    const id = (row as any)._id;
-                    idMap.set(id, id);
-                    ids.push(id);
-                  }
-                }
-                return Dadget._query(this.storage.getNode(), this.database, { _id: { $in: ids } }, undefined, -1, undefined, csn, "strict")
-                  .then((rowData) => {
-                    if (rowData.restQuery) { throw new Error("The queryHandlers has been empty before completing queries."); }
-                    if (rowData.resultSet.length === 0) { return whileData; }
-                    for (const data of rowData.resultSet) {
-                      idMap.delete((data as any)._id);
-                    }
-                    for (const id of idMap.keys()) {
-                      whileData.ids.push({ _id: id });
-                    }
-                    return this.storage.getSubsetDb().insertMany(rowData.resultSet).then(() => whileData);
-                  });
-              });
-          })
-          .then(() => { if (withJournal) { this.storage.getJournalDb().deleteAll(); } })
-          .then(() => { if (withJournal) { this.storage.getJournalDb().insert(subsetTransaction); } })
-          .then(() => { if (withJournal) { this.storage.getSystemDb().updateCsn(csn); } })
-          .then(() => { if (withJournal) { this.storage.getSystemDb().updateQueryHash(); } })
-          .then(() => { this.storage.setReady(withJournal ? subsetTransaction : undefined); });
-      })
-      .catch((e) => {
-        this.logger.error(LOG_MESSAGES.ERROR_MSG, [e.toString()], [206]);
-        throw e;
-      });
+    const innerSession = !session;
+    if (innerSession) {
+      session = await this.storage.getSystemDb().startTransaction();
+    }
+    try {
+      const fetchJournal = await this.fetchJournal(csn);
+      if (!fetchJournal) { throw new Error("journal not found: " + csn); }
+      const subsetTransaction = UpdateListener.convertTransactionForSubset(this.subsetDefinition, fetchJournal);
+      const result = await Dadget._query(this.storage.getNode(), this.database, query, undefined, undefined, undefined, csn, "strict", { _id: 1 });
+      if (result.restQuery) { throw new Error("The queryHandlers has been empty before completing queries."); }
+      await this.storage.getSubsetDb().deleteAll(session);
+      await Util.promiseWhile<{ ids: object[]; }>(
+        { ids: [...result.resultSet] },
+        (whileData) => {
+          return whileData.ids.length !== 0;
+        },
+        async (whileData) => {
+          const idMap = new Map();
+          const ids = [];
+          for (let i = 0; i < MAX_EXPORT_NUM; i++) {
+            const row = whileData.ids.shift();
+            if (row) {
+              const id = (row as any)._id;
+              idMap.set(id, id);
+              ids.push(id);
+            }
+          }
+          const rowData = await Dadget._query(this.storage.getNode(), this.database, { _id: { $in: ids } }, undefined, -1, undefined, csn, "strict");
+          if (rowData.restQuery) { throw new Error("The queryHandlers has been empty before completing queries."); }
+          if (rowData.resultSet.length === 0) { return whileData; }
+          for (const data of rowData.resultSet) {
+            idMap.delete((data as any)._id);
+          }
+          for (const id_1 of idMap.keys()) {
+            whileData.ids.push({ _id: id_1 });
+          }
+          await this.storage.getSubsetDb().insertMany(rowData.resultSet, session);
+          return whileData;
+        });
+      if (withJournal) {
+        await this.storage.getJournalDb().deleteAll(session);
+        await this.storage.getJournalDb().insert(subsetTransaction, session);
+        await this.storage.getSystemDb().updateCsn(csn, session);
+        await this.storage.getSystemDb().updateQueryHash(session);
+      }
+      if (innerSession) await this.storage.getSystemDb().commitTransaction(session);
+      this.storage.setReady(withJournal ? subsetTransaction : undefined);
+    } catch (e) {
+      this.logger.error(LOG_MESSAGES.ERROR_MSG, [e.toString()], [206]);
+      if (innerSession) await this.storage.getSystemDb().abortTransaction(session);
+      throw e;
+    }
   }
 
-  private resetData0(): Promise<void> {
+  private async resetData0(session?: any): Promise<void> {
     this.logger.warn(LOG_MESSAGES.RESET_DATA0);
     this.storage.pause();
-    return Promise.resolve()
-      .then(() => this.storage.getJournalDb().deleteAll())
-      .then(() => this.storage.getSubsetDb().deleteAll())
-      .then(() => this.storage.getSystemDb().updateCsn(0))
-      .then(() => this.storage.getSystemDb().updateQueryHash())
-      .then(() => {
-        this.storage.committedCsn = undefined;
-        this.storage.setReady();
-      })
-      .catch((e) => {
-        this.logger.error(LOG_MESSAGES.ERROR_MSG, [e.toString()], [207]);
-        throw e;
-      });
+    const innerSession = !session;
+    if (innerSession) {
+      session = await this.storage.getSystemDb().startTransaction();
+    }
+    try {
+      await Promise.resolve();
+      await this.storage.getJournalDb().deleteAll(session);
+      await this.storage.getSubsetDb().deleteAll(session);
+      await this.storage.getSystemDb().updateCsn(0, session);
+      await this.storage.getSystemDb().updateQueryHash(session);
+      if (innerSession) await this.storage.getSystemDb().commitTransaction(session);
+      this.storage.committedCsn = undefined;
+      this.storage.setReady();
+    } catch (e) {
+      this.logger.error(LOG_MESSAGES.ERROR_MSG, [e.toString()], [207]);
+      if (innerSession) await this.storage.getSystemDb().abortTransaction(session);
+      throw e;
+    }
   }
 }
 

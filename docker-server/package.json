@@ -3,7 +3,7 @@
   "version": "1.0.0",
   "main": "lib/server.js",
   "dependencies": {
-    "@chip-in/resource-node": "^0.1.4",
+    "@chip-in/resource-node": "^0.1.14",
     "@chip-in/logger": "*"
   },
   "devDependencies": {

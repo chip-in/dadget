@@ -7,10 +7,11 @@ export const SPLIT_IN_ONE_DB = "==";
 export const SPLIT_IN_INDEXED_DB = "__";
 
 export class Mongo {
-  static option: MongoClientOptions;
-  static url: [string, string | null];
+  private static option: MongoClientOptions;
+  private static url: [string, string | null];
+  private static _useTransaction = false;
 
-  static _getUrl() {
+  private static _getUrl() {
     if (Mongo.url) return Mongo.url;
     const baseUrl = (process.env.MONGODB_URL ? process.env.MONGODB_URL : "mongodb://localhost:27017/") as string;
     const re = /^mongodb:\/\/(?<id_pw>[^:\s]+:[^@\s]*@)?(?<hosts>[^@\/\s]+)(\/(?<db>[^?\s]*)(?<query>\?[^\s\n]+)?)?$/;
@@ -43,6 +44,10 @@ export class Mongo {
     } else {
       return collection
     }
+  }
+
+  static useTransaction() {
+    return Mongo._useTransaction;
   }
 
   static getOption(): MongoClientOptions {
@@ -140,6 +145,9 @@ export class Mongo {
         }
       }
     }
+    if ("MONGODB_USE_TRANSACTION" in env && env["MONGODB_USE_TRANSACTION"]) {
+      Mongo._useTransaction = true;
+    }
     Mongo.option = option;
     return option;
   }
@@ -183,6 +191,7 @@ export const CORE_NODE = {
   PATH_GET_TRANSACTIONS: "/getTransactionJournals/_get",
   PATH_GET_TRANSACTIONS_OLD: "/getTransactionJournals",
   PATH_GET_UPDATE_DATA: "/getUpdateData/_get",
+  PATH_GET_LATEST_CSN: "/getLatestCsn/_get",
   PATH_QUERY: "/query/_get",
   PATH_QUERY_OLD: "/query",
   PATH_COUNT: "/count/_get",

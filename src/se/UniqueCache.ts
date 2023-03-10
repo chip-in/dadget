@@ -387,13 +387,13 @@ export class UniqueCache extends ServiceEngine {
   }
 
   private adjustData(csn: number): Promise<void> {
-    this.logger.warn(LOG_MESSAGES.ADJUST_DATA, [], [csn]);
+    this.logger.info(LOG_MESSAGES.ADJUST_DATA, [], [csn]);
     return this.resetData(csn, true);
   }
 
   resetData(csn: number, withJournal: boolean): Promise<void> {
     if (csn === 0) { return this.resetData0(); }
-    this.logger.warn(LOG_MESSAGES.RESET_DATA, [], [csn]);
+    this.logger.info(LOG_MESSAGES.RESET_DATA, [], [csn]);
     this.pause();
     const query = {};
     const projection = { _id: 1 } as any;

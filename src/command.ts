@@ -156,9 +156,11 @@ if (mainOptions.command === "reset") {
   })
     .then(() => node.stop().then(() => process.exit()))
     .catch((msg) => {
-      console.error(msg.toString ? msg.toString() : msg);
       node.stop()
-        .then(() => process.exit());
+        .then(() => {
+          console.error('\u001b[31m' + (msg.toString ? msg.toString() : msg) + '\u001b[0m');
+          process.exit();
+        });
     });
 } else {
   usage();

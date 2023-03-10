@@ -80,12 +80,23 @@ export class Maintenance {
     let listSize = 0;
     let promise1 = Promise.resolve();
     let promise2 = Promise.resolve();
-    const func = async (list: TransactionRequest[]) => {
-      promise1 = dadget._execMany(0, list, atomicId);
-      await promise2;
-      promise2 = promise1;
-    }
+    let error: any = null;
     return new Promise<void>((resolve, reject) => {
+      const func = async (list: TransactionRequest[]) => {
+        if (error) {
+          await promise2;
+          throw error;
+        }
+        promise1 = dadget._execMany(0, list, atomicId).catch((e) => {
+          if (!error) error = e;
+        });
+        await promise2;
+        promise2 = promise1;
+        if (error) {
+          await promise2;
+          throw error;
+        }
+      }
       fs.createReadStream(fileName, { encoding: 'utf8' })
         .pipe(split2())
         .pipe(
@@ -93,7 +104,8 @@ export class Maintenance {
             const line = chunk.toString();
             const data = EJSON.parse(line);
             if (!data.hasOwnProperty(idName)) {
-              throw new Error("data has no " + idName + " property.");
+              reject("data has no " + idName + " property.");
+              return;
             }
             const target = data[idName];
             delete data._id;
@@ -105,10 +117,12 @@ export class Maintenance {
             } else {
               //call the method that creates a promise, and at the end
               //just empty the buffer, and process the next chunk
-              func(list).finally(() => {
+              func(list).then(() => {
                 list = [];
                 listSize = 0;
                 callback();
+              }).catch((e) => {
+                reject(e);
               });
             }
           }))
@@ -116,15 +130,31 @@ export class Maintenance {
           reject(error);
         })
         .on('finish', () => {
+          if (error) {
+            reject(error);
+            return;
+          }
           //any remaining data still needs to be sent
           //resolve the outer promise only when the final batch has completed processing
           if (list.length > 0) {
-            func(list).then(() => promise2).finally(() => {
-              resolve();
+            func(list).then(() => promise2).then(() => {
+              if (error) {
+                reject(error);
+              } else {
+                resolve();
+              }
+            }).catch((e) => {
+              reject(e);
             });
           } else {
-            promise2.finally(() => {
-              resolve();
+            promise2.then(() => {
+              if (error) {
+                reject(error);
+              } else {
+                resolve();
+              }
+            }).catch((e) => {
+              reject(e);
             });
           }
         });
