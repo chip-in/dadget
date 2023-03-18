@@ -496,8 +496,7 @@ export default class Dadget extends ServiceEngine {
           this.latestCsn = result.csn;
           return result.updateObject;
         } else if (result.reason) {
-          const reason = result.reason as DadgetError;
-          throw new DadgetError({ code: reason.code, message: reason.message }, reason.inserts, reason.ns);
+          throw DadgetError.from(result.reason);
         } else {
           throw new Error(JSON.stringify(result));
         }
@@ -554,8 +553,7 @@ export default class Dadget extends ServiceEngine {
           this.latestCsn = result.csn;
         } else if (result.reason) {
           if (result.csn) this.latestCsn = result.csn;
-          const reason = result.reason as DadgetError;
-          throw new DadgetError({ code: reason.code, message: reason.message }, reason.inserts, reason.ns);
+          throw DadgetError.from(result.reason);
         } else {
           throw new Error(JSON.stringify(result));
         }
@@ -597,8 +595,7 @@ export default class Dadget extends ServiceEngine {
           return result.count;
         } else if (result.reason) {
           if (result.csn) this.latestCsn = result.csn;
-          const reason = result.reason as DadgetError;
-          throw new DadgetError({ code: reason.code, message: reason.message }, reason.inserts, reason.ns);
+          throw DadgetError.from(result.reason);
         } else {
           throw new Error(JSON.stringify(result));
         }
