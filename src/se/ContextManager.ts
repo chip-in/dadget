@@ -1069,6 +1069,10 @@ export class ContextManager extends ServiceEngine {
         // マスターを取得した場合のみ実行される
         this.logger.info(LOG_MESSAGES.CONNECTED, ["ContextManagementServer"]);
         this.procAfterContextManagementServerConnect(mountHandle);
+      })
+      .catch((err) => {
+        this.logger.error(LOG_MESSAGES.ERROR_MSG, [err.toString()], [107]);
+        process.exit(1);
       });
   }
 

@@ -33,7 +33,15 @@ rnode.start().then(() => {
     rnode.stop().then(() => {
       process.exit()
     })
+      .catch((msg) => {
+        console.error('\u001b[31m' + (msg.toString ? msg.toString() : msg) + '\u001b[0m');
+        process.exit(1);
+      })
   }
   process.on('SIGINT', sigHandle);
   process.on('SIGTERM', sigHandle);
 })
+  .catch((msg) => {
+    console.error('\u001b[31m' + (msg.toString ? msg.toString() : msg) + '\u001b[0m');
+    process.exit(1);
+  })
