@@ -822,6 +822,7 @@ class ContextManagementServer extends Proxy {
             });
         })
         .then((protectedCsn) => {
+          if (--protectedCsn < 0) protectedCsn = 0;
           this.logger.info(LOG_MESSAGES.CHECKPOINT_PROTECTEDCSN, [], [protectedCsn]);
           this.context.getJournalDb().setProtectedCsn(protectedCsn);
           this.context.getJournalDb().deleteBeforeCsn(protectedCsn)
