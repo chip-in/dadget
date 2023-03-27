@@ -671,8 +671,13 @@ class ContextManagementServer extends Proxy {
           async (data) => {
             const pubData = data.shift();
             if (!pubData) { throw new Error("empty data error"); }
-            await this.context.getNode().publish(
-              CORE_NODE.PATH_TRANSACTION.replace(/:database\b/g, this.context.getDatabase()), pubData);
+            try {
+              await this.context.getNode().publish(
+                CORE_NODE.PATH_TRANSACTION.replace(/:database\b/g, this.context.getDatabase()), pubData);
+            } catch (err) {
+              this.logger.error(LOG_MESSAGES.ERROR_MSG, [err.toString()], [108]);
+              process.exit(1);
+            }
             return this.pubDataList;
           });
       });
@@ -1045,10 +1050,10 @@ export class ContextManager extends ServiceEngine {
   stop(node: ResourceNode): Promise<void> {
     return Promise.resolve()
       .then(() => {
-        if (this.mountHandle) { return this.node.unmount(this.mountHandle).catch(); }
+        if (this.mountHandle) { return this.node.unmount(this.mountHandle).catch(e => console.warn(e)); }
       })
       .then(() => {
-        if (this.subscriberKey) { return this.node.unsubscribe(this.subscriberKey).catch(); }
+        if (this.subscriberKey) { return this.node.unsubscribe(this.subscriberKey).catch(e => console.warn(e)); }
       });
   }
 

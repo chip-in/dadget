@@ -706,7 +706,10 @@ export default class Dadget extends ServiceEngine {
 
       if (!this.updateListenerKey) {
         this.node.subscribe(CORE_NODE.PATH_TRANSACTION.replace(/:database\b/g, this.database), new NotifyListener())
-          .then((key) => { this.updateListenerKey = key; });
+          .then((key) => { this.updateListenerKey = key; })
+          .catch((err) => {
+            this.logger.error(LOG_MESSAGES.ERROR_MSG, [err.toString()], [300]);
+          });
       }
     }
 
@@ -728,7 +731,7 @@ export default class Dadget extends ServiceEngine {
     delete this.updateListeners[id];
     if (Object.keys(this.updateListeners).length === 0) {
       if (this.updateListenerKey) {
-        this.node.unsubscribe(this.updateListenerKey);
+        this.node.unsubscribe(this.updateListenerKey).catch(e => console.warn(e));
         this.updateListenerKey = null;
       }
     }
@@ -740,7 +743,7 @@ export default class Dadget extends ServiceEngine {
   resetUpdateListener() {
     this.updateListeners = {};
     if (this.updateListenerKey) {
-      this.node.unsubscribe(this.updateListenerKey);
+      this.node.unsubscribe(this.updateListenerKey).catch(e => console.warn(e));
       this.updateListenerKey = null;
     }
   }
