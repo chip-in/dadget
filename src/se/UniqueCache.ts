@@ -32,7 +32,7 @@ export class UniqueCacheConfigDef {
  */
 export class UniqueCache extends ServiceEngine {
 
-  public bootOrder = 55;
+  public bootOrder = 15;
   private currentCsn: number;
   private logger: Logger;
   private option: UniqueCacheConfigDef;
@@ -90,6 +90,18 @@ export class UniqueCache extends ServiceEngine {
     return Promise.resolve();
   }
 
+  getContextManager(): ContextManager {
+    if (this.contextManager) {
+      return this.contextManager;
+    }
+    const seList = this.getNode().searchServiceEngine("ContextManager", { database: this.database });
+    if (seList.length !== 1) {
+      throw new DadgetError(ERROR.E2601, ["ContextManager is missing, or there are multiple ones."]);
+    }
+    this.contextManager = seList[0] as ContextManager;
+    return this.contextManager;
+  }
+
   start(node: ResourceNode): Promise<void> {
     this.node = node;
     this.logger.debug(LOG_MESSAGES.STARTING, ["UniqueCache"]);
@@ -104,11 +116,6 @@ export class UniqueCache extends ServiceEngine {
       throw new DadgetError(ERROR.E2601, ["Field type error"]);
     }
 
-    const seList = node.searchServiceEngine("ContextManager", { database: this.database });
-    if (seList.length !== 1) {
-      throw new DadgetError(ERROR.E2601, ["ContextManager is missing, or there are multiple ones."]);
-    }
-    this.contextManager = seList[0] as ContextManager;
     this.logger.debug(LOG_MESSAGES.STARTED, ["UniqueCache"]);
 
     return Promise.resolve();
@@ -233,7 +240,7 @@ export class UniqueCache extends ServiceEngine {
 
   private updateSubsetDb(promise: Promise<void>, transaction: TransactionObject): Promise<void> {
     if (transaction.csn > 1) {
-      promise = promise.then(() => this.contextManager.getJournalDb().findByCsn(transaction.csn - 1))
+      promise = promise.then(() => this.getContextManager().getJournalDb().findByCsn(transaction.csn - 1))
         .then((journal) => {
           if (!journal) {
             throw new Error("journal not found, csn:" + (transaction.csn - 1)
@@ -312,7 +319,7 @@ export class UniqueCache extends ServiceEngine {
     this.logger.warn(LOG_MESSAGES.ROLLBACK_TRANSACTIONS, [], [csn]);
     // Csn of the range is not csn + 1 for keeping last journal
     const firstJournalCsn = withJournal ? csn : csn + 1;
-    return this.contextManager.getJournalDb().findByCsnRange(firstJournalCsn, this.currentCsn)
+    return this.getContextManager().getJournalDb().findByCsnRange(firstJournalCsn, this.currentCsn)
       .then((transactions) => {
         transactions.sort((a, b) => b.csn - a.csn);
         if (transactions.length === 0 || transactions[transactions.length - 1].csn !== firstJournalCsn) {
@@ -372,7 +379,7 @@ export class UniqueCache extends ServiceEngine {
 
   private rollforwardSubsetDb(fromCsn: number, toCsn: number): Promise<void> {
     this.logger.warn(LOG_MESSAGES.ROLLFORWARD_TRANSACTIONS, [], [fromCsn, toCsn]);
-    return this.contextManager.getJournalDb().findByCsnRange(fromCsn + 1, toCsn)
+    return this.getContextManager().getJournalDb().findByCsnRange(fromCsn + 1, toCsn)
       .then((transactions) => {
         transactions.sort((a, b) => a.csn - b.csn);
         if (transactions.length !== toCsn - fromCsn) {

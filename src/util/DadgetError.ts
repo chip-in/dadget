@@ -1,3 +1,5 @@
+import { ERROR } from "../Errors";
+
 export class DadgetError {
   public code: number;
   public message: string;
@@ -12,8 +14,9 @@ export class DadgetError {
   }
 
   static from(from: any): DadgetError {
-    const message = from.message ? from.message : (from.toString ? from.toString() : from.code);
-    return new DadgetError({ code: from.code, message }, from.inserts, from.ns);
+    const message = from.message ? from.message : (from.toString ? from.toString() : from);
+    const code = from.code ? from.code : ERROR.E3001;
+    return new DadgetError({ code, message }, from.inserts, from.ns);
   }
 
   convertInsertsToString() {

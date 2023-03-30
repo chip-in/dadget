@@ -159,7 +159,7 @@ if (mainOptions.command === "reset") {
       node.stop()
         .then(() => {
           console.error('\u001b[31m' + (msg.toString ? msg.toString() : msg) + '\u001b[0m');
-          process.exit();
+          process.exit(1);
         });
     });
 } else {

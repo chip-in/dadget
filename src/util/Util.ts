@@ -103,8 +103,7 @@ export class Util {
         } else if (result.status === "NG") {
           return null;
         } else if (result.reason) {
-          const reason = result.reason as DadgetError;
-          throw new DadgetError({ code: reason.code, message: reason.message }, reason.inserts, reason.ns);
+          throw DadgetError.from(result.reason);
         } else {
           throw new Error(JSON.stringify(result));
         }
@@ -162,8 +161,7 @@ export class Util {
                 },
               ).then((loopData) => loopData.csn + 1);
             } else if (result.reason) {
-              const reason = result.reason as DadgetError;
-              throw new DadgetError({ code: reason.code, message: reason.message }, reason.inserts, reason.ns);
+              throw DadgetError.from(result.reason);
             } else {
               throw new Error(JSON.stringify(result));
             }

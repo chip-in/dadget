@@ -520,7 +520,12 @@ class UpdateListener extends Subscriber {
     if (this.exported) {
       this.storage.getNode().publish(CORE_NODE.PATH_SUBSET_TRANSACTION
         .replace(/:database\b/g, this.database)
-        .replace(/:subset\b/g, this.storage.getOption().subset), EJSON.stringify(subsetTransaction));
+        .replace(/:subset\b/g, this.storage.getOption().subset), EJSON.stringify(subsetTransaction)
+      )
+        .catch((err) => {
+          this.logger.error(LOG_MESSAGES.ERROR_MSG, [err.toString()], [215]);
+          process.exit(1);
+        });
     }
     this.updateProcessor.procTransaction(subsetTransaction);
   }
@@ -829,6 +834,10 @@ export class SubsetStorage extends ServiceEngine implements Proxy {
         .replace(/:subset\b/g, this.subsetName), mountingMode, this)
         .then((value) => {
           this.mountHandle = value;
+        })
+        .catch((err) => {
+          this.logger.error(LOG_MESSAGES.ERROR_MSG, [err.toString()], [210]);
+          process.exit(1);
         });
     }
   }
@@ -920,7 +929,7 @@ export class SubsetStorage extends ServiceEngine implements Proxy {
         this.logger.info(LOG_MESSAGES.DISCONNECTED, ["Updator"]);
         this.subscribeUpdateProcessor()
           .then(() => {
-            if (this.updateListenerKey) { this.node.unsubscribe(this.updateListenerKey); }
+            if (this.updateListenerKey) { this.node.unsubscribe(this.updateListenerKey).catch(e => console.warn(e)); }
             this.updateListenerKey = undefined;
           });
       },
@@ -929,7 +938,7 @@ export class SubsetStorage extends ServiceEngine implements Proxy {
         this.updateListenerMountHandle = mountHandle;
         this.subscribeUpdateListener()
           .then(() => {
-            if (this.subscriberKey) { this.node.unsubscribe(this.subscriberKey); }
+            if (this.subscriberKey) { this.node.unsubscribe(this.subscriberKey).catch(e => console.warn(e)); }
           });
       },
     })
@@ -937,14 +946,18 @@ export class SubsetStorage extends ServiceEngine implements Proxy {
         // マスターを取得した場合のみ実行される
         this.logger.info(LOG_MESSAGES.CONNECTED, ["Updator"]);
         if (this.updateListenerMountHandle === "stopped") {
-          setTimeout(() => { this.node.unmount(mountHandle); }, 1);
+          setTimeout(() => { this.node.unmount(mountHandle).catch(e => console.warn(e)); }, 1);
           return;
         }
         this.updateListenerMountHandle = mountHandle;
         this.subscribeUpdateListener()
           .then(() => {
-            if (this.subscriberKey) { this.node.unsubscribe(this.subscriberKey); }
+            if (this.subscriberKey) { this.node.unsubscribe(this.subscriberKey).catch(e => console.warn(e)); }
           });
+      })
+      .catch((err) => {
+        this.logger.error(LOG_MESSAGES.ERROR_MSG, [err.toString()], [211]);
+        process.exit(1);
       });
   }
 
@@ -954,11 +967,19 @@ export class SubsetStorage extends ServiceEngine implements Proxy {
         CORE_NODE.PATH_SUBSET_TRANSACTION
           .replace(/:database\b/g, this.database)
           .replace(/:subset\b/g, this.option.subscribe), this.updateListener)
-        .then((key) => { this.updateListenerKey = key; });
+        .then((key) => { this.updateListenerKey = key; })
+        .catch((err) => {
+          this.logger.error(LOG_MESSAGES.ERROR_MSG, [err.toString()], [212]);
+          process.exit(1);
+        });
     } else {
       return this.node.subscribe(
         CORE_NODE.PATH_TRANSACTION.replace(/:database\b/g, this.database), this.updateListener)
-        .then((key) => { this.updateListenerKey = key; });
+        .then((key) => { this.updateListenerKey = key; })
+        .catch((err) => {
+          this.logger.error(LOG_MESSAGES.ERROR_MSG, [err.toString()], [213]);
+          process.exit(1);
+        });
     }
   }
 
@@ -967,23 +988,27 @@ export class SubsetStorage extends ServiceEngine implements Proxy {
       CORE_NODE.PATH_SUBSET_TRANSACTION
         .replace(/:database\b/g, this.database)
         .replace(/:subset\b/g, this.subsetName), this.updateProcessor)
-      .then((key) => { this.subscriberKey = key; });
+      .then((key) => { this.subscriberKey = key; })
+      .catch((err) => {
+        this.logger.error(LOG_MESSAGES.ERROR_MSG, [err.toString()], [214]);
+        process.exit(1);
+      });
   }
 
   stop(node: ResourceNode): Promise<void> {
     return Promise.resolve()
       .then(() => {
-        if (this.updateListenerMountHandle) { return this.node.unmount(this.updateListenerMountHandle).catch(); }
+        if (this.updateListenerMountHandle) { return this.node.unmount(this.updateListenerMountHandle).catch(e => console.warn(e)); }
         this.updateListenerMountHandle = "stopped";
       })
       .then(() => {
-        if (this.updateListenerKey) { return this.node.unsubscribe(this.updateListenerKey); }
+        if (this.updateListenerKey) { return this.node.unsubscribe(this.updateListenerKey).catch(e => console.warn(e)); }
       })
       .then(() => {
-        if (this.mountHandle) { return this.node.unmount(this.mountHandle).catch(); }
+        if (this.mountHandle) { return this.node.unmount(this.mountHandle).catch(e => console.warn(e)); }
       })
       .then(() => {
-        if (this.subscriberKey) { return this.node.unsubscribe(this.subscriberKey).catch(); }
+        if (this.subscriberKey) { return this.node.unsubscribe(this.subscriberKey).catch(e => console.warn(e)); }
       });
   }
 
