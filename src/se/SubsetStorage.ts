@@ -143,7 +143,7 @@ class UpdateProcessor extends Subscriber {
                 promise = promise.then(() => this.adjustData(_csn, journals));
                 promise = promise.then(() => doQueuedQuery(_csn));
               }
-              promise = promise.then(() => this.updateSubsetDb(transaction));
+              promise = promise.then(() => this.updateSubsetDbWithTx(transaction));
               promise = promise.then(() => doQueuedQuery(transaction.csn));
               return promise.then(() => {
                 release2();
@@ -160,11 +160,18 @@ class UpdateProcessor extends Subscriber {
     });
   }
 
-  private async updateSubsetDb(transaction: TransactionObject, session?: any): Promise<void> {
-    const innerSession = !session;
-    if (innerSession) {
-      session = await this.storage.getSystemDb().startTransaction();
+  private async updateSubsetDbWithTx(transaction: TransactionObject): Promise<void> {
+    let session = await this.storage.getSystemDb().startTransaction();
+    try {
+      await this.updateSubsetDb(transaction, session);
+      await this.storage.getSystemDb().commitTransaction(session);
+    } catch (err) {
+      await this.storage.getSystemDb().abortTransaction(session);
+      throw err;
     }
+  }
+
+  private async updateSubsetDb(transaction: TransactionObject, session?: any): Promise<void> {
     if (transaction.csn > 1) {
       const journal = await this.storage.getJournalDb().findByCsn(transaction.csn - 1, session);
       if (!journal) {
@@ -209,21 +216,21 @@ class UpdateProcessor extends Subscriber {
           if (transaction.committedCsn === undefined) { throw new Error("committedCsn required"); }
           const committedCsn = transaction.committedCsn;
           try {
-            await this.rollbackSubsetDb(committedCsn, false, session);
+            await this.rollbackSubsetDb(committedCsn, false);
           } catch (e) {
             this.logger.warn(LOG_MESSAGES.ERROR_MSG, [e.toString()], [203]);
-            await this.resetData(committedCsn, false, session);
+            await this.resetData(committedCsn, false);
           }
         } else if (type === TransactionType.FORCE_ROLLBACK) {
           const committedCsn = transaction.csn;
           if (committedCsn === 0) {
-            await this.resetData0(session);
+            await this.resetData0();
           } else {
             try {
-              await this.rollbackSubsetDb(committedCsn, true, session);
+              await this.rollbackSubsetDb(committedCsn, true);
             } catch (e) {
               this.logger.warn(LOG_MESSAGES.ERROR_MSG, [e.toString()], [204]);
-              await this.resetData(committedCsn, true, session);
+              await this.resetData(committedCsn, true);
             }
           }
         } else if (type === TransactionType.BEGIN_RESTORE) {
@@ -240,22 +247,16 @@ class UpdateProcessor extends Subscriber {
       }
       await this.storage.getJournalDb().insert(transaction, session);
       await this.storage.getSystemDb().updateCsn(transaction.csn, session);
-      if (innerSession) await this.storage.getSystemDb().commitTransaction(session);
     } catch (err) {
-      if (innerSession) await this.storage.getSystemDb().abortTransaction(session);
       throw err;
     }
   }
 
-  private async rollbackSubsetDb(csn: number, withJournal: boolean, session?: any): Promise<void> {
+  private async rollbackSubsetDb(csn: number, withJournal: boolean): Promise<void> {
     this.logger.warn(LOG_MESSAGES.ROLLBACK_TRANSACTIONS, [], [csn]);
-    const innerSession = !session;
-    if (innerSession) {
-      session = await this.storage.getSystemDb().startTransaction();
-    }
     // Csn of the range is not csn + 1 for keeping last journal
     const firstJournalCsn = withJournal ? csn : csn + 1;
-    const transactions = await this.storage.getJournalDb().findByCsnRange(firstJournalCsn, Number.MAX_VALUE, undefined, session);
+    const transactions = await this.storage.getJournalDb().findByCsnRange(firstJournalCsn, Number.MAX_VALUE, undefined);
     transactions.sort((a, b) => b.csn - a.csn);
     if (transactions.length === 0 || transactions[transactions.length - 1].csn !== firstJournalCsn) {
       throw new Error("Lack of transactions");
@@ -267,20 +268,20 @@ class UpdateProcessor extends Subscriber {
         if (committedCsn !== undefined && committedCsn < transaction.csn) { continue; }
         const type = transaction.type;
         if (type === TransactionType.INSERT || type === TransactionType.RESTORE) {
-          await this.storage.getSubsetDb().deleteById(transaction.target, session);
+          await this.storage.getSubsetDb().deleteById(transaction.target);
         } else if (type === TransactionType.UPDATE && transaction.before) {
           const before = TransactionRequest.getBefore(transaction);
-          await this.storage.getSubsetDb().update(transaction.target, before, session);
+          await this.storage.getSubsetDb().update(transaction.target, before);
         } else if (type === TransactionType.UPSERT || type === TransactionType.REPLACE) {
           if (transaction.before) {
             const before = TransactionRequest.getBefore(transaction);
-            await this.storage.getSubsetDb().update(transaction.target, before, session);
+            await this.storage.getSubsetDb().update(transaction.target, before);
           } else {
-            await this.storage.getSubsetDb().deleteById(transaction.target, session);
+            await this.storage.getSubsetDb().deleteById(transaction.target);
           }
         } else if (type === TransactionType.DELETE && transaction.before) {
           const before = TransactionRequest.getBefore(transaction);
-          await this.storage.getSubsetDb().insert(before, session);
+          await this.storage.getSubsetDb().insert(before);
         } else if (type === TransactionType.TRUNCATE) {
           throw new Error("Cannot roll back TRUNCATE");
         } else if (type === TransactionType.BEGIN) {
@@ -289,7 +290,7 @@ class UpdateProcessor extends Subscriber {
           if (transaction.committedCsn === undefined) { throw new Error("committedCsn required"); }
           committedCsn = transaction.committedCsn;
           if (transaction.committedCsn < csn) {
-            await this.rollforwardSubsetDb(transaction.committedCsn, csn, session);
+            await this.rollforwardSubsetDb(transaction.committedCsn, csn);
           }
         } else if (type === TransactionType.BEGIN_IMPORT) {
         } else if (type === TransactionType.END_IMPORT) {
@@ -301,25 +302,23 @@ class UpdateProcessor extends Subscriber {
         }
       }
       if (withJournal) {
-        await this.storage.getJournalDb().deleteAfterCsn(csn, session);
-        await this.storage.getSystemDb().updateCsn(csn, session);
+        await this.storage.getJournalDb().deleteAfterCsn(csn);
+        await this.storage.getSystemDb().updateCsn(csn);
       }
-      if (innerSession) await this.storage.getSystemDb().commitTransaction(session);
     } catch (err) {
-      if (innerSession) await this.storage.getSystemDb().abortTransaction(session);
       throw err;
     }
   }
 
-  private async rollforwardSubsetDb(fromCsn: number, toCsn: number, session?: any): Promise<void> {
+  private async rollforwardSubsetDb(fromCsn: number, toCsn: number): Promise<void> {
     this.logger.warn(LOG_MESSAGES.ROLLFORWARD_TRANSACTIONS, [], [fromCsn, toCsn]);
-    const transactions = await this.storage.getJournalDb().findByCsnRange(fromCsn + 1, toCsn, undefined, session);
+    const transactions = await this.storage.getJournalDb().findByCsnRange(fromCsn + 1, toCsn, undefined);
     transactions.sort((a, b) => a.csn - b.csn);
     if (transactions.length !== toCsn - fromCsn) {
       throw new Error("Lack of rollforward transactions");
     }
     for (const transaction of transactions) {
-      await this.updateSubsetDb(transaction, session);
+      await this.updateSubsetDb(transaction);
     }
   }
 
@@ -409,22 +408,18 @@ class UpdateProcessor extends Subscriber {
       });
   }
 
-  private async resetData(csn: number, withJournal: boolean, session?: any): Promise<void> {
-    if (csn === 0) { return this.resetData0(session); }
+  private async resetData(csn: number, withJournal: boolean): Promise<void> {
+    if (csn === 0) { return this.resetData0(); }
     this.logger.warn(LOG_MESSAGES.RESET_DATA, [], [csn]);
     this.storage.pause();
     const query = this.subsetDefinition.query ? this.subsetDefinition.query : {};
-    const innerSession = !session;
-    if (innerSession) {
-      session = await this.storage.getSystemDb().startTransaction();
-    }
     try {
       const fetchJournal = await this.fetchJournal(csn);
       if (!fetchJournal) { throw new Error("journal not found: " + csn); }
       const subsetTransaction = UpdateListener.convertTransactionForSubset(this.subsetDefinition, fetchJournal);
       const result = await Dadget._query(this.storage.getNode(), this.database, query, undefined, undefined, undefined, csn, "strict", { _id: 1 });
       if (result.restQuery) { throw new Error("The queryHandlers has been empty before completing queries."); }
-      await this.storage.getSubsetDb().deleteAll(session);
+      await this.storage.getSubsetDb().deleteAll();
       await Util.promiseWhile<{ ids: object[]; }>(
         { ids: [...result.resultSet] },
         (whileData) => {
@@ -450,43 +445,35 @@ class UpdateProcessor extends Subscriber {
           for (const id_1 of idMap.keys()) {
             whileData.ids.push({ _id: id_1 });
           }
-          await this.storage.getSubsetDb().insertMany(rowData.resultSet, session);
+          await this.storage.getSubsetDb().insertMany(rowData.resultSet);
           return whileData;
         });
       if (withJournal) {
-        await this.storage.getJournalDb().deleteAll(session);
-        await this.storage.getJournalDb().insert(subsetTransaction, session);
-        await this.storage.getSystemDb().updateCsn(csn, session);
-        await this.storage.getSystemDb().updateQueryHash(session);
+        await this.storage.getJournalDb().deleteAll();
+        await this.storage.getJournalDb().insert(subsetTransaction);
+        await this.storage.getSystemDb().updateCsn(csn);
+        await this.storage.getSystemDb().updateQueryHash();
       }
-      if (innerSession) await this.storage.getSystemDb().commitTransaction(session);
       this.storage.setReady(withJournal ? subsetTransaction : undefined);
     } catch (e) {
       this.logger.error(LOG_MESSAGES.ERROR_MSG, [e.toString()], [206]);
-      if (innerSession) await this.storage.getSystemDb().abortTransaction(session);
       throw e;
     }
   }
 
-  private async resetData0(session?: any): Promise<void> {
+  private async resetData0(): Promise<void> {
     this.logger.warn(LOG_MESSAGES.RESET_DATA0);
     this.storage.pause();
-    const innerSession = !session;
-    if (innerSession) {
-      session = await this.storage.getSystemDb().startTransaction();
-    }
     try {
       await Promise.resolve();
-      await this.storage.getJournalDb().deleteAll(session);
-      await this.storage.getSubsetDb().deleteAll(session);
-      await this.storage.getSystemDb().updateCsn(0, session);
-      await this.storage.getSystemDb().updateQueryHash(session);
-      if (innerSession) await this.storage.getSystemDb().commitTransaction(session);
+      await this.storage.getJournalDb().deleteAll();
+      await this.storage.getSubsetDb().deleteAll();
+      await this.storage.getSystemDb().updateCsn(0);
+      await this.storage.getSystemDb().updateQueryHash();
       this.storage.committedCsn = undefined;
       this.storage.setReady();
     } catch (e) {
       this.logger.error(LOG_MESSAGES.ERROR_MSG, [e.toString()], [207]);
-      if (innerSession) await this.storage.getSystemDb().abortTransaction(session);
       throw e;
     }
   }
