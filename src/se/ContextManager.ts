@@ -172,6 +172,7 @@ class ContextManagementServer extends Proxy {
   private logger: Logger;
   private lastBeforeObj?: { _id?: string, csn?: number };
   private lastCheckPointTime: number = 0;
+  private checkPointTimer?: any;
   private atomicLockId?: string = undefined;
   private atomicTimer?: any;
   private queueWaitingList: (() => void)[] = [];
@@ -799,8 +800,10 @@ class ContextManagementServer extends Proxy {
 
   private checkProtectedCsn(): void {
     if (Date.now() - this.lastCheckPointTime <= CHECK_POINT_CHECK_PERIOD_MS) { return; }
-    this.lastCheckPointTime = Date.now();
-    setTimeout(() => {
+    if (this.checkPointTimer) { clearTimeout(this.checkPointTimer); }
+    this.checkPointTimer = setTimeout(() => {
+      this.checkPointTimer = undefined;
+      this.lastCheckPointTime = Date.now();
       const time = new Date();
       time.setMilliseconds(-CHECK_POINT_DELETE_PERIOD_MS);
       this.context.getJournalDb().getBeforeCheckPointTime(time)
