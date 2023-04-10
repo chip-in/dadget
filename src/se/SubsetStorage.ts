@@ -195,19 +195,19 @@ class UpdateProcessor extends Subscriber {
         if ((type === TransactionType.INSERT || type === TransactionType.RESTORE) && transaction.new) {
           const newObj = TransactionRequest.getNew(transaction);
           const obj = { ...newObj, _id: transaction.target, csn: transaction.csn };
-          await this.storage.getSubsetDb().insert(obj, session);
+          await this.storage.getSubsetDb().insert(obj, session, true);
         } else if (type === TransactionType.UPDATE && transaction.before) {
           const updateObj = TransactionRequest.applyOperator(transaction);
           updateObj.csn = transaction.csn;
-          await this.storage.getSubsetDb().update(transaction.target, updateObj, session);
+          await this.storage.getSubsetDb().update(transaction.target, updateObj, session, true);
         } else if (type === TransactionType.UPSERT || type === TransactionType.REPLACE) {
           const updateObj = TransactionRequest.applyOperator(transaction);
           updateObj.csn = transaction.csn;
-          await this.storage.getSubsetDb().update(transaction.target, updateObj, session);
+          await this.storage.getSubsetDb().update(transaction.target, updateObj, session, true);
         } else if (type === TransactionType.DELETE && transaction.before) {
-          await this.storage.getSubsetDb().deleteById(transaction.target, session);
+          await this.storage.getSubsetDb().deleteById(transaction.target, session, true);
         } else if (type === TransactionType.TRUNCATE) {
-          await this.storage.getSubsetDb().deleteAll(session);
+          await this.storage.getSubsetDb().deleteAll(undefined, true);
         } else if (type === TransactionType.BEGIN || type === TransactionType.BEGIN_IMPORT) {
           this.storage.committedCsn = transaction.committedCsn;
         } else if (type === TransactionType.END || type === TransactionType.END_IMPORT) {
@@ -392,9 +392,11 @@ class UpdateProcessor extends Subscriber {
                           if (!j) { throw new Error("journal not found: " + csn); }
                           return callback(j);
                         })
+                        .then(() => this.storage.getSystemDb().updateCsn(csn))
                         .then(() => { this.storage.setReady(); });
                     } else {
                       return this.fetchJournals(journal.csn + 1, csn, callback)
+                        .then(() => this.storage.getSystemDb().updateCsn(csn))
                         .then(() => { this.storage.setReady(); });
                     }
                   }

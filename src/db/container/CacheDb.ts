@@ -97,7 +97,7 @@ export class CacheDb implements IDb {
     return Promise.resolve(count);
   }
 
-  insertOne(doc: { _id: string }, session?: any): Promise<void> {
+  insertOne(doc: { _id: string }, session?: any, throwErrorMode?: boolean): Promise<void> {
     if (!(doc as any)._id) { (doc as any)._id = uuidv1(); }
     this.data[doc._id] = doc;
     return Promise.resolve();
@@ -133,13 +133,13 @@ export class CacheDb implements IDb {
     });
   }
 
-  replaceOneById(id: string, doc: object, session?: any): Promise<void> {
+  replaceOneById(id: string, doc: object, session?: any, throwErrorMode?: boolean): Promise<void> {
     (doc as any)._id = id;
     this.data[id] = doc;
     return Promise.resolve();
   }
 
-  deleteOneById(id: string, session?: any): Promise<void> {
+  deleteOneById(id: string, session?: any, throwErrorMode?: boolean): Promise<void> {
     delete this.data[id];
     return Promise.resolve();
   }
@@ -154,7 +154,7 @@ export class CacheDb implements IDb {
     return Promise.resolve();
   }
 
-  deleteAll(session?: any): Promise<void> {
+  deleteAll(session?: any, throwErrorMode?: boolean): Promise<void> {
     for (const id of Object.keys(this.data)) {
       delete this.data[id];
     }

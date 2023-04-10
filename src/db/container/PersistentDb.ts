@@ -38,7 +38,8 @@ export class PersistentDb implements IDb {
     });
   }
 
-  private static errorExit(error: any, num: number): any {
+  private static errorExit(error: any, num: number, throwErrorMode?: boolean): any {
+    if (throwErrorMode) { throw error; }
     const logger = Logger.getLoggerWoDB("PersistentDb");
     logger.error(LOG_MESSAGES.ERROR_MSG, [error.toString()], [num]);
     process.exit(1);
@@ -162,9 +163,9 @@ export class PersistentDb implements IDb {
       .catch((error) => PersistentDb.errorExit(error, 8));
   }
 
-  insertOne(doc: object, session?: ClientSession): Promise<void> {
+  insertOne(doc: object, session?: ClientSession, throwErrorMode?: boolean): Promise<void> {
     return this.db.collection(this.collection).insertOne(doc, { session }).then(() => { })
-      .catch((error) => PersistentDb.errorExit(error, 9));
+      .catch((error) => PersistentDb.errorExit(error, 9, throwErrorMode));
   }
 
   insertMany(docs: object[], session?: ClientSession): Promise<void> {
@@ -195,15 +196,15 @@ export class PersistentDb implements IDb {
       .catch((error) => PersistentDb.errorExit(error, 13));
   }
 
-  replaceOneById(id: string, doc: object, session?: ClientSession): Promise<void> {
+  replaceOneById(id: string, doc: object, session?: ClientSession, throwErrorMode?: boolean): Promise<void> {
     (doc as any)._id = id;
     return this.db.collection(this.collection).replaceOne({ _id: id }, doc, { upsert: true, session })
-      .catch((error) => PersistentDb.errorExit(error, 14));
+      .catch((error) => PersistentDb.errorExit(error, 14, throwErrorMode));
   }
 
-  deleteOneById(id: string, session?: ClientSession): Promise<void> {
+  deleteOneById(id: string, session?: ClientSession, throwErrorMode?: boolean): Promise<void> {
     return this.db.collection(this.collection).deleteOne({ _id: id }, { session })
-      .catch((error) => PersistentDb.errorExit(error, 15));
+      .catch((error) => PersistentDb.errorExit(error, 15, throwErrorMode));
   }
 
   deleteByRange(field: string, from: any, to: any, session?: ClientSession): Promise<void> {
@@ -212,9 +213,9 @@ export class PersistentDb implements IDb {
       .catch((error) => PersistentDb.errorExit(error, 16));
   }
 
-  deleteAll(session?: ClientSession): Promise<void> {
+  deleteAll(session?: ClientSession, throwErrorMode?: boolean): Promise<void> {
     return this.db.collection(this.collection).deleteMany({}, { session })
-      .catch((error) => PersistentDb.errorExit(error, 17));
+      .catch((error) => PersistentDb.errorExit(error, 17, throwErrorMode));
   }
 
   private createIndexes(): Promise<void> {

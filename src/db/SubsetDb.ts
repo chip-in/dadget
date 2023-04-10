@@ -29,8 +29,8 @@ export class SubsetDb {
       .catch((err) => Promise.reject(new DadgetError(ERROR.E1201, [err.toString()])));
   }
 
-  insert(obj: object, session?: any): Promise<void> {
-    return this.db.insertOne(obj, session)
+  insert(obj: object, session?: any, throwErrorMode?: boolean): Promise<void> {
+    return this.db.insertOne(obj, session, throwErrorMode)
       .catch((err) => Promise.reject(new DadgetError(ERROR.E1202, [err.toString()])));
   }
 
@@ -40,18 +40,18 @@ export class SubsetDb {
       .catch((err) => Promise.reject(new DadgetError(ERROR.E1206, [err.toString()])));
   }
 
-  update(id: string, obj: object, session?: any): Promise<void> {
-    return this.db.replaceOneById(id, obj, session)
+  update(id: string, obj: object, session?: any, throwErrorMode?: boolean): Promise<void> {
+    return this.db.replaceOneById(id, obj, session, throwErrorMode)
       .catch((err) => Promise.reject(new DadgetError(ERROR.E1203, [err.toString()])));
   }
 
-  deleteById(id: string, session?: any): Promise<void> {
-    return this.db.deleteOneById(id, session)
+  deleteById(id: string, session?: any, throwErrorMode?: boolean): Promise<void> {
+    return this.db.deleteOneById(id, session, throwErrorMode)
       .catch((err) => Promise.reject(new DadgetError(ERROR.E1204, [err.toString()])));
   }
 
-  deleteAll(session?: any): Promise<void> {
-    return this.db.deleteAll(session)
+  deleteAll(session?: any, throwErrorMode?: boolean): Promise<void> {
+    return this.db.deleteAll(session, throwErrorMode)
       .catch((err) => Promise.reject(new DadgetError(ERROR.E1207, [err.toString()])));
   }
 
