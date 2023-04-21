@@ -251,7 +251,7 @@ export default class Dadget extends ServiceEngine {
     return seList;
   }
 
-  public static _query(
+  static __query(
     node: ResourceNode,
     database: string,
     query: object,
@@ -366,14 +366,14 @@ export default class Dadget extends ServiceEngine {
       count--;
       return new Promise<QueryResult>((resolve) => {
         setTimeout(() => {
-          Dadget._query(this.node, this.database, query, sort, limit, offset, csn, csnMode, projection)
+          Dadget.__query(this.node, this.database, query, sort, limit, offset, csn, csnMode, projection)
             .then((result) => {
               resolve(result);
             });
         }, QUERY_ERROR_WAIT_TIME);
       });
     };
-    return Dadget._query(this.node, this.database, query, sort, limit, offset, csn, csnMode, projection)
+    return Dadget.__query(this.node, this.database, query, sort, limit, offset, csn, csnMode, projection)
       .then((result) => Util.promiseWhile<QueryResult>(result, (result) => !!(result.restQuery && count > 0), retryAction))
       .then((result) => {
         if (result.restQuery) { throw new Error("The queryHandlers has been empty before completing queries."); }
@@ -388,6 +388,40 @@ export default class Dadget extends ServiceEngine {
         setTimeout(() => {
           this.notifyAll();
         });
+        return result;
+      })
+      .catch((reason) => {
+        const cause = reason instanceof DadgetError ? reason :
+          (reason.code && reason.message ? DadgetError.from(reason) : new DadgetError(ERROR.E2102, [reason.toString()]));
+        return Promise.reject(cause);
+      });
+  }
+  public static _query(
+    node: ResourceNode,
+    database: string,
+    query: object,
+    sort?: object,
+    limit?: number,
+    offset?: number,
+    csn?: number,
+    csnMode?: CsnMode,
+    projection?: object): Promise<QueryResult> {
+    let count = QUERY_ERROR_RETRY_COUNT;
+    const retryAction = (_: any) => {
+      count--;
+      return new Promise<QueryResult>((resolve) => {
+        setTimeout(() => {
+          Dadget.__query(node, database, query, sort, limit, offset, csn, csnMode, projection)
+            .then((result) => {
+              resolve(result);
+            });
+        }, QUERY_ERROR_WAIT_TIME);
+      });
+    };
+    return Dadget.__query(node, database, query, sort, limit, offset, csn, csnMode, projection)
+      .then((result) => Util.promiseWhile<QueryResult>(result, (result) => !!(result.restQuery && count > 0), retryAction))
+      .then((result) => {
+        if (result.restQuery) { throw new Error("The queryHandlers has been empty before completing queries."); }
         return result;
       })
       .catch((reason) => {
