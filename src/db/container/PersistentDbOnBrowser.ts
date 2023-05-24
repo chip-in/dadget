@@ -387,7 +387,7 @@ export class PersistentDb implements IDb {
     return this.find(query).then((list) => list.length);
   }
 
-  insertOne(doc: object, session?: any): Promise<void> {
+  insertOne(doc: object, session?: any, throwErrorMode?: boolean): Promise<void> {
     return new Promise((resolve, reject) => {
       const transaction = this.db.transaction(OBJECT_STORE_NAME, "readwrite");
       if (!(doc as any)._id) { (doc as any)._id = uuidv1(); }
@@ -504,7 +504,7 @@ export class PersistentDb implements IDb {
     });
   }
 
-  replaceOneById(id: string, doc: object, session?: any): Promise<void> {
+  replaceOneById(id: string, doc: object, session?: any, throwErrorMode?: boolean): Promise<void> {
     return new Promise((resolve, reject) => {
       const transaction = this.db.transaction(OBJECT_STORE_NAME, "readwrite");
       (doc as any)._id = id;
@@ -518,7 +518,7 @@ export class PersistentDb implements IDb {
     });
   }
 
-  deleteOneById(id: string, session?: any): Promise<void> {
+  deleteOneById(id: string, session?: any, throwErrorMode?: boolean): Promise<void> {
     return new Promise((resolve, reject) => {
       const transaction = this.db.transaction(OBJECT_STORE_NAME, "readwrite");
       transaction.objectStore(OBJECT_STORE_NAME).delete(id);
@@ -542,7 +542,7 @@ export class PersistentDb implements IDb {
       });
   }
 
-  deleteAll(session?: any): Promise<void> {
+  deleteAll(session?: any, throwErrorMode?: boolean): Promise<void> {
     return new Promise((resolve, reject) => {
       const transaction = this.db.transaction(OBJECT_STORE_NAME, "readwrite");
       transaction.objectStore(OBJECT_STORE_NAME).clear();

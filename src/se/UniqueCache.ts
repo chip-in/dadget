@@ -32,7 +32,7 @@ export class UniqueCacheConfigDef {
  */
 export class UniqueCache extends ServiceEngine {
 
-  public bootOrder = 15;
+  public bootOrder = 55;
   private currentCsn: number;
   private logger: Logger;
   private option: UniqueCacheConfigDef;
@@ -401,6 +401,7 @@ export class UniqueCache extends ServiceEngine {
   resetData(csn: number, withJournal: boolean): Promise<void> {
     if (csn === 0) { return this.resetData0(); }
     this.logger.info(LOG_MESSAGES.RESET_DATA, [], [csn]);
+    if (csn === this.currentCsn) { return Promise.resolve(); }
     this.pause();
     const query = {};
     const projection = { _id: 1 } as any;

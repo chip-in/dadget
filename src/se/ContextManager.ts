@@ -136,7 +136,6 @@ class TransactionJournalSubscriber extends Subscriber {
     this.logger.warn(LOG_MESSAGES.ADJUST_DATA, [], [csn]);
     let csnUpdated = false;
     const loopData = { csn };
-    const session = await this.context.getSystemDb().startTransaction();
     try {
       await Util.promiseWhile<{ csn: number; }>(
         loopData,
@@ -144,28 +143,26 @@ class TransactionJournalSubscriber extends Subscriber {
           return loopData.csn !== 0;
         },
         async (loopData) => {
-          const journal = await this.context.getJournalDb().findByCsn(loopData.csn, session);
+          const journal = await this.context.getJournalDb().findByCsn(loopData.csn);
           const fetchJournal = await this.fetchJournal(loopData.csn);
           if (!fetchJournal) { return { ...loopData, csn: 0 }; }
           if (!csnUpdated) {
-            await this.context.getSystemDb().updateCsn(csn, session);
+            await this.context.getSystemDb().updateCsn(csn);
             csnUpdated = true;
           }
           if (!journal) {
-            return this.context.getJournalDb().insert(fetchJournal, session)
+            return this.context.getJournalDb().insert(fetchJournal)
               .then(() => ({ ...loopData, csn: loopData.csn - 1 }));
           }
           if (fetchJournal.digest === journal.digest) {
             return { ...loopData, csn: 0 };
           } else {
-            return this.context.getJournalDb().replace(journal, fetchJournal, session)
+            return this.context.getJournalDb().replace(journal, fetchJournal)
               .then(() => ({ ...loopData, csn: loopData.csn - 1 }));
           }
         });
-      await this.context.getSystemDb().commitTransaction(session);
     } catch (err) {
       this.logger.error(LOG_MESSAGES.ERROR_MSG, [err.toString()], [103]);
-      await this.context.getSystemDb().abortTransaction(session);
       throw err;
     }
   }
@@ -175,6 +172,7 @@ class ContextManagementServer extends Proxy {
   private logger: Logger;
   private lastBeforeObj?: { _id?: string, csn?: number };
   private lastCheckPointTime: number = 0;
+  private checkPointTimer?: any;
   private atomicLockId?: string = undefined;
   private atomicTimer?: any;
   private queueWaitingList: (() => void)[] = [];
@@ -802,8 +800,10 @@ class ContextManagementServer extends Proxy {
 
   private checkProtectedCsn(): void {
     if (Date.now() - this.lastCheckPointTime <= CHECK_POINT_CHECK_PERIOD_MS) { return; }
-    this.lastCheckPointTime = Date.now();
-    setTimeout(() => {
+    if (this.checkPointTimer) { clearTimeout(this.checkPointTimer); }
+    this.checkPointTimer = setTimeout(() => {
+      this.checkPointTimer = undefined;
+      this.lastCheckPointTime = Date.now();
       const time = new Date();
       time.setMilliseconds(-CHECK_POINT_DELETE_PERIOD_MS);
       this.context.getJournalDb().getBeforeCheckPointTime(time)

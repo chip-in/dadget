@@ -3,8 +3,8 @@
   "version": "1.0.0",
   "main": "lib/server.js",
   "dependencies": {
-    "@chip-in/resource-node": "^0.1.15",
-    "@chip-in/logger": "*"
+    "@chip-in/resource-node": "0.1.16",
+    "@chip-in/logger": "^0.1.5"
   },
   "devDependencies": {
     "babel-cli": "^6.24.1",

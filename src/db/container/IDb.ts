@@ -23,7 +23,7 @@ export interface IDb {
 
   count(query: object): Promise<number>;
 
-  insertOne(doc: object, session?: any): Promise<void>;
+  insertOne(doc: object, session?: any, throwErrorMode?: boolean): Promise<void>;
 
   insertMany(docs: object[], session?: any): Promise<void>;
 
@@ -33,11 +33,11 @@ export interface IDb {
 
   updateOne(filter: object, update: object, session?: any): Promise<void>;
 
-  replaceOneById(id: string, doc: object, session?: any): Promise<void>;
+  replaceOneById(id: string, doc: object, session?: any, throwErrorMode?: boolean): Promise<void>;
 
-  deleteOneById(id: string, session?: any): Promise<void>;
+  deleteOneById(id: string, session?: any, throwErrorMode?: boolean): Promise<void>;
 
   deleteByRange(field: string, from: any, to: any, session?: any): Promise<void>;
 
-  deleteAll(session?: any): Promise<void>;
+  deleteAll(session?: any, throwErrorMode?: boolean): Promise<void>;
 }
