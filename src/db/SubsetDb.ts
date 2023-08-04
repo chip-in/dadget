@@ -4,14 +4,18 @@ import { ERROR } from "../Errors";
 import { IndexDef } from "../se/DatabaseRegistry";
 import { DadgetError } from "../util/DadgetError";
 import { IDb } from "./container/IDb";
+import { Logger } from "../util/Logger";
+import { LOG_MESSAGES } from "../LogMessages";
 
 const SUBSET_COLLECTION = "subset_data";
 
 export class SubsetDb {
+  private logger: Logger;
 
   constructor(private db: IDb, protected subsetName: string, protected indexDefList: IndexDef[]) {
     db.setCollection(SUBSET_COLLECTION);
     console.log("SubsetDb is created:", subsetName);
+    this.logger = Logger.getLoggerWoDB("SubsetDb");
   }
 
   start(): Promise<void> {
@@ -57,8 +61,10 @@ export class SubsetDb {
 
   find(query: object, sort?: object, limit?: number, projection?: object, offset?: number): Promise<any[]> {
     console.log("find:", JSON.stringify(query));
+    this.logger.info(LOG_MESSAGES.DEBUG_FIND, [JSON.stringify(query)]);
     return this.db.find(query, sort, limit, offset, projection)
       .then((result) => {
+        this.logger.info(LOG_MESSAGES.DEBUG_FIND_COMPLETED);
         return result;
       })
       .catch((err) => Promise.reject(new DadgetError(ERROR.E1205, [err.toString()])));
