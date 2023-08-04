@@ -99,21 +99,33 @@ export class PersistentDb implements IDb {
     if (!Mongo.useTransaction()) {
       return undefined;
     }
-    let client = await PersistentDb.getConnection();
-    const session = client.startSession();
-    session.startTransaction();
-    return session;
+    try {
+      let client = await PersistentDb.getConnection();
+      const session = client.startSession();
+      session.startTransaction();
+      return session;
+    } catch (error) {
+      PersistentDb.errorExit(error, 100);
+    }
   }
 
   async commitTransaction(session?: ClientSession) {
     if (session) {
-      await session.commitTransaction();
+      try {
+        await session.commitTransaction();
+      } catch (error) {
+        PersistentDb.errorExit(error, 101);
+      }
     }
   }
 
   async abortTransaction(session?: ClientSession) {
     if (session) {
-      await session.abortTransaction();
+      try {
+        await session.abortTransaction();
+      } catch (error) {
+        PersistentDb.errorExit(error, 102);
+      }
     }
   }
 
