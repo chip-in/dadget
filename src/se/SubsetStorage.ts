@@ -645,7 +645,7 @@ class SubsetUpdatorProxy extends Proxy {
           delete (journal as any)._id;
           return {
             status: "OK",
-            journal,
+            journal: EJSON.serialize(journal),
           };
         } else {
           return {
@@ -671,7 +671,7 @@ class SubsetUpdatorProxy extends Proxy {
           .then((journal) => {
             if (!journal) { throw new Error("journal not found: " + loopData.csn); }
             delete (journal as any)._id;
-            const journalStr = JSON.stringify(journal);
+            const journalStr = EJSON.stringify(journal);
             journals.push(journalStr);
             return { csn: loopData.csn + 1, size: loopData.size + journalStr.length };
           });
