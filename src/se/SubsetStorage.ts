@@ -99,6 +99,15 @@ class UpdateProcessor extends Subscriber {
                         .then(() => { release1(); });
                     }
                   });
+              } else if (csn > transaction.csn) {
+                return this.rollbackSubsetDb(transaction.csn, true)
+                  .catch((e) => {
+                    this.logger.warn(LOG_MESSAGES.ERROR_MSG, [e.toString()], [216]);
+                    return this.resetData(transaction.csn, true);
+                  })
+                  .then(() => { this.storage.setReady(); })
+                  .then(() => { release2(); })
+                  .then(() => { release1(); });
               } else {
                 return this.adjustData(transaction.csn)
                   .then(() => { release2(); })
@@ -158,6 +167,21 @@ class UpdateProcessor extends Subscriber {
           });
       });
     });
+  }
+
+  /**
+   * トランザクションを進める
+   */
+  proceedTransaction(to_csn: number) {
+    this.logger.info(LOG_MESSAGES.PROCEED_TRANSACTION, [], [to_csn]);
+    this.storage.getSystemDb().getCsn()
+      .then((csn) => {
+        this.fetchJournals(csn + 1, to_csn, (fetchJournal) => {
+          console.error("proceedTransaction", fetchJournal.csn);
+          this.procTransaction(fetchJournal);
+          return Promise.resolve();
+        })
+      });
   }
 
   private async updateSubsetDbWithTx(transaction: TransactionObject): Promise<void> {
@@ -1103,8 +1127,9 @@ export class SubsetStorage extends ServiceEngine implements Proxy {
                 });
             });
         } else {
-          this.logger.info(LOG_MESSAGES.WAIT_FOR_TRANSACTIONS, [], [csn, currentCsn]);
+          this.logger.warn(LOG_MESSAGES.WAIT_FOR_TRANSACTIONS, [], [csn, currentCsn]);
           // wait for transaction journals
+          this.updateProcessor.proceedTransaction(csn);
           return new Promise<CountResult>((resolve, reject) => {
             if (!this.queryWaitingList[csn]) { this.queryWaitingList[csn] = []; }
             this.queryWaitingList[csn].push(() => {
@@ -1188,8 +1213,9 @@ export class SubsetStorage extends ServiceEngine implements Proxy {
                 });
             });
         } else {
-          this.logger.info(LOG_MESSAGES.WAIT_FOR_TRANSACTIONS, [], [csn, currentCsn]);
+          this.logger.warn(LOG_MESSAGES.WAIT_FOR_TRANSACTIONS, [], [csn, currentCsn]);
           // wait for transaction journals
+          this.updateProcessor.proceedTransaction(csn);
           return new Promise<QueryResult>((resolve, reject) => {
             if (!this.queryWaitingList[csn]) { this.queryWaitingList[csn] = []; }
             this.queryWaitingList[csn].push(() => {

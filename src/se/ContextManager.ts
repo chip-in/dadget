@@ -1033,8 +1033,10 @@ export class ContextManager extends ServiceEngine {
     // スレーブ動作で同期するのためのサブスクライバを登録
     this.subscriber = new TransactionJournalSubscriber(this);
     promise = promise.then(() => {
-      return node.subscribe(CORE_NODE.PATH_TRANSACTION.replace(/:database\b/g, this.database), this.subscriber)
-        .then((key) => { this.subscriberKey = key; });
+      setTimeout(() => {
+        node.subscribe(CORE_NODE.PATH_TRANSACTION.replace(/:database\b/g, this.database), this.subscriber)
+          .then((key) => { this.subscriberKey = key; });
+      }, KEEP_TIME_AFTER_CONTEXT_MANAGER_MASTER_ACQUIRED_MS + 1000);
     });
     promise = promise.then(() => {
       // コンテキストマネージャのRestサービスを登録
