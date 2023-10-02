@@ -38,7 +38,7 @@ function deconvertObject(obj: { [key: string]: any }): { [key: string]: any } {
   return out;
 }
 
-function serialize(val: any): any {
+export function serialize(val: any): any {
   if (val instanceof Date) {
     return { $date: val.toISOString() };
   }

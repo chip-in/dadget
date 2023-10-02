@@ -840,7 +840,7 @@ class ContextManagementServer extends Proxy {
           delete (journal as any)._id;
           return {
             status: "OK",
-            journal,
+            journal: EJSON.serialize(journal),
           };
         } else {
           return {
@@ -866,7 +866,7 @@ class ContextManagementServer extends Proxy {
           .then((journal) => {
             if (!journal) { throw new Error("journal not found: " + loopData.csn); }
             delete (journal as any)._id;
-            const journalStr = JSON.stringify(journal);
+            const journalStr = EJSON.stringify(journal);
             journals.push(journalStr);
             return { csn: loopData.csn + 1, size: loopData.size + journalStr.length };
           });
@@ -1033,8 +1033,10 @@ export class ContextManager extends ServiceEngine {
     // スレーブ動作で同期するのためのサブスクライバを登録
     this.subscriber = new TransactionJournalSubscriber(this);
     promise = promise.then(() => {
-      return node.subscribe(CORE_NODE.PATH_TRANSACTION.replace(/:database\b/g, this.database), this.subscriber)
-        .then((key) => { this.subscriberKey = key; });
+      setTimeout(() => {
+        node.subscribe(CORE_NODE.PATH_TRANSACTION.replace(/:database\b/g, this.database), this.subscriber)
+          .then((key) => { this.subscriberKey = key; });
+      }, KEEP_TIME_AFTER_CONTEXT_MANAGER_MASTER_ACQUIRED_MS + 1000);
     });
     promise = promise.then(() => {
       // コンテキストマネージャのRestサービスを登録

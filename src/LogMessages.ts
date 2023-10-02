@@ -67,6 +67,7 @@ export const LOG_MESSAGES = {
   ON_RECEIVE_GET_UPDATE_DATA: { code: 66, msg: "/getUpdateData csn %d1" },
   USE_TRANSACTION: { code: 67, msg: "use mongodb transaction" },
   ON_RECEIVE_GET_LATEST_CSN: { code: 68, msg: "/getLatestCsn" },
+  PROCEED_TRANSACTION: { code: 69, msg: "proceedTransaction, csn: %d1" },
 };
 
 Logger.checkLogType(LOG_MESSAGES);
