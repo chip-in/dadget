@@ -3,8 +3,9 @@
   "version": "1.1.0",
   "main": "lib/server.js",
   "dependencies": {
-    "@chip-in/resource-node": "^0.1.18",
-    "@chip-in/logger": "^0.1.5"
+    "@airbnb/node-memwatch": "^2.0.0",
+    "@chip-in/logger": "^0.1.5",
+    "@chip-in/resource-node": "^0.1.18"
   },
   "devDependencies": {
     "@babel/cli": "^7.14.8",
