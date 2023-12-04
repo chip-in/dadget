@@ -24,6 +24,15 @@ Logger.setLogLevel(process.env.LOG_LEVEL || "debug");
 //Dadget.getLogger().setLogLevel('debug');
 Dadget.registerServiceClasses(node);
 
+setInterval(() => {
+  try {
+    console.log('begin gc');
+    global.gc();
+  } catch (e) {
+    console.error('gc failed');
+  }
+}, 1 * 60 * 1000);
+
 node.start().then(() => {
   function sigHandle() {
     node.stop().then(() => {

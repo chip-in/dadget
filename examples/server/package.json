@@ -12,7 +12,7 @@
     "@babel/preset-env": "^7.15.0"
   },
   "scripts": {
-    "start": "node lib/server.js",
+    "start": "node --expose-gc lib/server.js",
     "debug": "node --inspect --debug-brk lib/server.js",
     "build": "babel src -d lib"
   },

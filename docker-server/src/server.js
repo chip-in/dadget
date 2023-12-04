@@ -30,8 +30,11 @@ if (jwtToken) {
 
 setInterval(() => {
   try {
+    console.log('begin gc');
     global.gc();
-  } catch (e) { }
+  } catch (e) {
+    console.error('gc failed');
+  }
 }, 10 * 60 * 1000);
 
 rnode.start().then(() => {
