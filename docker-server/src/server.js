@@ -1,7 +1,6 @@
 import { ResourceNode } from '@chip-in/resource-node';
 import { LogUploader } from '@chip-in/logger'
 import Dadget from '../..';
-import memwatch from '@airbnb/node-memwatch';
 
 if (!process.env.CORE_SERVER) {
   console.error("CORE_SERVER required");
@@ -29,19 +28,10 @@ if (jwtToken) {
   rnode.setJWTAuthorization(jwtToken, jwtRefreshPath);
 }
 
-let hd = new memwatch.HeapDiff();
 setInterval(() => {
   try {
     console.log(new Date(), 'begin gc');
     global.gc();
-    const used = process.memoryUsage();
-    const messages = [];
-    for (let key in used) {
-      messages.push(`${key}: ${Math.round(used[key] / 1024 / 1024 * 100) / 100} MB`);
-    }
-    console.log(new Date(), messages.join(', '));
-    console.dir(hd.end(), {depth: 3})
-    hd = new memwatch.HeapDiff();
   } catch (e) {
     console.error(new Date(), 'gc failed');
   }
