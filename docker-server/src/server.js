@@ -30,7 +30,6 @@ if (jwtToken) {
 
 setInterval(() => {
   try {
-    console.log(new Date(), 'begin gc');
     global.gc();
   } catch (e) {
     console.error(new Date(), 'gc failed');

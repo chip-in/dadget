@@ -113,6 +113,7 @@ export class PersistentDb implements IDb {
     if (session) {
       try {
         await session.commitTransaction();
+        await session.endSession();
       } catch (error) {
         PersistentDb.errorExit(error, 101);
       }
@@ -123,6 +124,7 @@ export class PersistentDb implements IDb {
     if (session) {
       try {
         await session.abortTransaction();
+        await session.endSession();
       } catch (error) {
         PersistentDb.errorExit(error, 102);
       }
