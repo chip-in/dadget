@@ -7,11 +7,12 @@
     "@chip-in/resource-node": "^0.1.18"
   },
   "devDependencies": {
-    "babel-cli": "^6.26.0",
-    "babel-preset-es2015": "^6.24.1"
+    "@babel/cli": "^7.14.8",
+    "@babel/core": "^7.15.0",
+    "@babel/preset-env": "^7.15.0"
   },
   "scripts": {
-    "start": "node lib/server.js",
+    "start": "node --expose-gc lib/server.js",
     "debug": "node --inspect --debug-brk lib/server.js",
     "build": "babel src -d lib"
   },

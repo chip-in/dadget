@@ -19,15 +19,35 @@ let node = new ResourceNode(CORE_SERVER, RN_NAME);
 if (process.env.ACCESS_TOKEN) {
   node.setJWTAuthorization(process.env.ACCESS_TOKEN);
 }
-Dadget.getLogger().setLogLevel('debug');
+let Logger = Dadget.getLogger();
+Logger.setLogLevel(process.env.LOG_LEVEL || "debug");
+//Dadget.getLogger().setLogLevel('debug');
 Dadget.registerServiceClasses(node);
+
+setInterval(() => {
+  try {
+    global.gc();
+  } catch (e) {
+    console.error(new Date(), 'gc failed');
+  }
+}, 1 * 60 * 1000);
+
 node.start().then(() => {
   function sigHandle() {
     node.stop().then(() => {
       process.exit()
     })
+      .catch((msg) => {
+        console.error('\u001b[31m' + (msg.toString ? msg.toString() : msg) + '\u001b[0m');
+        process.exit(1);
+      })
   }
   process.on('SIGINT', sigHandle);
   process.on('SIGTERM', sigHandle);
 })
+  .catch((msg) => {
+    console.error('\u001b[31m' + (msg.toString ? msg.toString() : msg) + '\u001b[0m');
+    process.exit(1);
+  })
+
 

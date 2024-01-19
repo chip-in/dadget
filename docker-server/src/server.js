@@ -28,6 +28,14 @@ if (jwtToken) {
   rnode.setJWTAuthorization(jwtToken, jwtRefreshPath);
 }
 
+setInterval(() => {
+  try {
+    global.gc();
+  } catch (e) {
+    console.error(new Date(), 'gc failed');
+  }
+}, 10 * 60 * 1000);
+
 rnode.start().then(() => {
   function sigHandle() {
     rnode.stop().then(() => {

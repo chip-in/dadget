@@ -13,4 +13,4 @@ RUN chmod +x bin/command
 WORKDIR ${CI_HOME}/docker-server
 RUN npm install
 RUN npm run build
-ENTRYPOINT ["node", "lib/server.js"]
+ENTRYPOINT ["node", "--expose-gc", "lib/server.js"]
