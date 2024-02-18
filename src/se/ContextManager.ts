@@ -343,6 +343,7 @@ class ContextManagementServer extends Proxy {
 
     if (this.context.getLock().isBusy(MASTER_LOCK) || this.atomicLockId && this.atomicLockId !== atomicId) {
       return new Promise<object>((resolve, reject) => {
+        this.logger.info(LOG_MESSAGES.QUEUE_WAITING);
         this.queueWaitingList.push(() => {
           this.exec(postulatedCsn, request, atomicId, options)
             .then((result) => resolve(result)).catch((reason) => reject(reason));
@@ -432,6 +433,7 @@ class ContextManagementServer extends Proxy {
 
     if (this.context.getLock().isBusy(MASTER_LOCK) || this.atomicLockId && this.atomicLockId !== atomicId) {
       return new Promise<object>((resolve, reject) => {
+        this.logger.info(LOG_MESSAGES.QUEUE_WAITING);
         this.queueWaitingList.push(() => {
           this.execMany(postulatedCsn, requests, atomicId, options)
             .then((result) => resolve(result)).catch((reason) => reject(reason));
@@ -689,7 +691,10 @@ class ContextManagementServer extends Proxy {
       this.atomicTimer = undefined;
       this.logger.warn(LOG_MESSAGES.TRANSACTION_TIMEOUT);
       this.procTransaction(0, { type: TransactionType.ABORT, target: "" }, this.atomicLockId)
-        .then(() => this.notifyAllWaitingList());
+        .then(() => this.notifyAllWaitingList())
+        .catch(err => {
+          this.logger.error(LOG_MESSAGES.ERROR_MSG, [err.toString()], [109]);
+        });
     }, ATOMIC_OPERATION_MAX_LOCK_TIME);
   }
 
@@ -724,6 +729,7 @@ class ContextManagementServer extends Proxy {
     }
 
     if (transaction.type === TransactionType.BEGIN || transaction.type === TransactionType.BEGIN_IMPORT) {
+      // BEGIN_RESTOREの場合はcommittedCsnにロールバックできないので設定しない
       this.context.committedCsn = newCsn - 1;
       transaction.committedCsn = this.context.committedCsn;
     }
@@ -742,7 +748,8 @@ class ContextManagementServer extends Proxy {
     if (transaction.type === TransactionType.ABORT || transaction.type === TransactionType.ABORT_IMPORT) {
       if (!atomicId) { throw new DadgetError(ERROR.E2011, ["atomicId"]); }
       if (this.context.committedCsn === undefined) {
-        throw new DadgetError(ERROR.E2009);
+        // リストア時にタイムアウトでABORTが呼び出される場合があるので、エラーにしない
+        // throw new DadgetError(ERROR.E2009);
       }
       transaction.committedCsn = this.context.committedCsn;
       this.atomicLockId = undefined;

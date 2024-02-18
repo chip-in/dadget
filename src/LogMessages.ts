@@ -68,6 +68,7 @@ export const LOG_MESSAGES = {
   USE_TRANSACTION: { code: 67, msg: "use mongodb transaction" },
   ON_RECEIVE_GET_LATEST_CSN: { code: 68, msg: "/getLatestCsn" },
   PROCEED_TRANSACTION: { code: 69, msg: "proceedTransaction, csn: %d1" },
+  QUEUE_WAITING: { code: 70, msg: "queue waiting" },
 };
 
 Logger.checkLogType(LOG_MESSAGES);
