@@ -14,6 +14,10 @@ const MAX_EXPORT_NUM = 100;
 const MAX_UPLOAD_BYTES = 100 * 1024;
 
 export class Maintenance {
+  static abortType: TransactionType | undefined;;
+  static atomicId: string | undefined;
+  static stop = false;
+
   static reset(target: string): void {
     console.info("reset DB:", target);
     let client: MongoClient;
@@ -76,6 +80,9 @@ export class Maintenance {
   }
 
   private static async uploadStream(fileName: string, dadget: Dadget, type: TransactionType, idName: string, atomicId: string) {
+    if (!fs.existsSync(fileName)) {
+      return;
+    }
     let list: TransactionRequest[] = [];
     let listSize = 0;
     let promise1 = Promise.resolve();
@@ -117,13 +124,15 @@ export class Maintenance {
             } else {
               //call the method that creates a promise, and at the end
               //just empty the buffer, and process the next chunk
-              func(list).then(() => {
-                list = [];
-                listSize = 0;
-                callback();
-              }).catch((e) => {
-                reject(e);
-              });
+              if (!Maintenance.stop) {
+                func(list).then(() => {
+                  list = [];
+                  listSize = 0;
+                  callback();
+                }).catch((e) => {
+                  reject(e);
+                });
+              }
             }
           }))
         .on('error', error => {
@@ -161,29 +170,65 @@ export class Maintenance {
     });
   }
 
-  static import(dadget: Dadget, fileName: string, idName: string): Promise<void> {
+  static import(dadget: Dadget, fileName: string, idName: string, skipMissingFile: boolean, emptyOnMissingFile: boolean): Promise<void> {
+    if (!fs.existsSync(fileName)) {
+      if (skipMissingFile) {
+        return Promise.resolve();
+      } else if (!emptyOnMissingFile) {
+        return Promise.reject("no such file");
+      }
+    }
     const atomicId = Dadget.uuidGen();
     return dadget._exec(0, { type: TransactionType.BEGIN_IMPORT, target: "" }, atomicId)
+      .then(() => {
+        Maintenance.abortType = TransactionType.ABORT_IMPORT;
+        Maintenance.atomicId = atomicId;
+      })
       .then(() => Maintenance.uploadStream(fileName, dadget, TransactionType.INSERT, idName, atomicId))
       .catch((reason) => {
         return dadget._exec(0, { type: TransactionType.ABORT_IMPORT, target: "" }, atomicId)
-          .then(() => { throw reason; });
+          .then(() => {
+            Maintenance.abortType = undefined;
+            Maintenance.atomicId = undefined;
+            throw reason;
+          });
       })
       .then(() => dadget._exec(0, { type: TransactionType.END_IMPORT, target: "" }, atomicId))
-      .then(() => { return; });
+      .then(() => {
+        Maintenance.abortType = undefined;
+        Maintenance.atomicId = undefined;
+      });
   }
 
-  static restore(dadget: Dadget, fileName: string): Promise<void> {
+  static restore(dadget: Dadget, fileName: string, skipMissingFile: boolean, emptyOnMissingFile: boolean): Promise<void> {
+    if (!fs.existsSync(fileName)) {
+      if (skipMissingFile) {
+        return Promise.resolve();
+      } else if (!emptyOnMissingFile) {
+        return Promise.reject("no such file");
+      }
+    }
     const atomicId = Dadget.uuidGen();
     return dadget._exec(0, { type: TransactionType.BEGIN_RESTORE, target: "" }, atomicId)
+      .then(() => {
+        Maintenance.abortType = TransactionType.ABORT_RESTORE;
+        Maintenance.atomicId = atomicId;
+      })
       .then(() => dadget._exec(0, { type: TransactionType.TRUNCATE, target: "" }, atomicId))
       .then(() => Maintenance.uploadStream(fileName, dadget, TransactionType.RESTORE, "_id", atomicId))
       .catch((reason) => {
         return dadget._exec(0, { type: TransactionType.ABORT_RESTORE, target: "" }, atomicId)
-          .then(() => { throw reason; });
+          .then(() => {
+            Maintenance.abortType = undefined;
+            Maintenance.atomicId = undefined;
+            throw reason;
+          });
       })
       .then(() => dadget._exec(0, { type: TransactionType.END_RESTORE, target: "" }, atomicId))
-      .then(() => { return; });
+      .then(() => {
+        Maintenance.abortType = undefined;
+        Maintenance.atomicId = undefined;
+      });
   }
 
   static clear(dadget: Dadget, force: boolean): Promise<void> {

@@ -8,7 +8,7 @@ const usage = () => {
   const sections = [
     {
       header: "Synopsis",
-      content: "$ dadget <command>　<options>",
+      content: "$ dadget <command> <options>",
     },
     {
       header: "Command List",
@@ -74,6 +74,16 @@ const usage = () => {
           type: Boolean,
           description: "Forced execution",
         },
+        {
+          name: "skipMissingFile",
+          type: Boolean,
+          description: "If there is no file, no action is taken.",
+        },
+        {
+          name: "emptyOnMissingFile",
+          type: Boolean,
+          description: "Empty data if file is missing",
+        },
       ],
     },
   ];
@@ -117,6 +127,10 @@ if (mainOptions.command === "reset") {
     argsDefinitions.push({ name: "file" });
     argsDefinitions.push({ name: "id" });
   }
+  if (mainOptions.command === "import" || mainOptions.command === "restore") {
+    argsDefinitions.push({ name: "skipMissingFile", type: Boolean });
+    argsDefinitions.push({ name: "emptyOnMissingFile", type: Boolean });
+  }
   const options = commandLineArgs(argsDefinitions, { argv });
   if (!options.server || !options.rn || !options.name) {
     usage();
@@ -137,6 +151,34 @@ if (mainOptions.command === "reset") {
     node.setJWTAuthorization(options.jwtToken, options.jwtRefreshPath);
   }
   node.start().then(() => {
+    function sigHandle() {
+      if (Maintenance.stop) {
+        return;
+      }
+      Maintenance.stop = true;
+      let promise = Promise.resolve();
+      const abortType = Maintenance.abortType;
+      const atomicId = Maintenance.atomicId;
+      Maintenance.abortType = undefined;
+      Maintenance.atomicId = undefined;
+      if (abortType) {
+        promise = promise.then(() => {
+          return dadget._exec(0, { type: abortType!, target: "" }, atomicId).then(() => { return; })
+        });
+      }
+      promise.then(() => {
+        return node.stop()
+      }).then(() => {
+        process.exit(1)
+      })
+        .catch((msg) => {
+          console.error('\u001b[31m' + (msg.toString ? msg.toString() : msg) + '\u001b[0m');
+          process.exit(1);
+        })
+    }
+    process.on('SIGINT', sigHandle);
+    process.on('SIGTERM', sigHandle);
+
     const seList = node.searchServiceEngine("Dadget", { database: options.name });
     if (seList.length === 0) {
       return Promise.reject("Dadget is missing from the RN configuration or the database name is incorrect.");
@@ -145,11 +187,11 @@ if (mainOptions.command === "reset") {
     if (mainOptions.command === "export") {
       return Maintenance.export(dadget, options.file);
     } else if (mainOptions.command === "import") {
-      return Maintenance.import(dadget, options.file, options.id);
+      return Maintenance.import(dadget, options.file, options.id, options.skipMissingFile, options.emptyOnMissingFile);
     } else if (mainOptions.command === "backup") {
       return Maintenance.export(dadget, options.file);
     } else if (mainOptions.command === "restore") {
-      return Maintenance.restore(dadget, options.file);
+      return Maintenance.restore(dadget, options.file, options.skipMissingFile, options.emptyOnMissingFile);
     } else if (mainOptions.command === "clear") {
       return Maintenance.clear(dadget, !!options.force);
     }
