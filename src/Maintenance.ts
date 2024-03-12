@@ -4,13 +4,12 @@ import { MongoClient } from "mongodb";
 import { promisify } from "util";
 import * as split2 from "split2";
 import * as through2 from "through2";
-import { Mongo, SPLIT_IN_SUBSET_DB } from "./Config";
+import { EXPORT_LIMIT_NUM, MAX_EXPORT_NUM, Mongo, SPLIT_IN_SUBSET_DB } from "./Config";
 import { TransactionRequest, TransactionType } from "./db/Transaction";
 import Dadget from "./se/Dadget";
 import { Util } from "./util/Util";
 import * as EJSON from "./util/Ejson";
 
-const MAX_EXPORT_NUM = 100;
 const MAX_UPLOAD_BYTES = 100 * 1024;
 
 export class Maintenance {
@@ -60,7 +59,7 @@ export class Maintenance {
                     ids.push(id);
                   }
                 }
-                return dadget.query({ _id: { $in: ids } }, undefined, -1, undefined, csn, "strict")
+                return dadget.query({ _id: { $in: ids } }, undefined, EXPORT_LIMIT_NUM, undefined, csn, "strict")
                   .then((rowData) => {
                     if (rowData.resultSet.length === 0) { return whileData; }
                     let out = "";

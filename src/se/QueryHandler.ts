@@ -2,13 +2,14 @@ import * as URL from "url";
 import * as EJSON from "../util/Ejson";
 
 import { ResourceNode, ServiceEngine } from "@chip-in/resource-node";
-import { CORE_NODE, SPLIT_IN_SUBSET_DB } from "../Config";
+import { CORE_NODE, EXPORT_LIMIT_NUM, MAX_EXPORT_NUM, SPLIT_IN_SUBSET_DB } from "../Config";
 import { ERROR } from "../Errors";
 import { LOG_MESSAGES } from "../LogMessages";
 import { DadgetError } from "../util/DadgetError";
 import { Logger } from "../util/Logger";
-import { CountResult, CsnMode, QueryResult, CLIENT_VERSION } from "./Dadget";
+import Dadget, { CountResult, CsnMode, QueryResult, CLIENT_VERSION } from "./Dadget";
 import { DatabaseRegistry, SubsetDef } from "./DatabaseRegistry";
+import { Util } from "../util/Util";
 
 /**
  * クエリハンドラコンフィグレーションパラメータ
@@ -123,6 +124,7 @@ export class QueryHandler extends ServiceEngine {
       .then((_) => {
         const data = EJSON.deserialize(_);
         if (data.status === "NG") { throw Error(JSON.stringify(data.reason)); }
+        if (data.status === "HUGE") { return this._handle_huge_response(data.result); }
         if (data.status === "OK") { return data.result; }
         throw new Error("fetch error:" + JSON.stringify(data));
       })
@@ -131,6 +133,43 @@ export class QueryHandler extends ServiceEngine {
         return { csn, resultSet: [], restQuery: query, csnMode };
       });
   }
+  _handle_huge_response(result: QueryResult): Promise<QueryResult> {
+    const csn = result.csn;
+    let result2 = { ...result, resultSet: [] } as QueryResult;
+    return Util.promiseWhile<{ ids: object[] }>(
+      { ids: [...result.resultSet] },
+      (whileData) => {
+        return whileData.ids.length !== 0;
+      },
+      (whileData) => {
+        const idMap = new Map();
+        const ids = [];
+        for (let i = 0; i < MAX_EXPORT_NUM; i++) {
+          const row = whileData.ids.shift();
+          if (row) {
+            const id = (row as any)._id;
+            idMap.set(id, id);
+            ids.push(id);
+          }
+        }
+        return Dadget._query(this.getNode(), this.database, { _id: { $in: ids } }, undefined, EXPORT_LIMIT_NUM, undefined, csn, "strict")
+          .then((rowData) => {
+            if (rowData.resultSet.length === 0) { return whileData; }
+            for (const data of rowData.resultSet) {
+              result2.resultSet.push(data);
+              idMap.delete((data as any)._id);
+            }
+            for (const id of idMap.keys()) {
+              whileData.ids.push({ _id: id });
+            }
+            return whileData;
+          });
+      })
+      .then(() => {
+        return result2;
+      });
+  }
+
 
   count(csn: number, query: object, csnMode?: CsnMode): Promise<CountResult> {
     this.logger.info(LOG_MESSAGES.COUNT_CSN, [csnMode || ""], [csn]);
