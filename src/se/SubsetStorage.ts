@@ -6,7 +6,7 @@ import * as URL from "url";
 import * as EJSON from "../util/Ejson";
 
 import { Proxy, ResourceNode, ServiceEngine, Subscriber } from "@chip-in/resource-node";
-import { CORE_NODE, SPLIT_IN_SUBSET_DB } from "../Config";
+import { CORE_NODE, EXPORT_LIMIT_NUM, MAX_EXPORT_NUM, MAX_STRING_LENGTH, SPLIT_IN_SUBSET_DB } from "../Config";
 import { CacheDb } from "../db/container/CacheDb";
 import { PersistentDb } from "../db/container/PersistentDb";
 import { JournalDb } from "../db/JournalDb";
@@ -24,7 +24,6 @@ import { CLIENT_VERSION, CountResult, CsnMode, default as Dadget, QueryResult } 
 import { DatabaseRegistry, SubsetDef } from "./DatabaseRegistry";
 
 const MAX_RESPONSE_SIZE_OF_JOURNALS = 10485760;
-const MAX_EXPORT_NUM = 100;
 
 class UpdateProcessor extends Subscriber {
 
@@ -462,7 +461,7 @@ class UpdateProcessor extends Subscriber {
               ids.push(id);
             }
           }
-          const rowData = await Dadget._query(this.storage.getNode(), this.database, { _id: { $in: ids } }, undefined, -1, undefined, csn, "strict");
+          const rowData = await Dadget._query(this.storage.getNode(), this.database, { _id: { $in: ids } }, undefined, EXPORT_LIMIT_NUM, undefined, csn, "strict");
           if (rowData.restQuery) { throw new Error("The queryHandlers has been empty before completing queries."); }
           if (rowData.resultSet.length === 0) { return whileData; }
           for (const data of rowData.resultSet) {
@@ -1042,6 +1041,28 @@ export class SubsetStorage extends ServiceEngine implements Proxy {
       if (request.version && Number(request.version) > CLIENT_VERSION) throw new DadgetError(ERROR.E3002);
       return this.query(csn, query, sort, limit, request.csnMode, projection, offset)
         .then((result) => {
+          let total = 0;
+          let count = 0;
+          let length = result.resultSet.length;
+          for (const obj of result.resultSet) {
+            total += EJSON.stringify(obj).length + 1;
+            count += 1;
+            if (limit === EXPORT_LIMIT_NUM) {
+              if (total > MAX_STRING_LENGTH) {
+                result.resultSet = result.resultSet.slice(0, Math.max(1, count - 1));
+                return { status: "OK", result };
+              }
+            } else {
+              if ((total / count) * length > MAX_STRING_LENGTH) {
+                let ids: any[] = [];
+                for (const obj of result.resultSet) {
+                  ids.push({ _id: (obj as any)._id });
+                }
+                result.resultSet = ids;
+                return { status: "HUGE", result };
+              }
+            }
+          }
           return { status: "OK", result };
         });
     };

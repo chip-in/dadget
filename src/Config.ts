@@ -5,6 +5,9 @@ import * as path from "path";
 export const SPLIT_IN_SUBSET_DB = "--";
 export const SPLIT_IN_ONE_DB = "==";
 export const SPLIT_IN_INDEXED_DB = "__";
+export const MAX_EXPORT_NUM = 100;
+export const EXPORT_LIMIT_NUM = -1;
+export const MAX_STRING_LENGTH = 500 * 1024 * 1024;
 
 export class Mongo {
   private static option: MongoClientOptions;
