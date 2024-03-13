@@ -124,7 +124,7 @@ export class QueryHandler extends ServiceEngine {
       .then((_) => {
         const data = EJSON.deserialize(_);
         if (data.status === "NG") { throw Error(JSON.stringify(data.reason)); }
-        if (data.status === "HUGE") { return this._handle_huge_response(data.result); }
+        if (data.status === "HUGE") { return this._handle_huge_response(data.result, projection); }
         if (data.status === "OK") { return data.result; }
         throw new Error("fetch error:" + JSON.stringify(data));
       })
@@ -133,7 +133,7 @@ export class QueryHandler extends ServiceEngine {
         return { csn, resultSet: [], restQuery: query, csnMode };
       });
   }
-  _handle_huge_response(result: QueryResult): Promise<QueryResult> {
+  _handle_huge_response(result: QueryResult, projection?: object): Promise<QueryResult> {
     const csn = result.csn;
     let result2 = { ...result, resultSet: [] } as QueryResult;
     return Util.promiseWhile<{ ids: object[] }>(
@@ -152,7 +152,7 @@ export class QueryHandler extends ServiceEngine {
             ids.push(id);
           }
         }
-        return Dadget._query(this.getNode(), this.database, { _id: { $in: ids } }, undefined, EXPORT_LIMIT_NUM, undefined, csn, "strict")
+        return Dadget._query(this.getNode(), this.database, { _id: { $in: ids } }, undefined, EXPORT_LIMIT_NUM, undefined, csn, "strict", projection)
           .then((rowData) => {
             if (rowData.resultSet.length === 0) { return whileData; }
             for (const data of rowData.resultSet) {
