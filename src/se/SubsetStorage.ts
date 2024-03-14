@@ -1186,7 +1186,7 @@ export class SubsetStorage extends ServiceEngine implements Proxy {
     this.logger.debug(LOG_MESSAGES.QUERY, [JSON.stringify(query)]);
     let release: () => void;
     const promise = new Promise<void>((resolve, reject) => {
-      this.getLock().writeLock((unlock) => { // Prohibit concurrent execution of queries to prevent memory shortage
+      this.getLock().readLock((unlock) => {
         this.logger.debug(LOG_MESSAGES.GET_READLOCK);
         release = () => {
           this.logger.debug(LOG_MESSAGES.RELEASE_READLOCK);
