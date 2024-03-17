@@ -1,6 +1,8 @@
 import { MongoClientOptions } from "mongodb";
 import * as fs from "fs";
 import * as path from "path";
+import { Logger } from "./util/Logger";
+import { LOG_MESSAGES } from "./LogMessages";
 
 export const SPLIT_IN_SUBSET_DB = "--";
 export const SPLIT_IN_ONE_DB = "==";
@@ -13,6 +15,7 @@ export class Mongo {
   private static option: MongoClientOptions;
   private static url: [string, string | null];
   private static _useTransaction = false;
+  static w: any | undefined;
 
   private static _getUrl() {
     if (Mongo.url) return Mongo.url;
@@ -26,6 +29,12 @@ export class Mongo {
     } else {
       Mongo.url = [newUrl, url.groups.db];
     }
+    const urlObj = new URL(Mongo.url[0]);
+    if (urlObj.searchParams.has("w")) {
+      Mongo.w = urlObj.searchParams.get("w");
+    }
+    const logger = Logger.getLoggerWoDB("MongoDB");
+    logger.info(LOG_MESSAGES.MONGODB_URL, [Mongo.url[0]]);
     return Mongo.url;
   }
 
@@ -55,7 +64,7 @@ export class Mongo {
 
   static getOption(): MongoClientOptions {
     if (Mongo.option) return Mongo.option;
-    const option: any = { useUnifiedTopology: true };
+    const option: any = {};
     const env = process.env;
     const intList = [
       "poolSize",
@@ -152,6 +161,13 @@ export class Mongo {
       Mongo._useTransaction = true;
     }
     Mongo.option = option;
+    if (option["w"]) Mongo.w = option["w"];
+
+    let opt = { ...option };
+    if (opt["sslPass"]) opt["sslPass"] = "hidden";
+    if (opt["tlsCertificateKeyFilePassword"]) opt["tlsCertificateKeyFilePassword"] = "hidden";
+    const logger = Logger.getLoggerWoDB("MongoDB");
+    logger.info(LOG_MESSAGES.MONGODB_OPTION, [JSON.stringify(opt)]);
     return option;
   }
 }
