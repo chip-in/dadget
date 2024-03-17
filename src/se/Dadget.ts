@@ -176,21 +176,15 @@ export default class Dadget extends ServiceEngine {
     const seList = databases.map((database) => new DadgetTr(Dadget.getDb(node, database)));
     const seMap: { [name: string]: DadgetTr } = seList.reduce((map: any, se: DadgetTr) => { map[se.getDatabase()] = se; return map; }, {});
     const sorted = [...databases].sort();
-    let checkInterval;
     try {
       for (const db of sorted) {
         await seMap[db]._begin();
       }
-      // Time-out prevention
-      checkInterval = setInterval(() => seList.map((se) => se._check()), ATOMIC_OPERATION_MAX_LOCK_TIME / 2);
       await callback.apply(null, seList);
       seList.map((se) => se._fix());
-      clearInterval(checkInterval);
-      checkInterval = undefined;
       await Promise.all(seList.map((se) => se._check()));
       await Promise.all(seList.map((se) => se._commit()));
     } catch (err) {
-      if (checkInterval) { clearInterval(checkInterval); }
       await Promise.all(seList.map((se) => se._rollback()));
       throw err;
     }
@@ -859,6 +853,7 @@ class DadgetTr {
   private dadget: Dadget;
   private atomicId?: string;
   private fixFlag = false;
+  private checkInterval?: any;
 
   constructor(dadget: Dadget) {
     this.orgDadget = dadget;
@@ -881,17 +876,24 @@ class DadgetTr {
   _begin(): Promise<void> {
     if (this.atomicId) { return Promise.reject("transaction is running"); }
     this.atomicId = Dadget.uuidGen();
-    return this.dadget._exec(0, { type: TransactionType.BEGIN, target: "" }, this.atomicId).then(() => { });
+    return this.dadget._exec(0, { type: TransactionType.BEGIN, target: "" }, this.atomicId).then(() => {
+      // Time-out prevention
+      this._check();
+      this.checkInterval = setInterval(() => this._check(), ATOMIC_OPERATION_MAX_LOCK_TIME / 2);
+    });
   }
 
   _commit(): Promise<void> {
     if (this.atomicId === undefined) { return Promise.reject(new DadgetError(ERROR.E2107)); }
+    clearInterval(this.checkInterval);
+    this.checkInterval = undefined;
     return this.dadget._exec(0, { type: TransactionType.END, target: "" }, this.atomicId).then(() => {
       this.orgDadget._afterCommit(this.dadget);
     });
   }
 
   _rollback(): Promise<void> {
+    if (this.checkInterval) { clearInterval(this.checkInterval); }
     if (this.atomicId === undefined) { return Promise.resolve(); }
     return this.dadget._exec(0, { type: TransactionType.ABORT, target: "" }, this.atomicId).then(() => { });
   }

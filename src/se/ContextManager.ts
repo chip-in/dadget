@@ -24,7 +24,8 @@ const KEEP_TIME_AFTER_SENDING_ROLLBACK_MS = 1000; // 1000ms
 const CHECK_POINT_CHECK_PERIOD_MS = 10 * 60 * 1000;  // 10 minutes
 const CHECK_POINT_DELETE_PERIOD_MS = 72 * 60 * 60 * 1000; // 72 hours
 const MAX_RESPONSE_SIZE_OF_JOURNALS = 10485760;
-export const ATOMIC_OPERATION_MAX_LOCK_TIME = 10 * 60 * 1000;  // 10 minutes
+const ATOMIC_OPERATION_FIRST_LOCK_TIME = 20 * 1000;  // 20 sec
+export const ATOMIC_OPERATION_MAX_LOCK_TIME = 60 * 1000;  // 1 minutes
 const MASTER_LOCK = "master";
 const TRANSACTION_LOCK = "transaction";
 const PUBLISH_LOCK = "publish";
@@ -329,7 +330,7 @@ class ContextManagementServer extends Proxy {
 
     if (request.type === TransactionType.CHECK) {
       if (this.atomicLockId === atomicId) {
-        this.setTransactionTimeout();
+        this.setTransactionTimeout(false);
         return Promise.resolve({
           status: "OK",
         });
@@ -685,7 +686,7 @@ class ContextManagementServer extends Proxy {
     return { transaction, newCsn, updateObject };
   }
 
-  private setTransactionTimeout() {
+  private setTransactionTimeout(first: boolean) {
     if (this.atomicTimer) { clearTimeout(this.atomicTimer); }
     this.atomicTimer = setTimeout(() => {
       this.atomicTimer = undefined;
@@ -695,7 +696,7 @@ class ContextManagementServer extends Proxy {
         .catch(err => {
           this.logger.error(LOG_MESSAGES.ERROR_MSG, [err.toString()], [109]);
         });
-    }, ATOMIC_OPERATION_MAX_LOCK_TIME);
+    }, first ? ATOMIC_OPERATION_FIRST_LOCK_TIME : ATOMIC_OPERATION_MAX_LOCK_TIME);
   }
 
   private clearTransactionTimeout() {
@@ -708,7 +709,7 @@ class ContextManagementServer extends Proxy {
       if (this.atomicLockId !== atomicId) {
         throw new DadgetError(ERROR.E2007);
       } else {
-        this.setTransactionTimeout();
+        this.setTransactionTimeout(false);
       }
     }
 
@@ -723,7 +724,7 @@ class ContextManagementServer extends Proxy {
       this.atomicLockId = atomicId;
       this.context.committedCsn = undefined;
       delete transaction.committedCsn;
-      this.setTransactionTimeout();
+      this.setTransactionTimeout(true);
     } else if (atomicId && this.atomicLockId !== atomicId) {
       throw new DadgetError(ERROR.E2010);
     }
