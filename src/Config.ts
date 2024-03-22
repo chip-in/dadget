@@ -29,7 +29,7 @@ export class Mongo {
     } else {
       Mongo.url = [newUrl, url.groups.db];
     }
-    const urlObj = new URL(Mongo.url[0]);
+    const urlObj = new URL("http://localhost/" + (url.groups.query || ""));
     if (urlObj.searchParams.has("w")) {
       Mongo.w = urlObj.searchParams.get("w");
     }
