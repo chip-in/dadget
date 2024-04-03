@@ -171,13 +171,28 @@ export class PersistentDb implements IDb {
       .catch((error) => PersistentDb.errorExit(error, 6));
   }
 
-  find(query: object, sort?: object, limit?: number, offset?: number, projection?: object, session?: ClientSession): Promise<any[]> {
+  async find(query: object, sort?: object, limit?: number, offset?: number, projection?: object, session?: ClientSession, softLimit?: number): Promise<any[]> {
     let cursor = this.db.collection(this.collection).find(PersistentDb.convertQuery(query), { allowDiskUse: true, projection, session })
     if (sort) { cursor = cursor.sort(sort as any); }
     if (offset) { cursor = cursor.skip(offset); }
     if (limit) { cursor = cursor.limit(limit); }
-    return cursor.toArray()
-      .catch((error) => PersistentDb.errorExit(error, 7));
+    let list = [];
+    try {
+      while (await cursor.hasNext()) {
+        const obj = await cursor.next();
+        if (!obj) {
+          continue;
+        }
+        if (softLimit && list.length > softLimit) {
+          list.push({ _id: obj._id });
+        } else {
+          list.push(obj);
+        }
+      }
+    } catch (error) {
+      PersistentDb.errorExit(error, 7);
+    }
+    return list;
   }
 
   count(query: object): Promise<number> {
