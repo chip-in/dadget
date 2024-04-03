@@ -1,4 +1,4 @@
-import { ClientSession, Db, MongoClient, TransactionOptions } from "mongodb";
+import { ClientSession, Db, MongoClient } from "mongodb";
 import { Mongo, SPLIT_IN_ONE_DB } from "../../Config";
 import { IDb } from "./IDb";
 import { Logger } from "../../util/Logger";
@@ -105,11 +105,7 @@ export class PersistentDb implements IDb {
       const time = Date.now();
       let client = await PersistentDb.getConnection();
       const session = client.startSession();
-      const option: TransactionOptions = {};
-      if (Mongo.w) {
-        option.writeConcern = { w: Mongo.w };
-      }
-      session.startTransaction(option);
+      session.startTransaction();
       if (Date.now() - time > 100) this.logger.info(LOG_MESSAGES.MONGODB_LOG, ["startTransaction"], [Date.now() - time]);
       return session;
     } catch (error) {

@@ -69,8 +69,6 @@ export const LOG_MESSAGES = {
   ON_RECEIVE_GET_LATEST_CSN: { code: 68, msg: "/getLatestCsn" },
   PROCEED_TRANSACTION: { code: 69, msg: "proceedTransaction, csn: %d1" },
   QUEUE_WAITING: { code: 70, msg: "queue waiting" },
-  MONGODB_URL: { code: 71, msg: "MONGODB_URL: %1" },
-  MONGODB_OPTION: { code: 72, msg: "MONGODB_OPTION: %1" },
   MONGODB_LOG: { code: 73, msg: "MONGODB: %1, %d1" },
 };
 
