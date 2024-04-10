@@ -157,21 +157,37 @@ export class PersistentDb implements IDb {
   }
 
   findOne(query: object, session?: ClientSession): Promise<object | null> {
+    const time = Date.now();
     return this.db.collection(this.collection).findOne(PersistentDb.convertQuery(query), { session })
+      .then((result) => {
+        if (Date.now() - time > 100) this.logger.info(LOG_MESSAGES.MONGODB_LOG, ["findOne"], [Date.now() - time]);
+        return result;
+      })
       .catch((error) => PersistentDb.errorExit(error, 4));
   }
 
   findByRange(field: string, from: any, to: any, dir: number, projection?: object, session?: ClientSession): Promise<any[]> {
+    const time = Date.now();
     return this.find({ $and: [{ [field]: { $gte: from } }, { [field]: { $lte: to } }] }, { [field]: dir }, undefined, undefined, projection, session)
+      .then((result) => {
+        if (Date.now() - time > 100) this.logger.info(LOG_MESSAGES.MONGODB_LOG, ["findByRange"], [Date.now() - time]);
+        return result;
+      })
       .catch((error) => PersistentDb.errorExit(error, 5));
   }
 
   findOneBySort(query: object, sort: object): Promise<any> {
+    const time = Date.now();
     return this.db.collection(this.collection).find(PersistentDb.convertQuery(query)).sort(sort as any).limit(1).next()
+      .then((result) => {
+        if (Date.now() - time > 100) this.logger.info(LOG_MESSAGES.MONGODB_LOG, ["findOneBySort"], [Date.now() - time]);
+        return result;
+      })
       .catch((error) => PersistentDb.errorExit(error, 6));
   }
 
   async find(query: object, sort?: object, limit?: number, offset?: number, projection?: object, session?: ClientSession, softLimit?: number): Promise<any[]> {
+    const time = Date.now();
     let cursor = this.db.collection(this.collection).find(PersistentDb.convertQuery(query), { allowDiskUse: true, projection, session })
     if (sort) { cursor = cursor.sort(sort as any); }
     if (offset) { cursor = cursor.skip(offset); }
@@ -192,11 +208,17 @@ export class PersistentDb implements IDb {
     } catch (error) {
       PersistentDb.errorExit(error, 7);
     }
+    if (Date.now() - time > 100) this.logger.info(LOG_MESSAGES.MONGODB_LOG, ["find"], [Date.now() - time]);
     return list;
   }
 
   count(query: object): Promise<number> {
+    const time = Date.now();
     return this.db.collection(this.collection).countDocuments(PersistentDb.convertQuery(query))
+      .then((result) => {
+        if (Date.now() - time > 100) this.logger.info(LOG_MESSAGES.MONGODB_LOG, ["count"], [Date.now() - time]);
+        return result;
+      })
       .catch((error) => PersistentDb.errorExit(error, 8));
   }
 
