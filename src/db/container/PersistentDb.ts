@@ -1,4 +1,4 @@
-import { ClientSession, Db, MongoClient, TransactionOptions } from "mongodb";
+import { ClientSession, Db, MongoClient } from "mongodb";
 import { Mongo, SPLIT_IN_ONE_DB } from "../../Config";
 import { IDb } from "./IDb";
 import { Logger } from "../../util/Logger";
@@ -105,11 +105,7 @@ export class PersistentDb implements IDb {
       const time = Date.now();
       let client = await PersistentDb.getConnection();
       const session = client.startSession();
-      const option: TransactionOptions = {};
-      if (Mongo.w) {
-        option.writeConcern = { w: Mongo.w };
-      }
-      session.startTransaction(option);
+      session.startTransaction();
       if (Date.now() - time > 100) this.logger.info(LOG_MESSAGES.MONGODB_LOG, ["startTransaction"], [Date.now() - time]);
       return session;
     } catch (error) {
@@ -161,31 +157,68 @@ export class PersistentDb implements IDb {
   }
 
   findOne(query: object, session?: ClientSession): Promise<object | null> {
+    const time = Date.now();
     return this.db.collection(this.collection).findOne(PersistentDb.convertQuery(query), { session })
+      .then((result) => {
+        if (Date.now() - time > 100) this.logger.info(LOG_MESSAGES.MONGODB_LOG, ["findOne"], [Date.now() - time]);
+        return result;
+      })
       .catch((error) => PersistentDb.errorExit(error, 4));
   }
 
   findByRange(field: string, from: any, to: any, dir: number, projection?: object, session?: ClientSession): Promise<any[]> {
+    const time = Date.now();
     return this.find({ $and: [{ [field]: { $gte: from } }, { [field]: { $lte: to } }] }, { [field]: dir }, undefined, undefined, projection, session)
+      .then((result) => {
+        if (Date.now() - time > 100) this.logger.info(LOG_MESSAGES.MONGODB_LOG, ["findByRange"], [Date.now() - time]);
+        return result;
+      })
       .catch((error) => PersistentDb.errorExit(error, 5));
   }
 
   findOneBySort(query: object, sort: object): Promise<any> {
+    const time = Date.now();
     return this.db.collection(this.collection).find(PersistentDb.convertQuery(query)).sort(sort as any).limit(1).next()
+      .then((result) => {
+        if (Date.now() - time > 100) this.logger.info(LOG_MESSAGES.MONGODB_LOG, ["findOneBySort"], [Date.now() - time]);
+        return result;
+      })
       .catch((error) => PersistentDb.errorExit(error, 6));
   }
 
-  find(query: object, sort?: object, limit?: number, offset?: number, projection?: object, session?: ClientSession): Promise<any[]> {
+  async find(query: object, sort?: object, limit?: number, offset?: number, projection?: object, session?: ClientSession, softLimit?: number): Promise<any[]> {
+    const time = Date.now();
     let cursor = this.db.collection(this.collection).find(PersistentDb.convertQuery(query), { allowDiskUse: true, projection, session })
     if (sort) { cursor = cursor.sort(sort as any); }
     if (offset) { cursor = cursor.skip(offset); }
     if (limit) { cursor = cursor.limit(limit); }
-    return cursor.toArray()
-      .catch((error) => PersistentDb.errorExit(error, 7));
+    let list = [];
+    try {
+      while (await cursor.hasNext()) {
+        const obj = await cursor.next();
+        if (!obj) {
+          continue;
+        }
+        if (softLimit && list.length > softLimit) {
+          list.push({ _id: obj._id });
+        } else {
+          list.push(obj);
+        }
+      }
+    } catch (error) {
+      PersistentDb.errorExit(error, 7);
+    }
+    if (Date.now() - time > 100) this.logger.info(LOG_MESSAGES.MONGODB_LOG, ["find"], [Date.now() - time]);
+    return list;
   }
 
   count(query: object): Promise<number> {
+    const time = Date.now();
     return this.db.collection(this.collection).countDocuments(PersistentDb.convertQuery(query))
+      .then((result) => {
+        if (Date.now() - time > 100) this.logger.info(LOG_MESSAGES.MONGODB_LOG, ["count"], [Date.now() - time]);
+        return result;
+      })
       .catch((error) => PersistentDb.errorExit(error, 8));
   }
 
