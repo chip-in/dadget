@@ -155,7 +155,14 @@ export default class Dadget extends ServiceEngine {
   }
 
   _afterCommit(dadget: Dadget) {
-    if (this.latestCsn < dadget.latestCsn) this.latestCsn = dadget.latestCsn;
+    if (this.latestCsn < dadget.latestCsn) this.setLatestCsn(dadget.latestCsn);
+  }
+
+  setLatestCsn(csn: number) {
+    this.logger.info(LOG_MESSAGES.DEBUG_LOG, [`setLatestCsn: ${this.latestCsn}, ${csn}`]);
+    if (csn !== undefined) {
+      this.latestCsn = csn;
+    }
   }
 
   /**
@@ -507,6 +514,7 @@ export default class Dadget extends ServiceEngine {
       if (request.before) request.before = EJSON.stringify(request.before);
     }
     const sendData = { csn, request, atomicId, options, version: CLIENT_VERSION };
+    this.logger.info(LOG_MESSAGES.DEBUG_LOG, [`exec: ${this.database}`]);
     return this.node.fetch(CORE_NODE.PATH_CONTEXT.replace(/:database\b/g, this.database) + CORE_NODE.PATH_EXEC, {
       method: "POST",
       headers: {
@@ -520,8 +528,9 @@ export default class Dadget extends ServiceEngine {
       })
       .then((_) => {
         const result = EJSON.deserialize(_);
+        this.logger.info(LOG_MESSAGES.DEBUG_LOG, [`exec result: ${this.database}, ${result.csn}`]);
         if (result.status === "OK") {
-          this.latestCsn = result.csn;
+          this.setLatestCsn(result.csn);
           return result.updateObject;
         } else if (result.reason) {
           throw DadgetError.from(result.reason);
@@ -564,6 +573,7 @@ export default class Dadget extends ServiceEngine {
       }
     }
     const sendData = { csn, requests, atomicId, options, version: CLIENT_VERSION };
+    this.logger.info(LOG_MESSAGES.DEBUG_LOG, [`execMany: ${this.database}`]);
     return this.node.fetch(CORE_NODE.PATH_CONTEXT.replace(/:database\b/g, this.database) + CORE_NODE.PATH_EXEC_MANY, {
       method: "POST",
       headers: {
@@ -577,10 +587,11 @@ export default class Dadget extends ServiceEngine {
       })
       .then((_) => {
         const result = EJSON.deserialize(_);
+        this.logger.info(LOG_MESSAGES.DEBUG_LOG, [`execMany result: ${this.database}, ${result.csn}`]);
         if (result.status === "OK") {
-          this.latestCsn = result.csn;
+          this.setLatestCsn(result.csn);
         } else if (result.reason) {
-          if (result.csn) this.latestCsn = result.csn;
+          if (result.csn) this.setLatestCsn(result.csn);
           throw DadgetError.from(result.reason);
         } else {
           throw new Error(JSON.stringify(result));
@@ -605,6 +616,7 @@ export default class Dadget extends ServiceEngine {
 
   _updateMany(query: object, operator: object, atomicId: string | undefined): Promise<number> {
     const sendData = { query, operator, atomicId, version: CLIENT_VERSION };
+    this.logger.info(LOG_MESSAGES.DEBUG_LOG, [`updateMany: ${this.database}`]);
     return this.node.fetch(CORE_NODE.PATH_CONTEXT.replace(/:database\b/g, this.database) + CORE_NODE.PATH_UPDATE_MANY, {
       method: "POST",
       headers: {
@@ -618,11 +630,12 @@ export default class Dadget extends ServiceEngine {
       })
       .then((_) => {
         const result = EJSON.deserialize(_);
+        this.logger.info(LOG_MESSAGES.DEBUG_LOG, [`updateMany result: ${this.database}, ${result.csn}`]);
         if (result.status === "OK") {
-          this.latestCsn = result.csn;
+          this.setLatestCsn(result.csn);
           return result.count;
         } else if (result.reason) {
-          if (result.csn) this.latestCsn = result.csn;
+          if (result.csn) this.setLatestCsn(result.csn);
           throw DadgetError.from(result.reason);
         } else {
           throw new Error(JSON.stringify(result));
@@ -697,7 +710,7 @@ export default class Dadget extends ServiceEngine {
     if (this.lockNotify || transaction.committedCsn !== undefined) { return; }
     if (transaction.type === TransactionType.FORCE_ROLLBACK) {
       this.notifyCsn = transaction.csn;
-      this.latestCsn = transaction.csn;
+      this.setLatestCsn(transaction.csn);
       this.notifyRollback(transaction.csn);
     } else if (transaction.csn > this.notifyCsn) {
       this.notifyCsn = transaction.csn;

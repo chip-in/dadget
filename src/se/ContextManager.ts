@@ -331,9 +331,13 @@ class ContextManagementServer extends Proxy {
     if (request.type === TransactionType.CHECK) {
       if (this.atomicLockId === atomicId) {
         this.setTransactionTimeout(false);
-        return Promise.resolve({
-          status: "OK",
-        });
+        return this.context.getSystemDb().getCsn()
+          .then((csn) => {
+            return Promise.resolve({
+              status: "OK",
+              csn,
+            });
+          });
       } else {
         return Promise.resolve({
           status: "NG",
