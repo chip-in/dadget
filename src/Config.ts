@@ -5,7 +5,7 @@ import * as path from "path";
 export const SPLIT_IN_SUBSET_DB = "--";
 export const SPLIT_IN_ONE_DB = "==";
 export const SPLIT_IN_INDEXED_DB = "__";
-export const MAX_EXPORT_NUM = 100;
+export const MAX_EXPORT_NUM = 1000;
 export const EXPORT_LIMIT_NUM = -1;
 export const MAX_STRING_LENGTH = 500 * 1024 * 1024;
 
@@ -199,6 +199,7 @@ export const CORE_NODE = {
   PATH_QUERY_OLD: "/query",
   PATH_COUNT: "/count/_get",
   PATH_COUNT_OLD: "/count",
+  PATH_WAIT: "/query/_wait",
 };
 
 export const MAX_OBJECT_SIZE = 8 * 1024 * 1024 - 2048;

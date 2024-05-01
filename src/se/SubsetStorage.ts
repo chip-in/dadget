@@ -176,11 +176,12 @@ class UpdateProcessor extends Subscriber {
     this.logger.info(LOG_MESSAGES.PROCEED_TRANSACTION, [], [to_csn]);
     this.storage.getSystemDb().getCsn()
       .then((csn) => {
-        this.fetchJournals(csn + 1, to_csn, (fetchJournal) => {
-          console.error("proceedTransaction", fetchJournal.csn);
-          this.procTransaction(fetchJournal);
-          return Promise.resolve();
-        })
+        if (to_csn > csn) {
+          this.fetchJournals(csn + 1, to_csn, (fetchJournal) => {
+            this.procTransaction(fetchJournal);
+            return Promise.resolve();
+          })
+        }
       });
   }
 
@@ -824,6 +825,10 @@ export class SubsetStorage extends ServiceEngine implements Proxy {
     return this.readyFlag;
   }
 
+  isWhole(): boolean {
+    return !this.subsetDefinition.query;
+  }
+
   pause(): void {
     this.readyFlag = false;
   }
@@ -1084,6 +1089,13 @@ export class SubsetStorage extends ServiceEngine implements Proxy {
           return { status: "OK", result };
         });
     };
+    const procWait = (request: any) => {
+      const csn = ProxyHelper.validateNumberRequired(request.csn, "csn");
+      return this.wait(csn)
+        .then((_) => {
+          return { status: "OK" };
+        });
+    };
     if (method === "OPTIONS") {
       return ProxyHelper.procOption(req, res);
     } else if (url.pathname.endsWith(CORE_NODE.PATH_QUERY) && method === "POST") {
@@ -1094,6 +1106,8 @@ export class SubsetStorage extends ServiceEngine implements Proxy {
       return ProxyHelper.procPost(req, res, this.logger, procCount);
     } else if (url.pathname.endsWith(CORE_NODE.PATH_COUNT_OLD) && method === "GET") {
       return ProxyHelper.procGet(req, res, this.logger, procCount);
+    } else if (url.pathname.endsWith(CORE_NODE.PATH_WAIT) && method === "POST") {
+      return ProxyHelper.procPost(req, res, this.logger, procWait);
     } else {
       this.logger.warn(LOG_MESSAGES.SERVER_COMMAND_NOT_FOUND, [method, url.pathname]);
       return ProxyHelper.procError(req, res);
@@ -1261,6 +1275,31 @@ export class SubsetStorage extends ServiceEngine implements Proxy {
       }).catch((e) => {
         this.logger.warn(LOG_MESSAGES.ERROR_MSG, [e.toString()], [209]);
         release();
+        return Promise.reject(e);
+      });
+  }
+
+  wait(csn: number): Promise<void> {
+    return this.getSystemDb().getCsn()
+      .then((currentCsn) => {
+        if (csn <= currentCsn) {
+          return;
+        } else {
+          this.logger.warn(LOG_MESSAGES.WAIT_FOR_TRANSACTIONS, [], [csn, currentCsn]);
+          // wait for transaction journals
+          setTimeout(() => {
+            this.updateProcessor.proceedTransaction(csn);
+          }, 5000);
+          return new Promise<void>((resolve, reject) => {
+            if (!this.queryWaitingList[csn]) { this.queryWaitingList[csn] = []; }
+            this.queryWaitingList[csn].push(() => {
+              resolve();
+              return Promise.resolve();
+            });
+          });
+        }
+      }).catch((e) => {
+        this.logger.warn(LOG_MESSAGES.ERROR_MSG, [e.toString()], [217]);
         return Promise.reject(e);
       });
   }
