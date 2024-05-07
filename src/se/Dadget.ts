@@ -345,6 +345,24 @@ export default class Dadget extends ServiceEngine {
       });
   }
 
+  public static _wait(
+    node: ResourceNode,
+    database: string,
+    csn: number): Promise<void> {
+
+    const subsetStorage = (node.searchServiceEngine("SubsetStorage", { database }) as SubsetStorage[]).find((v) => v.isWhole());
+    if (subsetStorage) {
+      return subsetStorage.wait(csn);
+    }
+
+    let queryHandlers = node.searchServiceEngine("QueryHandler", { database }) as QueryHandler[];
+    if (queryHandlers.length === 0) { throw new Error("QueryHandlers required"); }
+    queryHandlers = Dadget.sortQueryHandlers(queryHandlers);
+    const qh = queryHandlers.shift();
+    if (qh == null) { throw new Error("never happen"); }
+    return qh.wait(csn);
+  }
+
   /**
    * query メソッドはクエリルータを呼び出して、問い合わせを行い、結果オブジェクトを返す。
    *

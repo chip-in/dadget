@@ -67,7 +67,7 @@ export class CacheDb implements IDb {
     return Promise.resolve(null);
   }
 
-  find(query: object, sort?: object, limit?: number, offset?: number, projection?: object, session?: any, softLimit?: number): Promise<any[]> {
+  find(query: object, sort?: object, limit?: number, offset?: number, projection?: object, session?: any): Promise<any[]> {
     const dataList = [];
     for (const _id of Object.keys(this.data)) {
       dataList.push(this.data[_id]);

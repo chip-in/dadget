@@ -24,7 +24,6 @@ import { CLIENT_VERSION, CountResult, CsnMode, default as Dadget, QueryResult } 
 import { DatabaseRegistry, SubsetDef } from "./DatabaseRegistry";
 
 const MAX_RESPONSE_SIZE_OF_JOURNALS = 10485760;
-const QUERY_SOFT_LIMIT = 10000;
 
 class UpdateProcessor extends Subscriber {
 
@@ -176,11 +175,12 @@ class UpdateProcessor extends Subscriber {
     this.logger.info(LOG_MESSAGES.PROCEED_TRANSACTION, [], [to_csn]);
     this.storage.getSystemDb().getCsn()
       .then((csn) => {
-        this.fetchJournals(csn + 1, to_csn, (fetchJournal) => {
-          console.error("proceedTransaction", fetchJournal.csn);
-          this.procTransaction(fetchJournal);
-          return Promise.resolve();
-        })
+        if (to_csn > csn) {
+          this.fetchJournals(csn + 1, to_csn, (fetchJournal) => {
+            this.procTransaction(fetchJournal);
+            return Promise.resolve();
+          })
+        }
       });
   }
 
@@ -824,6 +824,10 @@ export class SubsetStorage extends ServiceEngine implements Proxy {
     return this.readyFlag;
   }
 
+  isWhole(): boolean {
+    return !this.subsetDefinition.query;
+  }
+
   pause(): void {
     this.readyFlag = false;
   }
@@ -1040,20 +1044,11 @@ export class SubsetStorage extends ServiceEngine implements Proxy {
       const offset = ProxyHelper.validateNumber(request.offset, "offset");
       const projection = request.projection ? EJSON.parse(request.projection) : undefined;
       if (request.version && Number(request.version) > CLIENT_VERSION) throw new DadgetError(ERROR.E3002);
-      const softLimit = (limit && limit < 0) ? undefined : QUERY_SOFT_LIMIT;
-      return this.query(csn, query, sort, limit, request.csnMode, projection, offset, softLimit)
+      return this.query(csn, query, sort, limit, request.csnMode, projection, offset)
         .then((result) => {
           let total = 0;
           let count = 0;
-          const length = result.resultSet.length;
-          if (softLimit && length >= softLimit) {
-            let ids: any[] = [];
-            for (const obj of result.resultSet) {
-              ids.push({ _id: (obj as any)._id });
-            }
-            result.resultSet = ids;
-            return { status: "HUGE", result };
-          }
+          let length = result.resultSet.length;
           for (const obj of result.resultSet) {
             total += EJSON.stringify(obj).length + 1;
             count += 1;
@@ -1084,6 +1079,13 @@ export class SubsetStorage extends ServiceEngine implements Proxy {
           return { status: "OK", result };
         });
     };
+    const procWait = (request: any) => {
+      const csn = ProxyHelper.validateNumberRequired(request.csn, "csn");
+      return this.wait(csn)
+        .then((_) => {
+          return { status: "OK" };
+        });
+    };
     if (method === "OPTIONS") {
       return ProxyHelper.procOption(req, res);
     } else if (url.pathname.endsWith(CORE_NODE.PATH_QUERY) && method === "POST") {
@@ -1094,6 +1096,8 @@ export class SubsetStorage extends ServiceEngine implements Proxy {
       return ProxyHelper.procPost(req, res, this.logger, procCount);
     } else if (url.pathname.endsWith(CORE_NODE.PATH_COUNT_OLD) && method === "GET") {
       return ProxyHelper.procGet(req, res, this.logger, procCount);
+    } else if (url.pathname.endsWith(CORE_NODE.PATH_WAIT) && method === "POST") {
+      return ProxyHelper.procPost(req, res, this.logger, procWait);
     } else {
       this.logger.warn(LOG_MESSAGES.SERVER_COMMAND_NOT_FOUND, [method, url.pathname]);
       return ProxyHelper.procError(req, res);
@@ -1179,7 +1183,7 @@ export class SubsetStorage extends ServiceEngine implements Proxy {
       });
   }
 
-  query(csn: number, query: object, sort?: object, limit?: number, csnMode?: CsnMode, projection?: object, offset?: number, softLimit?: number): Promise<QueryResult> {
+  query(csn: number, query: object, sort?: object, limit?: number, csnMode?: CsnMode, projection?: object, offset?: number): Promise<QueryResult> {
     if (!this.readyFlag) {
       return Promise.resolve({ csn, resultSet: [], restQuery: query, csnMode });
     }
@@ -1215,7 +1219,7 @@ export class SubsetStorage extends ServiceEngine implements Proxy {
           csn = Math.max(csn, this.committedCsn || currentCsn);
         }
         if (csn === currentCsn) {
-          return this.getSubsetDb().find(innerQuery, sort, limit, projection, offset, softLimit)
+          return this.getSubsetDb().find(innerQuery, sort, limit, projection, offset)
             .then((result) => {
               release();
               return { csn: currentCsn, resultSet: result, restQuery };
@@ -1235,7 +1239,7 @@ export class SubsetStorage extends ServiceEngine implements Proxy {
               const _offset = offset ? offset : 0;
               const maxLimit = limit ? limit + _offset : undefined;
               const possibleLimit = maxLimit ? maxLimit + transactions.length : undefined;
-              return this.getSubsetDb().find(innerQuery, sort, possibleLimit, undefined, undefined, softLimit)
+              return this.getSubsetDb().find(innerQuery, sort, possibleLimit)
                 .then((result) => {
                   release();
                   const resultSet = SubsetStorage.rollbackAndFind(result, transactions, innerQuery, sort, limit, offset)
@@ -1250,7 +1254,7 @@ export class SubsetStorage extends ServiceEngine implements Proxy {
           return new Promise<QueryResult>((resolve, reject) => {
             if (!this.queryWaitingList[csn]) { this.queryWaitingList[csn] = []; }
             this.queryWaitingList[csn].push(() => {
-              return this.getSubsetDb().find(innerQuery, sort, limit, projection, offset, softLimit)
+              return this.getSubsetDb().find(innerQuery, sort, limit, projection, offset)
                 .then((result) => {
                   resolve({ csn, resultSet: result, restQuery });
                 }).catch((reason) => reject(reason));
@@ -1261,6 +1265,31 @@ export class SubsetStorage extends ServiceEngine implements Proxy {
       }).catch((e) => {
         this.logger.warn(LOG_MESSAGES.ERROR_MSG, [e.toString()], [209]);
         release();
+        return Promise.reject(e);
+      });
+  }
+
+  wait(csn: number): Promise<void> {
+    return this.getSystemDb().getCsn()
+      .then((currentCsn) => {
+        if (csn <= currentCsn) {
+          return;
+        } else {
+          this.logger.warn(LOG_MESSAGES.WAIT_FOR_TRANSACTIONS, [], [csn, currentCsn]);
+          // wait for transaction journals
+          setTimeout(() => {
+            this.updateProcessor.proceedTransaction(csn);
+          }, 5000);
+          return new Promise<void>((resolve, reject) => {
+            if (!this.queryWaitingList[csn]) { this.queryWaitingList[csn] = []; }
+            this.queryWaitingList[csn].push(() => {
+              resolve();
+              return Promise.resolve();
+            });
+          });
+        }
+      }).catch((e) => {
+        this.logger.warn(LOG_MESSAGES.ERROR_MSG, [e.toString()], [217]);
         return Promise.reject(e);
       });
   }

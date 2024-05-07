@@ -171,7 +171,6 @@ export class QueryHandler extends ServiceEngine {
       });
   }
 
-
   count(csn: number, query: object, csnMode?: CsnMode): Promise<CountResult> {
     this.logger.info(LOG_MESSAGES.COUNT_CSN, [csnMode || ""], [csn]);
     this.logger.info(LOG_MESSAGES.COUNT, [JSON.stringify(query)]);
@@ -199,6 +198,34 @@ export class QueryHandler extends ServiceEngine {
       .catch((reason) => {
         this.logger.warn(LOG_MESSAGES.COUNT_ERROR, [reason.toString(), EJSON.stringify(request)]);
         return { csn, resultCount: 0, restQuery: query, csnMode };
+      });
+  }
+
+  wait(csn: number): Promise<void> {
+    const request = { csn };
+    return this.node.fetch(CORE_NODE.PATH_SUBSET
+      .replace(/:database\b/g, this.database)
+      .replace(/:subset\b/g, this.subsetName) + CORE_NODE.PATH_WAIT, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+      },
+      body: EJSON.stringify(request),
+    })
+      .then((result) => {
+        if (typeof result.ok !== "undefined" && !result.ok) { throw Error("fetch error:" + result.statusText); }
+        this.logger.info(LOG_MESSAGES.DEBUG_LOG, ["subset waited"]);
+        return result.json();
+      })
+      .then((_) => {
+        const data = EJSON.deserialize(_);
+        if (data.status === "NG") { throw Error(JSON.stringify(data.reason)); }
+        if (data.status === "OK") return;
+        throw new Error("fetch error:" + JSON.stringify(data));
+      })
+      .catch((reason) => {
+        this.logger.warn(LOG_MESSAGES.ERROR_MSG, [reason.toString()], [400]);
+        return;
       });
   }
 }
