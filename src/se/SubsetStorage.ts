@@ -24,7 +24,6 @@ import { CLIENT_VERSION, CountResult, CsnMode, default as Dadget, QueryResult } 
 import { DatabaseRegistry, SubsetDef } from "./DatabaseRegistry";
 
 const MAX_RESPONSE_SIZE_OF_JOURNALS = 10485760;
-const QUERY_SOFT_LIMIT = 10000;
 
 class UpdateProcessor extends Subscriber {
 
@@ -1045,20 +1044,11 @@ export class SubsetStorage extends ServiceEngine implements Proxy {
       const offset = ProxyHelper.validateNumber(request.offset, "offset");
       const projection = request.projection ? EJSON.parse(request.projection) : undefined;
       if (request.version && Number(request.version) > CLIENT_VERSION) throw new DadgetError(ERROR.E3002);
-      const softLimit = (limit && limit < 0) ? undefined : QUERY_SOFT_LIMIT;
-      return this.query(csn, query, sort, limit, request.csnMode, projection, offset, softLimit)
+      return this.query(csn, query, sort, limit, request.csnMode, projection, offset)
         .then((result) => {
           let total = 0;
           let count = 0;
-          const length = result.resultSet.length;
-          if (softLimit && length >= softLimit) {
-            let ids: any[] = [];
-            for (const obj of result.resultSet) {
-              ids.push({ _id: (obj as any)._id });
-            }
-            result.resultSet = ids;
-            return { status: "HUGE", result };
-          }
+          let length = result.resultSet.length;
           for (const obj of result.resultSet) {
             total += EJSON.stringify(obj).length + 1;
             count += 1;
@@ -1193,7 +1183,7 @@ export class SubsetStorage extends ServiceEngine implements Proxy {
       });
   }
 
-  query(csn: number, query: object, sort?: object, limit?: number, csnMode?: CsnMode, projection?: object, offset?: number, softLimit?: number): Promise<QueryResult> {
+  query(csn: number, query: object, sort?: object, limit?: number, csnMode?: CsnMode, projection?: object, offset?: number): Promise<QueryResult> {
     if (!this.readyFlag) {
       return Promise.resolve({ csn, resultSet: [], restQuery: query, csnMode });
     }
@@ -1229,7 +1219,7 @@ export class SubsetStorage extends ServiceEngine implements Proxy {
           csn = Math.max(csn, this.committedCsn || currentCsn);
         }
         if (csn === currentCsn) {
-          return this.getSubsetDb().find(innerQuery, sort, limit, projection, offset, softLimit)
+          return this.getSubsetDb().find(innerQuery, sort, limit, projection, offset)
             .then((result) => {
               release();
               return { csn: currentCsn, resultSet: result, restQuery };
@@ -1249,7 +1239,7 @@ export class SubsetStorage extends ServiceEngine implements Proxy {
               const _offset = offset ? offset : 0;
               const maxLimit = limit ? limit + _offset : undefined;
               const possibleLimit = maxLimit ? maxLimit + transactions.length : undefined;
-              return this.getSubsetDb().find(innerQuery, sort, possibleLimit, undefined, undefined, softLimit)
+              return this.getSubsetDb().find(innerQuery, sort, possibleLimit)
                 .then((result) => {
                   release();
                   const resultSet = SubsetStorage.rollbackAndFind(result, transactions, innerQuery, sort, limit, offset)
@@ -1264,7 +1254,7 @@ export class SubsetStorage extends ServiceEngine implements Proxy {
           return new Promise<QueryResult>((resolve, reject) => {
             if (!this.queryWaitingList[csn]) { this.queryWaitingList[csn] = []; }
             this.queryWaitingList[csn].push(() => {
-              return this.getSubsetDb().find(innerQuery, sort, limit, projection, offset, softLimit)
+              return this.getSubsetDb().find(innerQuery, sort, limit, projection, offset)
                 .then((result) => {
                   resolve({ csn, resultSet: result, restQuery });
                 }).catch((reason) => reject(reason));

@@ -186,7 +186,7 @@ export class PersistentDb implements IDb {
       .catch((error) => PersistentDb.errorExit(error, 6));
   }
 
-  async find(query: object, sort?: object, limit?: number, offset?: number, projection?: object, session?: ClientSession, softLimit?: number): Promise<any[]> {
+  async find(query: object, sort?: object, limit?: number, offset?: number, projection?: object, session?: ClientSession): Promise<any[]> {
     const time = Date.now();
     let cursor = this.db.collection(this.collection).find(PersistentDb.convertQuery(query), { allowDiskUse: true, projection, session })
     if (sort) { cursor = cursor.sort(sort as any); }
@@ -199,11 +199,7 @@ export class PersistentDb implements IDb {
         if (!obj) {
           continue;
         }
-        if (softLimit && list.length > softLimit) {
-          list.push({ _id: obj._id });
-        } else {
-          list.push(obj);
-        }
+        list.push(obj);
       }
     } catch (error) {
       PersistentDb.errorExit(error, 7);
