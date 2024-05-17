@@ -95,8 +95,8 @@ export class Util {
         if (typeof fetchResult.ok !== "undefined" && !fetchResult.ok) { throw Error(fetchResult.statusText); }
         return fetchResult.json();
       })
-      .then((_) => {
-        const result = EJSON.deserialize(_);
+      .then(EJSON.asyncDeserialize)
+      .then((result) => {
         console.log("fetchJournal: ", csn);
         if (result.status === "OK") {
           return result.journal as TransactionObject;

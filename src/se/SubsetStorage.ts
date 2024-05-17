@@ -1050,7 +1050,7 @@ export class SubsetStorage extends ServiceEngine implements Proxy {
           let count = 0;
           let length = result.resultSet.length;
           for (const obj of result.resultSet) {
-            total += EJSON.stringify(obj).length + 1;
+            total += JSON.stringify(obj).length + 1;
             count += 1;
             if (limit === EXPORT_LIMIT_NUM) {
               if (total > MAX_STRING_LENGTH) {

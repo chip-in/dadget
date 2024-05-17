@@ -30,8 +30,8 @@
     "browser-test": "cd browser-test && browserify src/indexeddb-test.js -o dest/test.js && cp src/index.html dest/ && http-server dest -c-1"
   },
   "dependencies": {
-    "@chip-in/logger": "*",
-    "@chip-in/resource-node": "*",
+    "@chip-in/logger": "^0.1.0",
+    "@chip-in/resource-node": "^0.1.0",
     "async-lock": "^1.3.0",
     "babel-plugin-transform-remove-console": "^6.9.4",
     "bson": "^4.2.0",

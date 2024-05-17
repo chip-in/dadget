@@ -121,8 +121,8 @@ export class QueryHandler extends ServiceEngine {
         if (typeof result.ok !== "undefined" && !result.ok) { throw Error("fetch error:" + result.statusText); }
         return result.json();
       })
-      .then((_) => {
-        const data = EJSON.deserialize(_);
+      .then(EJSON.asyncDeserialize)
+      .then((data) => {
         this.logger.info(LOG_MESSAGES.DEBUG_LOG, [`query result: ${data.status}, ${data.result?.csn}, ${data.result?.restQuery}`]);
         if (data.status === "NG") { throw Error(JSON.stringify(data.reason)); }
         if (data.status === "HUGE") { return this._handle_huge_response(data.result, projection); }
@@ -188,8 +188,8 @@ export class QueryHandler extends ServiceEngine {
         if (typeof result.ok !== "undefined" && !result.ok) { throw Error("fetch error:" + result.statusText); }
         return result.json();
       })
-      .then((_) => {
-        const data = EJSON.deserialize(_);
+      .then(EJSON.asyncDeserialize)
+      .then((data) => {
         this.logger.info(LOG_MESSAGES.DEBUG_LOG, [`count result: ${data.status}, ${data.result?.csn}, ${data.result?.restQuery}`]);
         if (data.status === "NG") { throw Error(JSON.stringify(data.reason)); }
         if (data.status === "OK") { return data.result; }
@@ -217,8 +217,8 @@ export class QueryHandler extends ServiceEngine {
         this.logger.info(LOG_MESSAGES.DEBUG_LOG, ["subset waited"]);
         return result.json();
       })
-      .then((_) => {
-        const data = EJSON.deserialize(_);
+      .then(EJSON.asyncDeserialize)
+      .then((data) => {
         if (data.status === "NG") { throw Error(JSON.stringify(data.reason)); }
         if (data.status === "OK") return;
         throw new Error("fetch error:" + JSON.stringify(data));

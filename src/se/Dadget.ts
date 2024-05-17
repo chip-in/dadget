@@ -544,8 +544,8 @@ export default class Dadget extends ServiceEngine {
         if (typeof fetchResult.ok !== "undefined" && !fetchResult.ok) { throw Error(fetchResult.statusText); }
         return fetchResult.json();
       })
-      .then((_) => {
-        const result = EJSON.deserialize(_);
+      .then(EJSON.asyncDeserialize)
+      .then((result) => {
         this.logger.info(LOG_MESSAGES.DEBUG_LOG, [`exec result: ${this.database}, ${result.csn}`]);
         if (result.status === "OK") {
           this.setLatestCsn(result.csn);
@@ -603,8 +603,8 @@ export default class Dadget extends ServiceEngine {
         if (typeof fetchResult.ok !== "undefined" && !fetchResult.ok) { throw Error(fetchResult.statusText); }
         return fetchResult.json();
       })
-      .then((_) => {
-        const result = EJSON.deserialize(_);
+      .then(EJSON.asyncDeserialize)
+      .then((result) => {
         this.logger.info(LOG_MESSAGES.DEBUG_LOG, [`execMany result: ${this.database}, ${result.csn}`]);
         if (result.status === "OK") {
           this.setLatestCsn(result.csn);
@@ -646,8 +646,8 @@ export default class Dadget extends ServiceEngine {
         if (typeof fetchResult.ok !== "undefined" && !fetchResult.ok) { throw Error(fetchResult.statusText); }
         return fetchResult.json();
       })
-      .then((_) => {
-        const result = EJSON.deserialize(_);
+      .then(EJSON.asyncDeserialize)
+      .then((result) => {
         this.logger.info(LOG_MESSAGES.DEBUG_LOG, [`updateMany result: ${this.database}, ${result.csn}`]);
         if (result.status === "OK") {
           this.setLatestCsn(result.csn);
@@ -823,8 +823,8 @@ export default class Dadget extends ServiceEngine {
         if (typeof fetchResult.ok !== "undefined" && !fetchResult.ok) { throw Error(fetchResult.statusText); }
         return fetchResult.json();
       })
-      .then((_) => {
-        const result = EJSON.deserialize(_);
+      .then(EJSON.asyncDeserialize)
+      .then((result) => {
         if (result.status === "OK") {
           return result.list;
         } else {
@@ -853,8 +853,8 @@ export default class Dadget extends ServiceEngine {
         if (typeof fetchResult.ok !== "undefined" && !fetchResult.ok) { throw Error(fetchResult.statusText); }
         return fetchResult.json();
       })
-      .then((_) => {
-        const result = EJSON.deserialize(_);
+      .then(EJSON.asyncDeserialize)
+      .then((result) => {
         if (result.status === "OK") {
           return result.csn;
         } else {
