@@ -8,6 +8,7 @@ import { DadgetError } from "../util/DadgetError";
 import { Logger } from "../util/Logger";
 import { default as Dadget } from "./Dadget";
 import { ContextManager } from "./ContextManager";
+import { SubsetStorage } from "./SubsetStorage";
 
 /**
  * ユニーク制約キャッシュSEコンフィグレーションパラメータ
@@ -405,10 +406,16 @@ export class UniqueCache extends ServiceEngine {
     this.pause();
     const query = {};
     const projection = { _id: 1 } as any;
-    for (let field of this.field.split(',')) {
+    for (const field of this.field.split(',')) {
       projection[field] = 1;
     }
-    return Dadget._query(this.getNode(), this.database, query, undefined, undefined, undefined, csn, "strict", projection)
+    const database = this.database;
+    const subsetStorage = (this.getNode().searchServiceEngine("SubsetStorage", { database }) as SubsetStorage[]).find((v) => v.isWhole());
+    let promise = subsetStorage ?
+      subsetStorage.query(csn, query, undefined, undefined, "strict", projection) :
+      Dadget._query(this.getNode(), database, query, undefined, undefined, undefined, csn, "strict", projection);
+
+    return promise
       .then((result) => {
         if (result.restQuery) { throw new Error("The queryHandlers has been empty before completing queries."); }
         return this._deleteAll().then(() => result);

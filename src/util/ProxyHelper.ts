@@ -26,9 +26,10 @@ export class ProxyHelper {
     if (!req.url) { throw new Error("no url"); }
     const url = URL.parse(req.url, true);
     const promise = Promise.resolve(proc(url.query))
+      .then(EJSON.asyncStringify)
       .then((result) => {
         res.writeHead(200, head);
-        res.write(EJSON.stringify(result));
+        res.write(result);
         res.end();
         return res;
       })
@@ -71,11 +72,12 @@ export class ProxyHelper {
         reject(error);
       });
     })
-      .then(EJSON.parse)
+      .then(EJSON.asyncParse)
       .then(proc)
+      .then(EJSON.asyncStringify)
       .then((result) => {
         res.writeHead(200, head);
-        res.write(EJSON.stringify(result));
+        res.write(result);
         res.end();
         return res;
       })

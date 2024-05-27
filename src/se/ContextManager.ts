@@ -216,6 +216,7 @@ class ContextManagementServer extends Proxy {
         this.logger.info(LOG_MESSAGES.ON_RECEIVE_EXEC, [], [csn]);
         if (data.version && Number(data.version) > CLIENT_VERSION) throw new DadgetError(ERROR.E3002);
         return this.exec(csn, data.request, data.atomicId, data.options)
+          .then((result) => this.context._waitSubsetStorage(result))
           .catch((reason) => ({ status: "NG", reason }));
       })
         .then((result) => {
@@ -228,6 +229,7 @@ class ContextManagementServer extends Proxy {
         this.logger.info(LOG_MESSAGES.ON_RECEIVE_EXEC_MANY, [], [csn]);
         if (data.version && Number(data.version) > CLIENT_VERSION) throw new DadgetError(ERROR.E3002);
         return this.execMany(csn, data.requests, data.atomicId, data.options)
+          .then((result) => this.context._waitSubsetStorage(result))
           .catch((reason) => ({ status: "NG", reason }));
       })
         .then((result) => {
@@ -239,6 +241,7 @@ class ContextManagementServer extends Proxy {
         this.logger.info(LOG_MESSAGES.ON_RECEIVE_UPDATE_MANY, [JSON.stringify(data.query), JSON.stringify(data.operator)], []);
         if (data.version && Number(data.version) > CLIENT_VERSION) throw new DadgetError(ERROR.E3002);
         return this.updateMany(data.query, data.operator, data.atomicId)
+          .then((result) => this.context._waitSubsetStorage(result))
           .catch((reason) => ({ status: "NG", reason }));
       })
         .then((result) => {
@@ -305,7 +308,7 @@ class ContextManagementServer extends Proxy {
     } else if (url.pathname.endsWith(CORE_NODE.PATH_GET_LATEST_CSN) && method === "POST") {
       return ProxyHelper.procPost(req, res, this.logger, (_data) => {
         this.logger.info(LOG_MESSAGES.ON_RECEIVE_GET_LATEST_CSN);
-        return this.getCommitedCsn()
+        return this.getCommittedCsn()
           .then((csn) => ({ status: "OK", csn }))
           .catch((reason) => ({ status: "NG", reason }));
       })
@@ -331,9 +334,13 @@ class ContextManagementServer extends Proxy {
     if (request.type === TransactionType.CHECK) {
       if (this.atomicLockId === atomicId) {
         this.setTransactionTimeout(false);
-        return Promise.resolve({
-          status: "OK",
-        });
+        return this.context.getSystemDb().getCsn()
+          .then((csn) => {
+            return Promise.resolve({
+              status: "OK",
+              csn,
+            });
+          });
       } else {
         return Promise.resolve({
           status: "NG",
@@ -937,7 +944,7 @@ class ContextManagementServer extends Proxy {
     }
   }
 
-  async getCommitedCsn(): Promise<number> {
+  async getCommittedCsn(): Promise<number> {
     let csn = await this.context.getSystemDb().getCsn();
     if (csn == 0) return 0;
     let journal = await this.context.getJournalDb().findByCsn(csn);
@@ -1330,6 +1337,12 @@ export class ContextManager extends ServiceEngine {
     for (const se of seList) {
       se.resetData(csn, true);
     }
+  }
+  _waitSubsetStorage(result: any): Promise<any> {
+    if (result.csn) {
+      return Dadget._wait(this.getNode(), this.database, result.csn).then(() => result)
+    }
+    return Promise.resolve(result);
   }
 }
 

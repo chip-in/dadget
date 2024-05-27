@@ -70,6 +70,7 @@ export const LOG_MESSAGES = {
   PROCEED_TRANSACTION: { code: 69, msg: "proceedTransaction, csn: %d1" },
   QUEUE_WAITING: { code: 70, msg: "queue waiting" },
   MONGODB_LOG: { code: 73, msg: "MONGODB: %1, %d1" },
+  DEBUG_LOG: { code: 9999, msg: "dadget info: %1" },
 };
 
 Logger.checkLogType(LOG_MESSAGES);

@@ -97,7 +97,7 @@ export class QueryHandler extends ServiceEngine {
 
   query(csn: number, query: object, sort?: object, limit?: number, csnMode?: CsnMode, projection?: object, offset?: number): Promise<QueryResult> {
     this.logger.info(LOG_MESSAGES.QUERY_CSN, [csnMode || ""], [csn]);
-    this.logger.debug(LOG_MESSAGES.QUERY, [JSON.stringify(query)]);
+    this.logger.info(LOG_MESSAGES.QUERY, [JSON.stringify(query)]);
     const request = {
       csn,
       query: EJSON.stringify(query),
@@ -121,8 +121,9 @@ export class QueryHandler extends ServiceEngine {
         if (typeof result.ok !== "undefined" && !result.ok) { throw Error("fetch error:" + result.statusText); }
         return result.json();
       })
-      .then((_) => {
-        const data = EJSON.deserialize(_);
+      .then(EJSON.asyncDeserialize)
+      .then((data) => {
+        this.logger.info(LOG_MESSAGES.DEBUG_LOG, [`query result: ${data.status}, ${data.result?.csn}, ${data.result?.restQuery}`]);
         if (data.status === "NG") { throw Error(JSON.stringify(data.reason)); }
         if (data.status === "HUGE") { return this._handle_huge_response(data.result, projection); }
         if (data.status === "OK") { return data.result; }
@@ -170,10 +171,9 @@ export class QueryHandler extends ServiceEngine {
       });
   }
 
-
   count(csn: number, query: object, csnMode?: CsnMode): Promise<CountResult> {
     this.logger.info(LOG_MESSAGES.COUNT_CSN, [csnMode || ""], [csn]);
-    this.logger.debug(LOG_MESSAGES.COUNT, [JSON.stringify(query)]);
+    this.logger.info(LOG_MESSAGES.COUNT, [JSON.stringify(query)]);
     const request = { csn, query: EJSON.stringify(query), csnMode, version: CLIENT_VERSION };
     return this.node.fetch(CORE_NODE.PATH_SUBSET
       .replace(/:database\b/g, this.database)
@@ -188,8 +188,9 @@ export class QueryHandler extends ServiceEngine {
         if (typeof result.ok !== "undefined" && !result.ok) { throw Error("fetch error:" + result.statusText); }
         return result.json();
       })
-      .then((_) => {
-        const data = EJSON.deserialize(_);
+      .then(EJSON.asyncDeserialize)
+      .then((data) => {
+        this.logger.info(LOG_MESSAGES.DEBUG_LOG, [`count result: ${data.status}, ${data.result?.csn}, ${data.result?.restQuery}`]);
         if (data.status === "NG") { throw Error(JSON.stringify(data.reason)); }
         if (data.status === "OK") { return data.result; }
         throw new Error("fetch error:" + JSON.stringify(data));
@@ -197,6 +198,34 @@ export class QueryHandler extends ServiceEngine {
       .catch((reason) => {
         this.logger.warn(LOG_MESSAGES.COUNT_ERROR, [reason.toString(), EJSON.stringify(request)]);
         return { csn, resultCount: 0, restQuery: query, csnMode };
+      });
+  }
+
+  wait(csn: number): Promise<void> {
+    const request = { csn };
+    return this.node.fetch(CORE_NODE.PATH_SUBSET
+      .replace(/:database\b/g, this.database)
+      .replace(/:subset\b/g, this.subsetName) + CORE_NODE.PATH_WAIT, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+      },
+      body: EJSON.stringify(request),
+    })
+      .then((result) => {
+        if (typeof result.ok !== "undefined" && !result.ok) { throw Error("fetch error:" + result.statusText); }
+        this.logger.info(LOG_MESSAGES.DEBUG_LOG, ["subset waited"]);
+        return result.json();
+      })
+      .then(EJSON.asyncDeserialize)
+      .then((data) => {
+        if (data.status === "NG") { throw Error(JSON.stringify(data.reason)); }
+        if (data.status === "OK") return;
+        throw new Error("fetch error:" + JSON.stringify(data));
+      })
+      .catch((reason) => {
+        this.logger.warn(LOG_MESSAGES.ERROR_MSG, [reason.toString()], [400]);
+        return;
       });
   }
 }
