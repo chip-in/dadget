@@ -944,11 +944,12 @@ export class SubsetStorage extends ServiceEngine implements Proxy {
       .replace(/:subset\b/g, this.subsetName), "singletonMaster", new SubsetUpdatorProxy(this), {
       onDisconnect: () => {
         this.logger.info(LOG_MESSAGES.DISCONNECTED, ["Updator"]);
-        this.subscribeUpdateProcessor()
-          .then(() => {
-            if (this.updateListenerKey) { this.node.unsubscribe(this.updateListenerKey).catch(e => console.warn(e)); }
-            this.updateListenerKey = undefined;
-          });
+        // 下記実装の意図不明、onDisconnect→onRemountの流れを妨げて異常終了になる
+        // this.subscribeUpdateProcessor()
+        //   .then(() => {
+        //     if (this.updateListenerKey) { this.node.unsubscribe(this.updateListenerKey).catch(e => console.warn(e)); }
+        //     this.updateListenerKey = undefined;
+        //   });
       },
       onRemount: (mountHandle: string) => {
         this.logger.info(LOG_MESSAGES.REMOUNTED, ["Updator"]);
