@@ -537,7 +537,7 @@ class UpdateListener extends Subscriber {
       )
         .catch((err) => {
           this.logger.error(LOG_MESSAGES.ERROR_MSG, [err.toString()], [215]);
-          process.exit(1);
+          if (process) { process.exit(1); }
         });
     }
     this.updateProcessor.procTransaction(subsetTransaction);
@@ -854,7 +854,7 @@ export class SubsetStorage extends ServiceEngine implements Proxy {
         })
         .catch((err) => {
           this.logger.error(LOG_MESSAGES.ERROR_MSG, [err.toString()], [210]);
-          process.exit(1);
+          if (process) { process.exit(1); }
         });
     }
   }
@@ -943,13 +943,8 @@ export class SubsetStorage extends ServiceEngine implements Proxy {
       .replace(/:database\b/g, this.database)
       .replace(/:subset\b/g, this.subsetName), "singletonMaster", new SubsetUpdatorProxy(this), {
       onDisconnect: () => {
-        this.logger.info(LOG_MESSAGES.DISCONNECTED, ["Updator"]);
-        // 下記実装の意図不明、onDisconnect→onRemountの流れを妨げて異常終了になる
-        // this.subscribeUpdateProcessor()
-        //   .then(() => {
-        //     if (this.updateListenerKey) { this.node.unsubscribe(this.updateListenerKey).catch(e => console.warn(e)); }
-        //     this.updateListenerKey = undefined;
-        //   });
+        this.logger.error(LOG_MESSAGES.DISCONNECTED, ["Updator"]);
+        if (process) { process.exit(1); }
       },
       onRemount: (mountHandle: string) => {
         this.logger.info(LOG_MESSAGES.REMOUNTED, ["Updator"]);
@@ -975,7 +970,7 @@ export class SubsetStorage extends ServiceEngine implements Proxy {
       })
       .catch((err) => {
         this.logger.error(LOG_MESSAGES.ERROR_MSG, [err.toString()], [211]);
-        process.exit(1);
+        if (process) { process.exit(1); }
       });
   }
 
@@ -988,7 +983,7 @@ export class SubsetStorage extends ServiceEngine implements Proxy {
         .then((key) => { this.updateListenerKey = key; })
         .catch((err) => {
           this.logger.error(LOG_MESSAGES.ERROR_MSG, [err.toString()], [212]);
-          process.exit(1);
+          if (process) { process.exit(1); }
         });
     } else {
       return this.node.subscribe(
@@ -996,7 +991,7 @@ export class SubsetStorage extends ServiceEngine implements Proxy {
         .then((key) => { this.updateListenerKey = key; })
         .catch((err) => {
           this.logger.error(LOG_MESSAGES.ERROR_MSG, [err.toString()], [213]);
-          process.exit(1);
+          if (process) { process.exit(1); }
         });
     }
   }
@@ -1009,7 +1004,7 @@ export class SubsetStorage extends ServiceEngine implements Proxy {
       .then((key) => { this.subscriberKey = key; })
       .catch((err) => {
         this.logger.error(LOG_MESSAGES.ERROR_MSG, [err.toString()], [214]);
-        process.exit(1);
+        if (process) { process.exit(1); }
       });
   }
 
