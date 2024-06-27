@@ -9,6 +9,7 @@ import { Logger } from "../util/Logger";
 import { default as Dadget } from "./Dadget";
 import { ContextManager } from "./ContextManager";
 import { SubsetStorage } from "./SubsetStorage";
+import { tickAsync } from "../util/Ejson";
 
 /**
  * ユニーク制約キャッシュSEコンフィグレーションパラメータ
@@ -152,9 +153,16 @@ export class UniqueCache extends ServiceEngine {
     return Promise.resolve();
   }
 
-  private _insertMany(list: object[]): Promise<void> {
+  private async _insertMany(list: object[]): Promise<void> {
+    let c = 0;
     for (const obj of list) {
-      this._insert(obj);
+      if (c > 10000) {
+        c = 0;
+        await tickAsync((n) => this._insert(obj), null);
+      } else {
+        c++;
+        this._insert(obj);
+      }
     }
     return Promise.resolve();
   }
