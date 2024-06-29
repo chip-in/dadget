@@ -46,7 +46,7 @@ export class UniqueCache extends ServiceEngine {
   private updateLock: ReadWriteLock;
   private readyFlag: boolean = false;
   private errorFlag: boolean = false;
-  private index = new Set();
+  private index: Set<string>[] = [new Set()];
 
   constructor(option: UniqueCacheConfigDef) {
     super(option);
@@ -141,13 +141,23 @@ export class UniqueCache extends ServiceEngine {
     return JSON.stringify(v);
   }
 
+  private _addIndexKey(key: string): Set<string> {
+    const set = this.index[this.index.length - 1]
+    if (set.size >= 16777216) {
+      this.index.push(new Set())
+      return this._addIndexKey(key)
+    } else {
+      return set.add(key)
+    }
+  }
+
   private _insert(obj: any): Promise<void> {
     const val = UniqueCache._convertKey(this.field, obj);
     if (val !== undefined && val !== null) {
-      if (this.index.has(val)) {
+      if (_setForKey(this.index, val) !== undefined) {
         this.errorFlag = true;
       } else {
-        this.index.add(val);
+        this._addIndexKey(val);
       }
     }
     return Promise.resolve();
@@ -178,20 +188,25 @@ export class UniqueCache extends ServiceEngine {
   private _delete(obj: any): Promise<void> {
     const val = UniqueCache._convertKey(this.field, obj);
     if (val !== undefined && val !== null) {
-      this.index.delete(val);
+      const set = _setForKey(this.index, val)
+      if (set !== undefined) {
+        set.delete(val)
+      }
     }
     return Promise.resolve();
   }
 
   private _deleteAll(): Promise<void> {
-    this.index.clear();
+    for (let set of this.index) {
+      set.clear()
+    }
     this.errorFlag = false;
     return Promise.resolve();
   }
 
   private _has(val: any): Promise<boolean> {
     if (this.errorFlag) return Promise.resolve(true);
-    return Promise.resolve(this.index.has(val));
+    return Promise.resolve(_setForKey(this.index, val) !== undefined);
   }
 
   /**
@@ -484,5 +499,14 @@ export class UniqueCache extends ServiceEngine {
         release();
         return Promise.reject(e);
       });
+  }
+}
+
+function _setForKey(sets: Set<string>[], key: string) {
+  for (let index = sets.length - 1; index >= 0; index--) {
+    const set = sets[index]
+    if (set.has(key)) {
+      return set
+    }
   }
 }
