@@ -13,7 +13,7 @@ export async function asyncParse(str: string): Promise<any> {
   return await tickAsync(asyncDeserialize, v);
 }
 
-function tickAsync(func: (v: any) => any, val: any): Promise<any> {
+export function tickAsync(func: (v: any) => any, val: any): Promise<any> {
   return new Promise<any>((resolve) => {
     setTimeout(() => {
       resolve(Promise.resolve(func(val)))
