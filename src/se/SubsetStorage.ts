@@ -238,6 +238,7 @@ class UpdateProcessor extends Subscriber {
           this.storage.committedCsn = undefined;
         } else if (type === TransactionType.ABORT || type === TransactionType.ABORT_IMPORT) {
           if (transaction.committedCsn === undefined) { throw new Error("committedCsn required"); }
+          this.storage.committedCsn = undefined;
           const committedCsn = transaction.committedCsn;
           try {
             await this.rollbackSubsetDb(committedCsn, false);
