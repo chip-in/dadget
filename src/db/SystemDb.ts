@@ -11,20 +11,10 @@ export class SystemDb {
   private isFirstCsnAccess = true;
   private queryHash: string;
   private csn?: number;
-  private resetTimer?: any;
 
   constructor(private db: IDb) {
     db.setCollection(SYSTEM_COLLECTION);
     console.log("SystemDb is created");
-  }
-
-  private resetCache() {
-    if (this.resetTimer) { clearTimeout(this.resetTimer); }
-    this.resetTimer = setTimeout(() => {
-      // for debug
-      this.csn = undefined;
-      this.resetTimer = undefined;
-    }, 5000);
   }
 
   isNew(): boolean {
@@ -103,7 +93,6 @@ export class SystemDb {
       .then((result: { seq: number } | null) => {
         if (!result) { throw new Error("csn not found"); }
         this.csn = result.seq;
-        this.resetCache();
         return result.seq;
       })
       .catch((reason) => Promise.reject(new DadgetError(ERROR.E1003, [reason.toString()])));
@@ -115,7 +104,6 @@ export class SystemDb {
       .then(() => {
         this.isNewDb = false;
         this.csn = seq;
-        this.resetCache();
       })
       .catch((reason) => Promise.reject(new DadgetError(ERROR.E1004, [reason.toString()])));
   }
