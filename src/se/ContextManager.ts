@@ -208,6 +208,16 @@ class ContextManagementServer extends Proxy {
     const method = req.method.toUpperCase();
     this.logger.debug(LOG_MESSAGES.ON_RECEIVE, [method, url.pathname]);
     const time = Date.now();
+    const sleep = (waitMS: number) => {
+      if (waitMS < 0) {
+        return Promise.resolve();
+      }
+      return new Promise<void>(resolve => {
+        setTimeout(() => {
+          resolve()
+        }, waitMS)
+      })
+    }
     if (method === "OPTIONS") {
       return ProxyHelper.procOption(req, res);
     } else if (url.pathname.endsWith(CORE_NODE.PATH_EXEC) && method === "POST") {
@@ -216,7 +226,7 @@ class ContextManagementServer extends Proxy {
         this.logger.info(LOG_MESSAGES.ON_RECEIVE_EXEC, [], [csn]);
         if (data.version && Number(data.version) > CLIENT_VERSION) throw new DadgetError(ERROR.E3002);
         return this.exec(csn, data.request, data.atomicId, data.options)
-          .then((result) => this.context._waitSubsetStorage(result))
+          .then((result) => Promise.any([sleep(570 * 1000 - (Date.now() - time)), this.context._waitSubsetStorage(result)]))
           .catch((reason) => ({ status: "NG", reason }));
       })
         .then((result) => {
@@ -229,7 +239,7 @@ class ContextManagementServer extends Proxy {
         this.logger.info(LOG_MESSAGES.ON_RECEIVE_EXEC_MANY, [], [csn]);
         if (data.version && Number(data.version) > CLIENT_VERSION) throw new DadgetError(ERROR.E3002);
         return this.execMany(csn, data.requests, data.atomicId, data.options)
-          .then((result) => this.context._waitSubsetStorage(result))
+          .then((result) => Promise.any([sleep(570 * 1000 - (Date.now() - time)), this.context._waitSubsetStorage(result)]))
           .catch((reason) => ({ status: "NG", reason }));
       })
         .then((result) => {
@@ -241,7 +251,7 @@ class ContextManagementServer extends Proxy {
         this.logger.info(LOG_MESSAGES.ON_RECEIVE_UPDATE_MANY, [JSON.stringify(data.query), JSON.stringify(data.operator)], []);
         if (data.version && Number(data.version) > CLIENT_VERSION) throw new DadgetError(ERROR.E3002);
         return this.updateMany(data.query, data.operator, data.atomicId)
-          .then((result) => this.context._waitSubsetStorage(result))
+          .then((result) => Promise.any([sleep(570 * 1000 - (Date.now() - time)), this.context._waitSubsetStorage(result)]))
           .catch((reason) => ({ status: "NG", reason }));
       })
         .then((result) => {
