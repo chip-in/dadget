@@ -1,3 +1,6 @@
+const LOOP = typeof setImmediate === 'function' ? 0 : 100;
+const _setImmediate = (typeof setImmediate === 'function') ? setImmediate : setTimeout;
+
 export function stringify(obj: any): string {
   return JSON.stringify(serialize(obj));
 }
@@ -5,17 +8,34 @@ export function parse(str: string): any {
   return deserialize(JSON.parse(str));
 }
 export async function asyncStringify(obj: any): Promise<string> {
+  if (Array.isArray(obj)) {
+    let out = "[";
+    let c = 0;
+    let first = true;
+    for (const row of obj) {
+      if (first) {
+        first = false;
+      } else {
+        out += ',';
+      }
+      if (c >= LOOP) {
+        c = 0;
+        out += JSON.stringify(await tickAsync(asyncSerialize, row));
+      } else {
+        c++;
+        out += JSON.stringify(await asyncSerialize(row));
+      }
+    }
+    out += ']';
+    return out;
+  }
   const v = await tickAsync(asyncSerialize, obj);
-  if (Array.isArray(v)) { return await asyncJsonStringify(v); }
   return await tickAsync(JSON.stringify, v);
 }
 export async function asyncParse(str: string): Promise<any> {
   const v = await tickAsync(JSON.parse, str);
   return await tickAsync(asyncDeserialize, v);
 }
-
-const LOOP = typeof setImmediate === 'function' ? 1 : 100;
-const _setImmediate = (typeof setImmediate === 'function') ? setImmediate : setTimeout;
 
 export function tickAsync(func: (v: any) => any, val: any): Promise<any> {
   return new Promise<any>((resolve) => {
@@ -63,7 +83,7 @@ async function asyncDeconvertArray(val: any[]): Promise<any[]> {
   const out: any[] = [];
   let c = 0;
   for (const row of val) {
-    if (c > LOOP) {
+    if (c >= LOOP) {
       c = 0;
       out.push(await tickAsync(asyncDeserialize, row));
     } else {
@@ -116,7 +136,7 @@ async function asyncConvertArray(val: any[]): Promise<any[]> {
   const out: any[] = [];
   let c = 0;
   for (const row of val) {
-    if (c > LOOP) {
+    if (c >= LOOP) {
       c = 0;
       out.push(await tickAsync(asyncSerialize, row));
     } else {
@@ -125,21 +145,6 @@ async function asyncConvertArray(val: any[]): Promise<any[]> {
     }
   }
   return out;
-}
-
-async function asyncJsonStringify(val: any[]): Promise<string> {
-  const out: any[] = [];
-  let c = 0;
-  for (const row of val) {
-    if (c > LOOP) {
-      c = 0;
-      out.push(await tickAsync(JSON.stringify, row));
-    } else {
-      c++;
-      out.push(JSON.stringify(row));
-    }
-  }
-  return '[' + out.join(',') + ']';
 }
 
 function convertObject(obj: { [key: string]: any }): { [key: string]: any } {
