@@ -12,7 +12,7 @@ import { DadgetError } from "../util/DadgetError";
 import * as EJSON from "../util/Ejson";
 import { Logger } from "../util/Logger";
 import { Util } from "../util/Util";
-import { ATOMIC_OPERATION_MAX_LOCK_TIME, ContextManager, ExecOptions, TransactionUpdateDetail } from "./ContextManager";
+import { ContextManager, ExecOptions, TransactionUpdateDetail } from "./ContextManager";
 import { DatabaseRegistry } from "./DatabaseRegistry";
 import { QueryHandler } from "./QueryHandler";
 import { SubsetStorage } from "./SubsetStorage";
@@ -884,7 +884,6 @@ class DadgetTr {
   private dadget: Dadget;
   private atomicId?: string;
   private fixFlag = false;
-  private checkInterval?: any;
 
   constructor(dadget: Dadget) {
     this.orgDadget = dadget;
@@ -908,23 +907,18 @@ class DadgetTr {
     if (this.atomicId) { return Promise.reject("transaction is running"); }
     this.atomicId = Dadget.uuidGen();
     return this.dadget._exec(0, { type: TransactionType.BEGIN, target: "" }, this.atomicId).then(() => {
-      // Time-out prevention
       this._check();
-      this.checkInterval = setInterval(() => this._check(), ATOMIC_OPERATION_MAX_LOCK_TIME / 2);
     });
   }
 
   _commit(): Promise<void> {
     if (this.atomicId === undefined) { return Promise.reject(new DadgetError(ERROR.E2107)); }
-    clearInterval(this.checkInterval);
-    this.checkInterval = undefined;
     return this.dadget._exec(0, { type: TransactionType.END, target: "" }, this.atomicId).then(() => {
       this.orgDadget._afterCommit(this.dadget);
     });
   }
 
   _rollback(): Promise<void> {
-    if (this.checkInterval) { clearInterval(this.checkInterval); }
     if (this.atomicId === undefined) { return Promise.resolve(); }
     return this.dadget._exec(0, { type: TransactionType.ABORT, target: "" }, this.atomicId).then(() => { });
   }
