@@ -186,7 +186,7 @@ export class PersistentDb implements IDb {
       .catch((error) => PersistentDb.errorExit(error, 6));
   }
 
-  async find(query: object, sort?: object, limit?: number, offset?: number, projection?: object, session?: ClientSession): Promise<any[]> {
+  async find(query: object, sort?: object, limit?: number, offset?: number, projection?: object, session?: ClientSession, throwErrorMode?: boolean): Promise<any[]> {
     const time = Date.now();
     let cursor = this.db.collection(this.collection).find(PersistentDb.convertQuery(query), { allowDiskUse: true, projection, session })
     if (sort) { cursor = cursor.sort(sort as any); }
@@ -202,20 +202,20 @@ export class PersistentDb implements IDb {
         list.push(obj);
       }
     } catch (error) {
-      PersistentDb.errorExit(error, 7);
+      PersistentDb.errorExit(error, 7, throwErrorMode);
     }
     if (Date.now() - time > 100) this.logger.info(LOG_MESSAGES.MONGODB_LOG, ["find"], [Date.now() - time]);
     return list;
   }
 
-  count(query: object): Promise<number> {
+  count(query: object, throwErrorMode?: boolean): Promise<number> {
     const time = Date.now();
     return this.db.collection(this.collection).countDocuments(PersistentDb.convertQuery(query))
       .then((result) => {
         if (Date.now() - time > 100) this.logger.info(LOG_MESSAGES.MONGODB_LOG, ["count"], [Date.now() - time]);
         return result;
       })
-      .catch((error) => PersistentDb.errorExit(error, 8));
+      .catch((error) => PersistentDb.errorExit(error, 8, throwErrorMode));
   }
 
   insertOne(doc: object, session?: ClientSession, throwErrorMode?: boolean): Promise<void> {

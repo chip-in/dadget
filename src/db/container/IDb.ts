@@ -19,9 +19,9 @@ export interface IDb {
 
   findOneBySort(query: object, sort: object): Promise<any>;
 
-  find(query: object, sort?: object, limit?: number, offset?: number, projection?: object, session?: any): Promise<any[]>;
+  find(query: object, sort?: object, limit?: number, offset?: number, projection?: object, session?: any, throwErrorMode?: boolean): Promise<any[]>;
 
-  count(query: object): Promise<number>;
+  count(query: object, throwErrorMode?: boolean): Promise<number>;
 
   insertOne(doc: object, session?: any, throwErrorMode?: boolean): Promise<void>;
 
