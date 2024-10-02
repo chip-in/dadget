@@ -333,7 +333,7 @@ export class PersistentDb implements IDb {
     });
   }
 
-  find(query: object, sort?: object, limit?: number, offset?: number, projection?: object, session?: any): Promise<any[]> {
+  find(query: object, sort?: object, limit?: number, offset?: number, projection?: object, session?: any, throwErrorMode?: boolean): Promise<any[]> {
     const sortFields = sort ? Object.keys(sort) : [];
     const parserQuery = parser.parse(query);
 
@@ -383,7 +383,7 @@ export class PersistentDb implements IDb {
     });
   }
 
-  count(query: object): Promise<number> {
+  count(query: object, throwErrorMode?: boolean): Promise<number> {
     return this.find(query).then((list) => list.length);
   }
 

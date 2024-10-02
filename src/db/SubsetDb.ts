@@ -55,18 +55,18 @@ export class SubsetDb {
       .catch((err) => Promise.reject(new DadgetError(ERROR.E1207, [err.toString()])));
   }
 
-  find(query: object, sort?: object, limit?: number, projection?: object, offset?: number): Promise<any[]> {
+  find(query: object, sort?: object, limit?: number, projection?: object, offset?: number, throwErrorMode?: boolean): Promise<any[]> {
     console.log("find:", JSON.stringify(query));
-    return this.db.find(query, sort, limit, offset, projection)
+    return this.db.find(query, sort, limit, offset, projection, undefined, throwErrorMode)
       .then((result) => {
         return result;
       })
       .catch((err) => Promise.reject(new DadgetError(ERROR.E1205, [err.toString()])));
   }
 
-  count(query: object): Promise<number> {
+  count(query: object, throwErrorMode?: boolean): Promise<number> {
     console.log("count:", JSON.stringify(query));
-    return this.db.count(query)
+    return this.db.count(query, throwErrorMode)
       .then((count) => {
         return count;
       })

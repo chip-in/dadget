@@ -1133,7 +1133,7 @@ export class SubsetStorage extends ServiceEngine implements Proxy {
           csn = Math.max(csn, this.committedCsn || currentCsn);
         }
         if (csn === currentCsn) {
-          return this.getSubsetDb().count(innerQuery)
+          return this.getSubsetDb().count(innerQuery, true)
             .then((result) => {
               release();
               return { csn: currentCsn, resultCount: result, restQuery };
@@ -1150,7 +1150,7 @@ export class SubsetStorage extends ServiceEngine implements Proxy {
                 this.logger.info(LOG_MESSAGES.INSUFFICIENT_ROLLBACK_TRANSACTIONS);
                 return { csn, resultCount: 0, restQuery: query };
               }
-              return this.getSubsetDb().count({ $and: [innerQuery, { csn: { $lte: csn } }] })
+              return this.getSubsetDb().count({ $and: [innerQuery, { csn: { $lte: csn } }] }, true)
                 .then((result) => {
                   release();
                   const resultSet = SubsetStorage.rollbackAndFind([], transactions, innerQuery);
@@ -1165,7 +1165,7 @@ export class SubsetStorage extends ServiceEngine implements Proxy {
           return new Promise<CountResult>((resolve, reject) => {
             if (!this.queryWaitingList[csn]) { this.queryWaitingList[csn] = []; }
             this.queryWaitingList[csn].push(() => {
-              return this.getSubsetDb().count(innerQuery)
+              return this.getSubsetDb().count(innerQuery, true)
                 .then((result) => {
                   resolve({ csn, resultCount: result, restQuery });
                 }).catch((reason) => reject(reason));
@@ -1216,7 +1216,7 @@ export class SubsetStorage extends ServiceEngine implements Proxy {
           csn = Math.max(csn, this.committedCsn || currentCsn);
         }
         if (csn === currentCsn) {
-          return this.getSubsetDb().find(innerQuery, sort, limit, projection, offset)
+          return this.getSubsetDb().find(innerQuery, sort, limit, projection, offset, true)
             .then((result) => {
               release();
               return { csn: currentCsn, resultSet: result, restQuery };
@@ -1236,7 +1236,7 @@ export class SubsetStorage extends ServiceEngine implements Proxy {
               const _offset = offset ? offset : 0;
               const maxLimit = limit ? limit + _offset : undefined;
               const possibleLimit = maxLimit ? maxLimit + transactions.length : undefined;
-              return this.getSubsetDb().find(innerQuery, sort, possibleLimit)
+              return this.getSubsetDb().find(innerQuery, sort, possibleLimit, undefined, undefined, true)
                 .then((result) => {
                   release();
                   const resultSet = SubsetStorage.rollbackAndFind(result, transactions, innerQuery, sort, limit, offset)
@@ -1251,7 +1251,7 @@ export class SubsetStorage extends ServiceEngine implements Proxy {
           return new Promise<QueryResult>((resolve, reject) => {
             if (!this.queryWaitingList[csn]) { this.queryWaitingList[csn] = []; }
             this.queryWaitingList[csn].push(() => {
-              return this.getSubsetDb().find(innerQuery, sort, limit, projection, offset)
+              return this.getSubsetDb().find(innerQuery, sort, limit, projection, offset, true)
                 .then((result) => {
                   resolve({ csn, resultSet: result, restQuery });
                 }).catch((reason) => reject(reason));
