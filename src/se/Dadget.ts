@@ -69,6 +69,8 @@ export class QueryResult {
   queryHandlers?: QueryHandler[];
 
   csnMode?: CsnMode;
+
+  error?: object;
 }
 
 /**
@@ -94,6 +96,8 @@ export class CountResult {
   queryHandlers?: QueryHandler[];
 
   csnMode?: CsnMode;
+
+  error?: object;
 }
 
 const PREQUERY_CSN = -1;
@@ -275,7 +279,7 @@ export default class Dadget extends ServiceEngine {
           return Promise.resolve(request);
         }
         const qh = request.queryHandlers.shift();
-        if (qh == null) { throw new Error("never happen"); }
+        if (qh == null) { throw request.error ?? new Error("No QueryHandlers"); }
         return qh.query(request.csn, request.restQuery, sort, limit, csnMode, projection, offset)
           .then((result) => queryFallback({
             csn: result.csn,
@@ -283,6 +287,7 @@ export default class Dadget extends ServiceEngine {
             restQuery: result.restQuery,
             queryHandlers: request.queryHandlers,
             csnMode: result.csnMode,
+            error: result.error,
           }));
       })
       .then((result) => {
@@ -333,7 +338,7 @@ export default class Dadget extends ServiceEngine {
           return Promise.resolve(request);
         }
         const qh = request.queryHandlers.shift();
-        if (qh == null) { throw new Error("never happen"); }
+        if (qh == null) { throw request.error ?? new Error("No QueryHandlers"); }
         return qh.count(request.csn, request.restQuery, csnMode)
           .then((result) => queryFallback({
             csn: result.csn,
@@ -341,6 +346,7 @@ export default class Dadget extends ServiceEngine {
             restQuery: result.restQuery,
             queryHandlers: request.queryHandlers,
             csnMode: result.csnMode,
+            error: result.error,
           }));
       });
   }
@@ -395,7 +401,7 @@ export default class Dadget extends ServiceEngine {
     return Dadget.__query(this.node, this.database, query, sort, limit, offset, csn, csnMode, projection)
       .then((result) => Util.promiseWhile<QueryResult>(result, (result) => !!(result.restQuery && count > 0), retryAction))
       .then((result) => {
-        if (result.restQuery) { throw new Error("The queryHandlers has been empty before completing queries."); }
+        if (result.restQuery) { throw result.error ?? new Error("The queryHandlers has been empty before completing queries."); }
         this.currentCsn = result.csn;
         for (const id of Object.keys(this.updateListeners)) {
           const listener = this.updateListeners[id];
@@ -440,7 +446,7 @@ export default class Dadget extends ServiceEngine {
     return Dadget.__query(node, database, query, sort, limit, offset, csn, csnMode, projection)
       .then((result) => Util.promiseWhile<QueryResult>(result, (result) => !!(result.restQuery && count > 0), retryAction))
       .then((result) => {
-        if (result.restQuery) { throw new Error("The queryHandlers has been empty before completing queries."); }
+        if (result.restQuery) { throw result.error ?? new Error("The queryHandlers has been empty before completing queries."); }
         return result;
       })
       .catch((reason) => {
@@ -478,7 +484,7 @@ export default class Dadget extends ServiceEngine {
     return Dadget._count(this.node, this.database, query, csn, csnMode)
       .then((result) => Util.promiseWhile<CountResult>(result, (result) => !!(result.restQuery && count > 0), retryAction))
       .then((result) => {
-        if (result.restQuery) { throw new Error("The queryHandlers has been empty before completing count queries."); }
+        if (result.restQuery) { throw result.error ?? new Error("The queryHandlers has been empty before completing count queries."); }
         this.currentCsn = result.csn;
         for (const id of Object.keys(this.updateListeners)) {
           const listener = this.updateListeners[id];

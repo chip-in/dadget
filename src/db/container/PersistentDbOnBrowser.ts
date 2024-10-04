@@ -355,7 +355,13 @@ export class PersistentDb implements IDb {
       request.onsuccess = (event) => {
         const cursor = (event.target as IDBRequest).result;
         if (cursor) {
-          if (parserQuery.matches(cursor.value, false)) { dataList.push(Util.project(cursor.value, projection)); }
+          let res = false;
+          try {
+            res = parserQuery.matches(cursor.value, false);
+          } catch (e) {
+            return reject("find request error: " + e);
+          }
+          if (res) { dataList.push(Util.project(cursor.value, projection)); }
           if (!listNum || dataList.length < listNum) { cursor.continue(); }
         }
       };

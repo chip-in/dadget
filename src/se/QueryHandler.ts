@@ -118,20 +118,20 @@ export class QueryHandler extends ServiceEngine {
       body: EJSON.stringify(request),
     })
       .then((result) => {
-        if (typeof result.ok !== "undefined" && !result.ok) { throw Error("fetch error:" + result.statusText); }
+        if (typeof result.ok !== "undefined" && !result.ok) { throw new Error("fetch error:" + result.statusText); }
         return result.json();
       })
       .then(EJSON.asyncDeserialize)
       .then((data) => {
         this.logger.info(LOG_MESSAGES.DEBUG_LOG, [`query result: ${data.status}, ${data.result?.csn}, ${data.result?.restQuery}`]);
-        if (data.status === "NG") { throw Error(JSON.stringify(data.reason)); }
+        if (data.status === "NG") { throw data.reason.code && data.reason.message ? DadgetError.from(data.reason) : new Error(JSON.stringify(data.reason)); }
         if (data.status === "HUGE") { return this._handle_huge_response(data.result, projection); }
         if (data.status === "OK") { return data.result; }
         throw new Error("fetch error:" + JSON.stringify(data));
       })
-      .catch((reason) => {
-        this.logger.warn(LOG_MESSAGES.QUERY_ERROR, [reason.toString(), EJSON.stringify(request)]);
-        return { csn, resultSet: [], restQuery: query, csnMode };
+      .catch((error) => {
+        this.logger.warn(LOG_MESSAGES.QUERY_ERROR, [error.toString(), EJSON.stringify(request)]);
+        return { csn, resultSet: [], restQuery: query, csnMode, error };
       });
   }
   _handle_huge_response(result: QueryResult, projection?: object): Promise<QueryResult> {
@@ -185,19 +185,19 @@ export class QueryHandler extends ServiceEngine {
       body: EJSON.stringify(request),
     })
       .then((result) => {
-        if (typeof result.ok !== "undefined" && !result.ok) { throw Error("fetch error:" + result.statusText); }
+        if (typeof result.ok !== "undefined" && !result.ok) { throw new Error("fetch error:" + result.statusText); }
         return result.json();
       })
       .then(EJSON.asyncDeserialize)
       .then((data) => {
         this.logger.info(LOG_MESSAGES.DEBUG_LOG, [`count result: ${data.status}, ${data.result?.csn}, ${data.result?.restQuery}`]);
-        if (data.status === "NG") { throw Error(JSON.stringify(data.reason)); }
+        if (data.status === "NG") { throw data.reason.code && data.reason.message ? DadgetError.from(data.reason) : new Error(JSON.stringify(data.reason)); }
         if (data.status === "OK") { return data.result; }
         throw new Error("fetch error:" + JSON.stringify(data));
       })
-      .catch((reason) => {
-        this.logger.warn(LOG_MESSAGES.COUNT_ERROR, [reason.toString(), EJSON.stringify(request)]);
-        return { csn, resultCount: 0, restQuery: query, csnMode };
+      .catch((error) => {
+        this.logger.warn(LOG_MESSAGES.COUNT_ERROR, [error.toString(), EJSON.stringify(request)]);
+        return { csn, resultCount: 0, restQuery: query, csnMode, error };
       });
   }
 
