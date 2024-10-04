@@ -129,9 +129,9 @@ export class QueryHandler extends ServiceEngine {
         if (data.status === "OK") { return data.result; }
         throw new Error("fetch error:" + JSON.stringify(data));
       })
-      .catch((error) => {
-        this.logger.warn(LOG_MESSAGES.QUERY_ERROR, [error.toString(), EJSON.stringify(request)]);
-        return { csn, resultSet: [], restQuery: query, csnMode, error };
+      .catch((e) => {
+        this.logger.warn(LOG_MESSAGES.QUERY_ERROR, [e.toString(), EJSON.stringify(request)]);
+        return { csn, resultSet: [], restQuery: query, csnMode, error: e instanceof DadgetError ? e : undefined };
       });
   }
   _handle_huge_response(result: QueryResult, projection?: object): Promise<QueryResult> {
@@ -195,9 +195,9 @@ export class QueryHandler extends ServiceEngine {
         if (data.status === "OK") { return data.result; }
         throw new Error("fetch error:" + JSON.stringify(data));
       })
-      .catch((error) => {
-        this.logger.warn(LOG_MESSAGES.COUNT_ERROR, [error.toString(), EJSON.stringify(request)]);
-        return { csn, resultCount: 0, restQuery: query, csnMode, error };
+      .catch((e) => {
+        this.logger.warn(LOG_MESSAGES.COUNT_ERROR, [e.toString(), EJSON.stringify(request)]);
+        return { csn, resultCount: 0, restQuery: query, csnMode, error: e instanceof DadgetError ? e : undefined };
       });
   }
 

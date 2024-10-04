@@ -399,9 +399,9 @@ export default class Dadget extends ServiceEngine {
       });
     };
     return Dadget.__query(this.node, this.database, query, sort, limit, offset, csn, csnMode, projection)
-      .then((result) => Util.promiseWhile<QueryResult>(result, (result) => !!(result.restQuery && count > 0), retryAction))
+      .then((result) => Util.promiseWhile<QueryResult>(result, (result) => !!(result.restQuery && !result.error && count > 0), retryAction))
       .then((result) => {
-        if (result.restQuery) { throw result.error ?? new Error("The queryHandlers has been empty before completing queries."); }
+        if (result.restQuery) { throw result.error ?? new DadgetError(ERROR.E2110); }
         this.currentCsn = result.csn;
         for (const id of Object.keys(this.updateListeners)) {
           const listener = this.updateListeners[id];
@@ -444,9 +444,9 @@ export default class Dadget extends ServiceEngine {
       });
     };
     return Dadget.__query(node, database, query, sort, limit, offset, csn, csnMode, projection)
-      .then((result) => Util.promiseWhile<QueryResult>(result, (result) => !!(result.restQuery && count > 0), retryAction))
+      .then((result) => Util.promiseWhile<QueryResult>(result, (result) => !!(result.restQuery && !result.error && count > 0), retryAction))
       .then((result) => {
-        if (result.restQuery) { throw result.error ?? new Error("The queryHandlers has been empty before completing queries."); }
+        if (result.restQuery) { throw result.error ?? new DadgetError(ERROR.E2110); }
         return result;
       })
       .catch((reason) => {
@@ -482,9 +482,9 @@ export default class Dadget extends ServiceEngine {
       });
     };
     return Dadget._count(this.node, this.database, query, csn, csnMode)
-      .then((result) => Util.promiseWhile<CountResult>(result, (result) => !!(result.restQuery && count > 0), retryAction))
+      .then((result) => Util.promiseWhile<CountResult>(result, (result) => !!(result.restQuery && !result.error && count > 0), retryAction))
       .then((result) => {
-        if (result.restQuery) { throw result.error ?? new Error("The queryHandlers has been empty before completing count queries."); }
+        if (result.restQuery) { throw result.error ?? new DadgetError(ERROR.E2110); }
         this.currentCsn = result.csn;
         for (const id of Object.keys(this.updateListeners)) {
           const listener = this.updateListeners[id];
