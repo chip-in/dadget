@@ -770,6 +770,7 @@ export class SubsetStorage extends ServiceEngine implements Proxy {
   private queryWaitingList: { [csn: number]: (() => Promise<any>)[] } = {};
   private subscriberKey: string | null;
   private readyFlag: boolean = false;
+  private readyQueue: any[] = [];
   private updateProcessor: UpdateProcessor;
   private updateListener: UpdateListener;
   private updateListenerKey?: string;
@@ -825,6 +826,16 @@ export class SubsetStorage extends ServiceEngine implements Proxy {
     return this.readyFlag;
   }
 
+  waitReady(): Promise<void> {
+    if (this.readyFlag) {
+      return Promise.resolve();
+    } else {
+      return new Promise<void>((resolve, reject) => {
+        this.readyQueue.push(resolve);
+      });
+    }
+  }
+
   isWhole(): boolean {
     return !this.subsetDefinition.query;
   }
@@ -841,6 +852,11 @@ export class SubsetStorage extends ServiceEngine implements Proxy {
       return;
     }
     this.readyFlag = true;
+    setTimeout(() => {
+      while (this.readyQueue.length) {
+        this.readyQueue.pop()();
+      }
+    });
 
     if (!this.mounted) {
       // Rest サービスを登録する。

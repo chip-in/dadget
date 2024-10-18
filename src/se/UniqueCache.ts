@@ -435,7 +435,7 @@ export class UniqueCache extends ServiceEngine {
     const database = this.database;
     const subsetStorage = (this.getNode().searchServiceEngine("SubsetStorage", { database }) as SubsetStorage[]).find((v) => v.isWhole());
     let promise = subsetStorage ?
-      subsetStorage.query(csn, query, undefined, undefined, "strict", projection) :
+      subsetStorage.waitReady().then(() => subsetStorage.query(csn, query, undefined, undefined, "strict", projection)) :
       Dadget._query(this.getNode(), database, query, undefined, undefined, undefined, csn, "strict", projection);
 
     return promise
