@@ -1072,6 +1072,7 @@ export class SubsetStorage extends ServiceEngine implements Proxy {
               }
             } else {
               if ((total / count) * length > MAX_STRING_LENGTH) {
+                this.logger.warn(LOG_MESSAGES.TOO_LARGE_RESPONSE, [JSON.stringify(query)]);
                 let ids: any[] = [];
                 for (const obj of result.resultSet) {
                   ids.push({ _id: (obj as any)._id });
