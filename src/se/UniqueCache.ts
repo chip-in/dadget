@@ -11,6 +11,8 @@ import { ContextManager } from "./ContextManager";
 import { SubsetStorage } from "./SubsetStorage";
 import { tickAsync } from "../util/Ejson";
 
+const BOOT_MUTEX = new ReadWriteLock();
+
 /**
  * ユニーク制約キャッシュSEコンフィグレーションパラメータ
  */
@@ -423,6 +425,25 @@ export class UniqueCache extends ServiceEngine {
   }
 
   resetData(csn: number, withJournal: boolean): Promise<void> {
+    let release: () => void;
+    const promise = new Promise<void>((resolve, reject) => {
+      BOOT_MUTEX.writeLock((unlock) => {
+        release = () => {
+          unlock();
+        };
+        resolve();
+      });
+    });
+    return promise
+      .then(() => this._resetData(csn, withJournal))
+      .then(() => release())
+      .catch((e) => {
+        release();
+        throw e;
+      })
+  }
+
+  _resetData(csn: number, withJournal: boolean): Promise<void> {
     if (csn === 0) { return this.resetData0(); }
     this.logger.info(LOG_MESSAGES.RESET_DATA, [], [csn]);
     if (csn === this.currentCsn) { return Promise.resolve(); }
