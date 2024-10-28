@@ -1,4 +1,5 @@
 import * as ReadWriteLock from "rwlock";
+import * as CRC32 from "crc-32";
 
 import { ResourceNode, ServiceEngine } from "@chip-in/resource-node";
 import { TransactionObject, TransactionRequest, TransactionType } from "../db/Transaction";
@@ -47,8 +48,7 @@ export class UniqueCache extends ServiceEngine {
   private lock: ReadWriteLock;
   private updateLock: ReadWriteLock;
   private readyFlag: boolean = false;
-  private errorFlag: boolean = false;
-  private index: Set<string>[] = [new Set()];
+  private index: Set<number>[] = [new Set()];
 
   constructor(option: UniqueCacheConfigDef) {
     super(option);
@@ -143,22 +143,20 @@ export class UniqueCache extends ServiceEngine {
     return JSON.stringify(v);
   }
 
-  private _addIndexKey(key: string): Set<string> {
+  private _addIndexKey(key: string): Set<number> {
     const set = this.index[this.index.length - 1]
     if (set.size >= 16777216) {
       this.index.push(new Set())
       return this._addIndexKey(key)
     } else {
-      return set.add(key)
+      return set.add(CRC32.str(key))
     }
   }
 
   private _insert(obj: any): Promise<void> {
     const val = UniqueCache._convertKey(this.field, obj);
     if (val !== undefined && val !== null) {
-      if (_setForKey(this.index, val) !== undefined) {
-        this.errorFlag = true;
-      } else {
+      if (_setForKey(this.index, val) === undefined) {
         this._addIndexKey(val);
       }
     }
@@ -188,13 +186,7 @@ export class UniqueCache extends ServiceEngine {
   }
 
   private _delete(obj: any): Promise<void> {
-    const val = UniqueCache._convertKey(this.field, obj);
-    if (val !== undefined && val !== null) {
-      const set = _setForKey(this.index, val)
-      if (set !== undefined) {
-        set.delete(val)
-      }
-    }
+    // Do not delete because different objects may have the same hash value
     return Promise.resolve();
   }
 
@@ -202,12 +194,11 @@ export class UniqueCache extends ServiceEngine {
     for (let set of this.index) {
       set.clear()
     }
-    this.errorFlag = false;
+    this.index = [new Set()];
     return Promise.resolve();
   }
 
   private _has(val: any): Promise<boolean> {
-    if (this.errorFlag) return Promise.resolve(true);
     return Promise.resolve(_setForKey(this.index, val) !== undefined);
   }
 
@@ -523,10 +514,10 @@ export class UniqueCache extends ServiceEngine {
   }
 }
 
-function _setForKey(sets: Set<string>[], key: string) {
+function _setForKey(sets: Set<number>[], key: string) {
   for (let index = sets.length - 1; index >= 0; index--) {
     const set = sets[index]
-    if (set.has(key)) {
+    if (set.has(CRC32.str(key))) {
       return set
     }
   }
