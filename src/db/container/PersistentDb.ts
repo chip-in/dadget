@@ -5,6 +5,8 @@ import { Logger } from "../../util/Logger";
 import { LOG_MESSAGES } from "../../LogMessages";
 import * as AsyncLock from "async-lock";
 
+const SLOW_QUERY_TIME = 100;
+
 export class PersistentDb implements IDb {
   private static connection: MongoClient;
   private static lock = new AsyncLock();
@@ -93,7 +95,7 @@ export class PersistentDb implements IDb {
   constructor(database: string) {
     this.subsetName = database;
     this.database = Mongo.getDbName(database)
-    this.logger = Logger.getLoggerWoDB("PersistentDb");
+    this.logger = Logger.getLogger("PersistentDb", database);
     console.log("PersistentDb is created");
   }
 
@@ -106,7 +108,7 @@ export class PersistentDb implements IDb {
       let client = await PersistentDb.getConnection();
       const session = client.startSession();
       session.startTransaction();
-      if (Date.now() - time > 100) this.logger.info(LOG_MESSAGES.MONGODB_LOG, ["startTransaction"], [Date.now() - time]);
+      if (Date.now() - time > SLOW_QUERY_TIME) this.logger.info(LOG_MESSAGES.MONGODB_LOG, ["startTransaction"], [Date.now() - time]);
       return session;
     } catch (error) {
       PersistentDb.errorExit(error, 100);
@@ -119,7 +121,7 @@ export class PersistentDb implements IDb {
         const time = Date.now();
         await session.commitTransaction();
         await session.endSession();
-        if (Date.now() - time > 100) this.logger.info(LOG_MESSAGES.MONGODB_LOG, ["commitTransaction"], [Date.now() - time]);
+        if (Date.now() - time > SLOW_QUERY_TIME) this.logger.info(LOG_MESSAGES.MONGODB_LOG, ["commitTransaction"], [Date.now() - time]);
       } catch (error) {
         PersistentDb.errorExit(error, 101);
       }
@@ -132,7 +134,7 @@ export class PersistentDb implements IDb {
         const time = Date.now();
         await session.abortTransaction();
         await session.endSession();
-        if (Date.now() - time > 100) this.logger.info(LOG_MESSAGES.MONGODB_LOG, ["abortTransaction"], [Date.now() - time]);
+        if (Date.now() - time > SLOW_QUERY_TIME) this.logger.info(LOG_MESSAGES.MONGODB_LOG, ["abortTransaction"], [Date.now() - time]);
       } catch (error) {
         PersistentDb.errorExit(error, 102);
       }
@@ -160,7 +162,7 @@ export class PersistentDb implements IDb {
     const time = Date.now();
     return this.db.collection(this.collection).findOne(PersistentDb.convertQuery(query), { session })
       .then((result) => {
-        if (Date.now() - time > 100) this.logger.info(LOG_MESSAGES.MONGODB_LOG, ["findOne"], [Date.now() - time]);
+        if (Date.now() - time > SLOW_QUERY_TIME) this.logger.info(LOG_MESSAGES.MONGODB_LOG, ["findOne"], [Date.now() - time]);
         return result;
       })
       .catch((error) => PersistentDb.errorExit(error, 4));
@@ -170,7 +172,7 @@ export class PersistentDb implements IDb {
     const time = Date.now();
     return this.find({ $and: [{ [field]: { $gte: from } }, { [field]: { $lte: to } }] }, { [field]: dir }, undefined, undefined, projection, session)
       .then((result) => {
-        if (Date.now() - time > 100) this.logger.info(LOG_MESSAGES.MONGODB_LOG, ["findByRange"], [Date.now() - time]);
+        if (Date.now() - time > SLOW_QUERY_TIME) this.logger.info(LOG_MESSAGES.MONGODB_LOG, ["findByRange"], [Date.now() - time]);
         return result;
       })
       .catch((error) => PersistentDb.errorExit(error, 5));
@@ -180,7 +182,7 @@ export class PersistentDb implements IDb {
     const time = Date.now();
     return this.db.collection(this.collection).find(PersistentDb.convertQuery(query)).sort(sort as any).limit(1).next()
       .then((result) => {
-        if (Date.now() - time > 100) this.logger.info(LOG_MESSAGES.MONGODB_LOG, ["findOneBySort"], [Date.now() - time]);
+        if (Date.now() - time > SLOW_QUERY_TIME) this.logger.info(LOG_MESSAGES.MONGODB_LOG, ["findOneBySort"], [Date.now() - time]);
         return result;
       })
       .catch((error) => PersistentDb.errorExit(error, 6));
@@ -204,7 +206,7 @@ export class PersistentDb implements IDb {
     } catch (error) {
       PersistentDb.errorExit(error, 7, throwErrorMode);
     }
-    if (Date.now() - time > 100) this.logger.info(LOG_MESSAGES.MONGODB_LOG, ["find"], [Date.now() - time]);
+    if (Date.now() - time > SLOW_QUERY_TIME) this.logger.info(LOG_MESSAGES.MONGODB_LOG, ["find"], [Date.now() - time]);
     return list;
   }
 
@@ -212,7 +214,7 @@ export class PersistentDb implements IDb {
     const time = Date.now();
     return this.db.collection(this.collection).countDocuments(PersistentDb.convertQuery(query))
       .then((result) => {
-        if (Date.now() - time > 100) this.logger.info(LOG_MESSAGES.MONGODB_LOG, ["count"], [Date.now() - time]);
+        if (Date.now() - time > SLOW_QUERY_TIME) this.logger.info(LOG_MESSAGES.MONGODB_LOG, ["count"], [Date.now() - time]);
         return result;
       })
       .catch((error) => PersistentDb.errorExit(error, 8, throwErrorMode));
@@ -221,14 +223,14 @@ export class PersistentDb implements IDb {
   insertOne(doc: object, session?: ClientSession, throwErrorMode?: boolean): Promise<void> {
     const time = Date.now();
     return this.db.collection(this.collection).insertOne(doc, { session }).then(() => { })
-      .then(() => { if (Date.now() - time > 100) this.logger.info(LOG_MESSAGES.MONGODB_LOG, ["insertOne"], [Date.now() - time]) })
+      .then(() => { if (Date.now() - time > SLOW_QUERY_TIME) this.logger.info(LOG_MESSAGES.MONGODB_LOG, ["insertOne"], [Date.now() - time]) })
       .catch((error) => PersistentDb.errorExit(error, 9, throwErrorMode));
   }
 
   insertMany(docs: object[], session?: ClientSession): Promise<void> {
     const time = Date.now();
     return this.db.collection(this.collection).insertMany(docs, { session }).then(() => { })
-      .then(() => { if (Date.now() - time > 100) this.logger.info(LOG_MESSAGES.MONGODB_LOG, ["insertMany"], [Date.now() - time]) })
+      .then(() => { if (Date.now() - time > SLOW_QUERY_TIME) this.logger.info(LOG_MESSAGES.MONGODB_LOG, ["insertMany"], [Date.now() - time]) })
       .catch((error) => PersistentDb.errorExit(error, 10));
   }
 
@@ -236,7 +238,7 @@ export class PersistentDb implements IDb {
     const time = Date.now();
     return this.db.collection(this.collection)
       .findOneAndUpdate({ _id: id }, { $inc: { [field]: 1 } }, { returnDocument: "after" })
-      .then(() => { if (Date.now() - time > 100) this.logger.info(LOG_MESSAGES.MONGODB_LOG, ["increment"], [Date.now() - time]) })
+      .then(() => { if (Date.now() - time > SLOW_QUERY_TIME) this.logger.info(LOG_MESSAGES.MONGODB_LOG, ["increment"], [Date.now() - time]) })
       .then((result: any) => {
         if (result.ok) {
           return result.value[field];
@@ -250,14 +252,14 @@ export class PersistentDb implements IDb {
   updateOneById(id: string, update: object, session?: ClientSession): Promise<void> {
     const time = Date.now();
     return this.db.collection(this.collection).updateOne({ _id: id }, update, { session })
-      .then(() => { if (Date.now() - time > 100) this.logger.info(LOG_MESSAGES.MONGODB_LOG, ["updateOneById"], [Date.now() - time]) })
+      .then(() => { if (Date.now() - time > SLOW_QUERY_TIME) this.logger.info(LOG_MESSAGES.MONGODB_LOG, ["updateOneById"], [Date.now() - time]) })
       .catch((error) => PersistentDb.errorExit(error, 12));
   }
 
   updateOne(filter: object, update: object, session?: ClientSession): Promise<void> {
     const time = Date.now();
     return this.db.collection(this.collection).updateOne(filter, update, { session })
-      .then(() => { if (Date.now() - time > 100) this.logger.info(LOG_MESSAGES.MONGODB_LOG, ["updateOne"], [Date.now() - time]) })
+      .then(() => { if (Date.now() - time > SLOW_QUERY_TIME) this.logger.info(LOG_MESSAGES.MONGODB_LOG, ["updateOne"], [Date.now() - time]) })
       .catch((error) => PersistentDb.errorExit(error, 13));
   }
 
@@ -265,14 +267,14 @@ export class PersistentDb implements IDb {
     const time = Date.now();
     (doc as any)._id = id;
     return this.db.collection(this.collection).replaceOne({ _id: id }, doc, { upsert: true, session })
-      .then(() => { if (Date.now() - time > 100) this.logger.info(LOG_MESSAGES.MONGODB_LOG, ["replaceOneById"], [Date.now() - time]) })
+      .then(() => { if (Date.now() - time > SLOW_QUERY_TIME) this.logger.info(LOG_MESSAGES.MONGODB_LOG, ["replaceOneById"], [Date.now() - time]) })
       .catch((error) => PersistentDb.errorExit(error, 14, throwErrorMode));
   }
 
   deleteOneById(id: string, session?: ClientSession, throwErrorMode?: boolean): Promise<void> {
     const time = Date.now();
     return this.db.collection(this.collection).deleteOne({ _id: id }, { session })
-      .then(() => { if (Date.now() - time > 100) this.logger.info(LOG_MESSAGES.MONGODB_LOG, ["deleteOneById"], [Date.now() - time]) })
+      .then(() => { if (Date.now() - time > SLOW_QUERY_TIME) this.logger.info(LOG_MESSAGES.MONGODB_LOG, ["deleteOneById"], [Date.now() - time]) })
       .catch((error) => PersistentDb.errorExit(error, 15, throwErrorMode));
   }
 
@@ -280,14 +282,14 @@ export class PersistentDb implements IDb {
     const time = Date.now();
     const query = { $and: [{ [field]: { $gte: from } }, { [field]: { $lte: to } }] };
     return this.db.collection(this.collection).deleteMany(PersistentDb.convertQuery(query), { session })
-      .then(() => { if (Date.now() - time > 100) this.logger.info(LOG_MESSAGES.MONGODB_LOG, ["deleteByRange"], [Date.now() - time]) })
+      .then(() => { if (Date.now() - time > SLOW_QUERY_TIME) this.logger.info(LOG_MESSAGES.MONGODB_LOG, ["deleteByRange"], [Date.now() - time]) })
       .catch((error) => PersistentDb.errorExit(error, 16));
   }
 
   deleteAll(session?: ClientSession, throwErrorMode?: boolean): Promise<void> {
     const time = Date.now();
     return this.db.collection(this.collection).deleteMany({}, { session })
-      .then(() => { if (Date.now() - time > 100) this.logger.info(LOG_MESSAGES.MONGODB_LOG, ["deleteAll"], [Date.now() - time]) })
+      .then(() => { if (Date.now() - time > SLOW_QUERY_TIME) this.logger.info(LOG_MESSAGES.MONGODB_LOG, ["deleteAll"], [Date.now() - time]) })
       .catch((error) => PersistentDb.errorExit(error, 17, throwErrorMode));
   }
 
