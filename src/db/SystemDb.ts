@@ -98,6 +98,10 @@ export class SystemDb {
       .catch((reason) => Promise.reject(new DadgetError(ERROR.E1003, [reason.toString()])));
   }
 
+  _getCsn(): number {
+    return this.csn || 0;
+  }
+
   updateCsn(seq: number, session?: any): Promise<void> {
     return this.prepareCsn(session)
       .then(() => this.db.updateOneById(CSN_ID, { $set: { seq } }, session))

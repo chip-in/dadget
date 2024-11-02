@@ -15,9 +15,10 @@ import * as EJSON from "../util/Ejson";
 import { Logger } from "../util/Logger";
 import { ProxyHelper } from "../util/ProxyHelper";
 import { Util } from "../util/Util";
-import Dadget, { CLIENT_VERSION } from "./Dadget";
+import Dadget, { CLIENT_VERSION, CsnMode, QueryResult } from "./Dadget";
 import { DatabaseRegistry, IndexDef } from "./DatabaseRegistry";
 import { UniqueCache } from "./UniqueCache";
+import { SubsetStorage } from "./SubsetStorage";
 
 const KEEP_TIME_AFTER_CONTEXT_MANAGER_MASTER_ACQUIRED_MS = 3000; // 3000ms
 const KEEP_TIME_AFTER_SENDING_ROLLBACK_MS = 1000; // 1000ms
@@ -530,6 +531,37 @@ class ContextManagementServer extends Proxy {
     });
   }
 
+  _query(query: object, csn: number, projection?: object): Promise<QueryResult> {
+    const node = this.context.getNode();
+    const database = this.context.getDatabase();
+    const subsetStorage = (node.searchServiceEngine("SubsetStorage", { database }) as SubsetStorage[]).find((v) => v.isWhole());
+    let promise = subsetStorage ?
+      subsetStorage.waitReady().then(() => subsetStorage.query(csn, query, undefined, undefined, undefined, projection)) :
+      Dadget._query(node, database, query, undefined, undefined, undefined, csn, undefined, projection);
+    return promise;
+  }
+
+  async _updateMany(resultSet: object[], csn: number, operator: object, atomicId?: string): Promise<number> {
+    const idList = resultSet.map((row) => (row as any)._id);
+    let count = 0;
+    while (idList.length > 0) {
+      const ids = idList.splice(0, 2);
+      const result = await this._query({ _id: { $in: ids } }, csn);
+      if (result.restQuery) { throw new Error("The queryHandlers has been empty before completing queries."); }
+      if (result.resultSet.length !== ids.length) { throw new Error(`Update object not found ${result.resultSet.length}, ${ids.length}`); }
+      for (const obj of result.resultSet) {
+        const request = new TransactionRequest();
+        request.type = TransactionType.UPDATE;
+        request.target = (obj as any)._id;
+        request.before = obj;
+        request.operator = operator;
+        count++;
+        await this.procTransaction(result.csn, request, atomicId);
+      }
+    }
+    return count;
+  }
+
   updateMany(query: object, operator: object, atomicId?: string): Promise<object> {
     if (this.context.getLock().isBusy(MASTER_LOCK) || this.atomicLockId && this.atomicLockId !== atomicId) {
       return new Promise<object>((resolve, reject) => {
@@ -542,78 +574,28 @@ class ContextManagementServer extends Proxy {
 
     return new Promise((resolve, reject) => {
       this.context.getLock().acquire(MASTER_LOCK, () => {
-        let _newCsn: number;
         let count = 0;
         return this.context.getLock().acquire(TRANSACTION_LOCK, () => {
           return this.context.getSystemDb().getCsn()
             .then((currentCsn) => {
-              return Dadget._query(this.context.getNode(), this.context.getDatabase(), query,
-                undefined, undefined, undefined, currentCsn, "strict", { _id: 1 })
+              return this._query(query, currentCsn, { _id: 1 })
                 .then((result) => {
                   if (result.restQuery) { throw new Error("The queryHandlers has been empty before completing queries."); }
                   if (this.atomicLockId) {
-                    return Util.promiseEach<object>(
-                      result.resultSet,
-                      (row) => {
-                        return Dadget._query(this.context.getNode(), this.context.getDatabase(),
-                          { _id: (row as any)._id }, undefined, 1, undefined, currentCsn, "strict")
-                          .then((result2) => {
-                            if (result2.restQuery) { throw new Error("The queryHandlers has been empty before completing queries."); }
-                            if (result2.resultSet.length === 0) { throw new Error("Update object not found"); }
-                            const obj = result2.resultSet[0];
-                            const request = new TransactionRequest();
-                            request.type = TransactionType.UPDATE;
-                            request.target = (obj as any)._id;
-                            request.before = obj;
-                            request.operator = operator;
-                            count++;
-                            return this.procTransaction(result2.csn, request, atomicId)
-                              .then(({ newCsn }) => {
-                                _newCsn = newCsn;
-                              });
-                          });
-                      },
-                    );
+                    return this._updateMany(result.resultSet, currentCsn, operator, atomicId).then((_count) => {
+                      count = _count;
+                    });
                   } else {
                     atomicId = Dadget.uuidGen();
                     return this.procTransaction(0, { type: TransactionType.BEGIN, target: "" }, atomicId)
-                      .then(({ newCsn }) => {
-                        _newCsn = newCsn;
-                        return Util.promiseEach<object>(
-                          result.resultSet,
-                          (row) => {
-                            return Dadget._query(this.context.getNode(), this.context.getDatabase(),
-                              { _id: (row as any)._id }, undefined, 1, undefined, currentCsn, "strict")
-                              .then((result2) => {
-                                if (result2.restQuery) { throw new Error("The queryHandlers has been empty before completing queries."); }
-                                if (result2.resultSet.length === 0) { throw new Error("Update object not found"); }
-                                const obj = result2.resultSet[0];
-                                const request = new TransactionRequest();
-                                request.type = TransactionType.UPDATE;
-                                request.target = (obj as any)._id;
-                                request.before = obj;
-                                request.operator = operator;
-                                count++;
-                                return this.procTransaction(result2.csn, request, atomicId)
-                                  .then(({ newCsn }) => {
-                                    _newCsn = newCsn;
-                                  });
-                              });
-                          },
-                        );
-                      })
+                      .then(() => this._updateMany(result.resultSet, currentCsn, operator, atomicId))
                       .catch((reason) => {
                         return this.procTransaction(0, { type: TransactionType.ABORT, target: "" }, atomicId)
-                          .then(({ newCsn }) => {
-                            _newCsn = newCsn;
-                          })
                           .then(() => { throw reason; });
                       })
-                      .then(() => {
-                        return this.procTransaction(0, { type: TransactionType.END, target: "" }, atomicId)
-                          .then(({ newCsn }) => {
-                            _newCsn = newCsn;
-                          });
+                      .then((_count) => {
+                        count = _count;
+                        return this.procTransaction(0, { type: TransactionType.END, target: "" }, atomicId).then(() => { });
                       });
                   }
                 });
@@ -623,7 +605,7 @@ class ContextManagementServer extends Proxy {
           this.lastBeforeObj = undefined;
           resolve({
             status: "OK",
-            csn: _newCsn,
+            csn: this.context.getSystemDb()._getCsn(),
             count,
           });
         }, (reason) => {
@@ -633,7 +615,7 @@ class ContextManagementServer extends Proxy {
           this.logger.warn(LOG_MESSAGES.ERROR_CAUSE, [cause.toString()]);
           resolve({
             status: "NG",
-            csn: _newCsn,
+            csn: this.context.getSystemDb()._getCsn(),
             reason: cause,
           });
         }).then(() => this.notifyAllWaitingList());
