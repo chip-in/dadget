@@ -1128,7 +1128,7 @@ export class SubsetStorage extends ServiceEngine implements Proxy {
     }
     const restQuery = LogicalOperator.getOutsideOfCache(query, this.subsetDefinition.query);
     this.logger.info(LOG_MESSAGES.COUNT_CSN, [csnMode || ""], [csn]);
-    this.logger.debug(LOG_MESSAGES.COUNT, [JSON.stringify(query)]);
+    this.logger.info(LOG_MESSAGES.COUNT, [JSON.stringify(query)]);
     let release: () => void;
     const promise = new Promise<void>((resolve, reject) => {
       this.getLock().readLock((unlock) => {
@@ -1211,7 +1211,7 @@ export class SubsetStorage extends ServiceEngine implements Proxy {
     }
     if (limit && limit < 0) { limit = this.option.exportMaxLines; }
     this.logger.info(LOG_MESSAGES.QUERY_CSN, [csnMode || ""], [csn]);
-    this.logger.debug(LOG_MESSAGES.QUERY, [JSON.stringify(query)]);
+    this.logger.info(LOG_MESSAGES.QUERY, [JSON.stringify(query)]);
     let release: () => void;
     const promise = new Promise<void>((resolve, reject) => {
       this.getLock().readLock((unlock) => {
