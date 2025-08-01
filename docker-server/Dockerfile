@@ -4,7 +4,6 @@ ENV CI_HOME=/usr/local/chip-in
 
 RUN apk update
 COPY . ${CI_HOME}
-RUN npm set unsafe-perm true
 WORKDIR ${CI_HOME}
 RUN npm install
 RUN npm run clean
