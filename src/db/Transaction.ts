@@ -63,7 +63,7 @@ export class TransactionRequest {
   operator?: { [op: string]: any };
 
   static getNew(self: TransactionRequest): object {
-    return typeof self.new === "string" ? EJSON.parse(self.new) : self.new;
+    return typeof self.new === "string" ? EJSON.parse(self.new) : self.new!;
   }
 
   static getBefore(self: TransactionRequest): { [key: string]: any } {

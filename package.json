@@ -59,7 +59,7 @@
     "@types/command-line-usage": "^5.0.1",
     "@types/deep-diff": "0.0.31",
     "@types/deep-equal": "^1.0.1",
-    "@types/node": "14.14.41",
+    "@types/node": "^22.17.0",
     "@types/object-hash": "0.5.29",
     "@types/rwlock": "^5.0.2",
     "@types/split2": "^3.2.1",
@@ -72,7 +72,7 @@
     "mongodb-extended-json": "^1.10.0",
     "tslint": "^6.1.3",
     "typedoc": "^0.14.2",
-    "typescript": "4.5.5"
+    "typescript": "5.8.3"
   },
   "publishConfig": {
     "access": "public"
