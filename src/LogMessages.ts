@@ -71,6 +71,7 @@ export const LOG_MESSAGES = {
   QUEUE_WAITING: { code: 70, msg: "queue waiting" },
   MONGODB_LOG: { code: 73, msg: "MONGODB: %1, %d1" },
   TOO_LARGE_RESPONSE: { code: 74, msg: "too large response!, %1" },
+  MANY_ROWS_RESPONSE: { code: 75, msg: "many rows response!, %d1, %1" },
   DEBUG_LOG: { code: 9999, msg: "dadget info: %1" },
 };
 

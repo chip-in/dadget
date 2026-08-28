@@ -1049,7 +1049,7 @@ export class SubsetStorage extends ServiceEngine implements Proxy {
     if (url.pathname == null) { throw new Error("pathname is required."); }
     const method = req.method.toUpperCase();
     this.logger.debug(LOG_MESSAGES.ON_RECEIVE, [method, url.pathname]);
-    const procQuery = (request: any) => {
+    const procQuery = async (request: any) => {
       const csn = ProxyHelper.validateNumberRequired(request.csn, "csn");
       const query = EJSON.parse(request.query);
       const sort = request.sort ? EJSON.parse(request.sort) : undefined;
@@ -1057,33 +1057,37 @@ export class SubsetStorage extends ServiceEngine implements Proxy {
       const offset = ProxyHelper.validateNumber(request.offset, "offset");
       const projection = request.projection ? EJSON.parse(request.projection) : undefined;
       if (request.version && Number(request.version) > CLIENT_VERSION) throw new DadgetError(ERROR.E3002);
-      return this.query(csn, query, sort, limit, request.csnMode, projection, offset)
-        .then((result) => {
-          let total = 0;
-          let count = 0;
-          let length = result.resultSet.length;
-          for (const obj of result.resultSet) {
-            total += JSON.stringify(obj).length + 1;
-            count += 1;
-            if (limit === EXPORT_LIMIT_NUM) {
-              if (total > MAX_STRING_LENGTH) {
-                result.resultSet = result.resultSet.slice(0, Math.max(1, count - 1));
-                return { status: "OK", result };
-              }
-            } else {
-              if ((total / count) * length > MAX_STRING_LENGTH) {
-                this.logger.warn(LOG_MESSAGES.TOO_LARGE_RESPONSE, [JSON.stringify(query)]);
-                let ids: any[] = [];
-                for (const obj of result.resultSet) {
-                  ids.push({ _id: (obj as any)._id });
-                }
-                result.resultSet = ids;
-                return { status: "HUGE", result };
-              }
-            }
+      let result = await this.query(csn, query, sort, limit, request.csnMode, { _id: 1 }, offset);
+      let length = result.resultSet.length;
+      if (length > MAX_EXPORT_NUM * 10 && limit !== EXPORT_LIMIT_NUM) {
+            this.logger.warn(LOG_MESSAGES.MANY_ROWS_RESPONSE, [JSON.stringify(query)], [length]);
+            return { status: "HUGE", result };
+      }
+      result = await this.query(csn, query, sort, limit, request.csnMode, projection, offset);
+      let total = 0;
+      let count = 0;
+      length = result.resultSet.length;
+      for (const obj of result.resultSet) {
+        total += JSON.stringify(obj).length + 1;
+        count += 1;
+        if (limit === EXPORT_LIMIT_NUM) {
+          if (total > MAX_STRING_LENGTH) {
+            result.resultSet = result.resultSet.slice(0, Math.max(1, count - 1));
+            return { status: "OK", result };
           }
-          return { status: "OK", result };
-        });
+        } else {
+          if ((total / count) * length > MAX_STRING_LENGTH) {
+            this.logger.warn(LOG_MESSAGES.TOO_LARGE_RESPONSE, [JSON.stringify(query)]);
+            let ids: any[] = [];
+            for (const obj of result.resultSet) {
+              ids.push({ _id: (obj as any)._id });
+            }
+            result.resultSet = ids;
+            return { status: "HUGE", result };
+          }
+        }
+      }
+      return { status: "OK", result };
     };
     const procCount = (request: any) => {
       const csn = ProxyHelper.validateNumberRequired(request.csn, "csn");
