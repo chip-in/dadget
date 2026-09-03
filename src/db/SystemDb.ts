@@ -11,6 +11,7 @@ export class SystemDb {
   private isFirstCsnAccess = true;
   private queryHash: string;
   private csn?: number;
+  private pendingCsn?: number;
 
   constructor(private db: IDb) {
     db.setCollection(SYSTEM_COLLECTION);
@@ -38,10 +39,18 @@ export class SystemDb {
   }
 
   async commitTransaction(session: any) {
-    return await this.db.commitTransaction(session);
+    await this.db.commitTransaction(session);
+    // トランザクション内で更新したcsnはコミット完了後にキャッシュへ反映する
+    // (ロックフリー読み取りが未コミットのcsnを観測しないようにするため)
+    if (this.pendingCsn !== undefined) {
+      this.isNewDb = false;
+      this.csn = this.pendingCsn;
+      this.pendingCsn = undefined;
+    }
   }
 
   async abortTransaction(session: any) {
+    this.pendingCsn = undefined;
     return await this.db.abortTransaction(session);
   }
 
@@ -106,8 +115,13 @@ export class SystemDb {
     return this.prepareCsn(session)
       .then(() => this.db.updateOneById(CSN_ID, { $set: { seq } }, session))
       .then(() => {
-        this.isNewDb = false;
-        this.csn = seq;
+        if (session) {
+          // トランザクション内の更新はコミット後(commitTransaction)にキャッシュへ反映する
+          this.pendingCsn = seq;
+        } else {
+          this.isNewDb = false;
+          this.csn = seq;
+        }
       })
       .catch((reason) => Promise.reject(new DadgetError(ERROR.E1004, [reason.toString()])));
   }

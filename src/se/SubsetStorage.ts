@@ -6,7 +6,7 @@ import * as URL from "url";
 import * as EJSON from "../util/Ejson";
 
 import { Proxy, ResourceNode, ServiceEngine, Subscriber } from "@chip-in/resource-node";
-import { CORE_NODE, EXPORT_LIMIT_NUM, MAX_EXPORT_NUM, MAX_STRING_LENGTH, SPLIT_IN_SUBSET_DB } from "../Config";
+import { CORE_NODE, EXPORT_LIMIT_NUM, MAX_EXPORT_NUM, MAX_ROWS_NUM, MAX_STRING_LENGTH, Mongo, SPLIT_IN_SUBSET_DB } from "../Config";
 import { CacheDb } from "../db/container/CacheDb";
 import { PersistentDb } from "../db/container/PersistentDb";
 import { JournalDb } from "../db/JournalDb";
@@ -24,6 +24,8 @@ import { CLIENT_VERSION, CountResult, CsnMode, default as Dadget, QueryResult } 
 import { DatabaseRegistry, SubsetDef } from "./DatabaseRegistry";
 
 const MAX_RESPONSE_SIZE_OF_JOURNALS = 10485760;
+const LOCK_FREE_RETRY_MAX = 3;
+const LOCK_FREE_RETRY_WAIT_MS = 100;
 
 class UpdateProcessor extends Subscriber {
 
@@ -231,7 +233,12 @@ class UpdateProcessor extends Subscriber {
         } else if (type === TransactionType.DELETE && transaction.before) {
           await this.storage.getSubsetDb().deleteById(transaction.target, session, true);
         } else if (type === TransactionType.TRUNCATE) {
-          await this.storage.getSubsetDb().deleteAll(undefined, true);
+          this.storage.enterUnsafeWrite();
+          try {
+            await this.storage.getSubsetDb().deleteAll(undefined, true);
+          } finally {
+            this.storage.leaveUnsafeWrite();
+          }
         } else if (type === TransactionType.BEGIN || type === TransactionType.BEGIN_IMPORT) {
           this.storage.committedCsn = transaction.committedCsn;
         } else if (type === TransactionType.END || type === TransactionType.END_IMPORT) {
@@ -278,6 +285,16 @@ class UpdateProcessor extends Subscriber {
   }
 
   private async rollbackSubsetDb(csn: number, withJournal: boolean): Promise<void> {
+    // 複数ステップの非アトミック書き込みとなるため、ロックフリー読み取りにダーティ区間を通知する
+    this.storage.enterUnsafeWrite();
+    try {
+      return await this.rollbackSubsetDbBody(csn, withJournal);
+    } finally {
+      this.storage.leaveUnsafeWrite();
+    }
+  }
+
+  private async rollbackSubsetDbBody(csn: number, withJournal: boolean): Promise<void> {
     this.logger.warn(LOG_MESSAGES.ROLLBACK_TRANSACTIONS, [], [csn]);
     // Csn of the range is not csn + 1 for keeping last journal
     const firstJournalCsn = withJournal ? csn : csn + 1;
@@ -336,6 +353,16 @@ class UpdateProcessor extends Subscriber {
   }
 
   private async rollforwardSubsetDb(fromCsn: number, toCsn: number): Promise<void> {
+    // 複数ステップの非アトミック書き込みとなるため、ロックフリー読み取りにダーティ区間を通知する
+    this.storage.enterUnsafeWrite();
+    try {
+      return await this.rollforwardSubsetDbBody(fromCsn, toCsn);
+    } finally {
+      this.storage.leaveUnsafeWrite();
+    }
+  }
+
+  private async rollforwardSubsetDbBody(fromCsn: number, toCsn: number): Promise<void> {
     this.logger.warn(LOG_MESSAGES.ROLLFORWARD_TRANSACTIONS, [], [fromCsn, toCsn]);
     const transactions = await this.storage.getJournalDb().findByCsnRange(fromCsn + 1, toCsn, undefined);
     transactions.sort((a, b) => a.csn - b.csn);
@@ -439,6 +466,15 @@ class UpdateProcessor extends Subscriber {
     if (csn === 0) { return this.resetData0(); }
     this.logger.warn(LOG_MESSAGES.RESET_DATA, [], [csn]);
     this.storage.pause();
+    this.storage.enterUnsafeWrite();
+    try {
+      return await this.resetDataBody(csn, withJournal);
+    } finally {
+      this.storage.leaveUnsafeWrite();
+    }
+  }
+
+  private async resetDataBody(csn: number, withJournal: boolean): Promise<void> {
     const query = this.subsetDefinition.query ? this.subsetDefinition.query : {};
     try {
       const fetchJournal = await this.fetchJournal(csn);
@@ -491,6 +527,7 @@ class UpdateProcessor extends Subscriber {
   private async resetData0(): Promise<void> {
     this.logger.warn(LOG_MESSAGES.RESET_DATA0);
     this.storage.pause();
+    this.storage.enterUnsafeWrite();
     try {
       await Promise.resolve();
       await this.storage.getJournalDb().deleteAll();
@@ -502,6 +539,8 @@ class UpdateProcessor extends Subscriber {
     } catch (e) {
       this.logger.error(LOG_MESSAGES.ERROR_MSG, [e.toString()], [207]);
       throw e;
+    } finally {
+      this.storage.leaveUnsafeWrite();
     }
   }
 }
@@ -767,6 +806,8 @@ export class SubsetStorage extends ServiceEngine implements Proxy {
   private mountHandle: string;
   private mounted = false;
   private lock: ReadWriteLock;
+  private unsafeWriteCount = 0;
+  private unsafeWriteEpoch = 0;
   private queryWaitingList: { [csn: number]: (() => Promise<any>)[] } = {};
   private subscriberKey: string | null;
   private readyFlag: boolean = false;
@@ -812,6 +853,20 @@ export class SubsetStorage extends ServiceEngine implements Proxy {
 
   getLock(): ReadWriteLock {
     return this.lock;
+  }
+
+  /**
+   * 非アトミックな複数ステップ書き込み(ABORT/FORCE_ROLLBACKの巻き戻し、TRUNCATE、resetData等)の
+   * 開始をロックフリー読み取りへ通知する。この区間と重なった読み取りはリトライされる。
+   */
+  enterUnsafeWrite(): void {
+    this.unsafeWriteCount++;
+    this.unsafeWriteEpoch++;
+  }
+
+  leaveUnsafeWrite(): void {
+    this.unsafeWriteCount--;
+    this.unsafeWriteEpoch++;
   }
 
   getDbName(): string {
@@ -1049,7 +1104,7 @@ export class SubsetStorage extends ServiceEngine implements Proxy {
     if (url.pathname == null) { throw new Error("pathname is required."); }
     const method = req.method.toUpperCase();
     this.logger.debug(LOG_MESSAGES.ON_RECEIVE, [method, url.pathname]);
-    const procQuery = (request: any) => {
+    const procQuery = async (request: any) => {
       const csn = ProxyHelper.validateNumberRequired(request.csn, "csn");
       const query = EJSON.parse(request.query);
       const sort = request.sort ? EJSON.parse(request.sort) : undefined;
@@ -1057,33 +1112,37 @@ export class SubsetStorage extends ServiceEngine implements Proxy {
       const offset = ProxyHelper.validateNumber(request.offset, "offset");
       const projection = request.projection ? EJSON.parse(request.projection) : undefined;
       if (request.version && Number(request.version) > CLIENT_VERSION) throw new DadgetError(ERROR.E3002);
-      return this.query(csn, query, sort, limit, request.csnMode, projection, offset)
-        .then((result) => {
-          let total = 0;
-          let count = 0;
-          let length = result.resultSet.length;
-          for (const obj of result.resultSet) {
-            total += JSON.stringify(obj).length + 1;
-            count += 1;
-            if (limit === EXPORT_LIMIT_NUM) {
-              if (total > MAX_STRING_LENGTH) {
-                result.resultSet = result.resultSet.slice(0, Math.max(1, count - 1));
-                return { status: "OK", result };
-              }
-            } else {
-              if ((total / count) * length > MAX_STRING_LENGTH) {
-                this.logger.warn(LOG_MESSAGES.TOO_LARGE_RESPONSE, [JSON.stringify(query)]);
-                let ids: any[] = [];
-                for (const obj of result.resultSet) {
-                  ids.push({ _id: (obj as any)._id });
-                }
-                result.resultSet = ids;
-                return { status: "HUGE", result };
-              }
-            }
+      let result = await this.query(csn, query, sort, limit, request.csnMode, { _id: 1 }, offset);
+      let length = result.resultSet.length;
+      if (length > MAX_EXPORT_NUM * 10 && limit !== EXPORT_LIMIT_NUM) {
+            this.logger.warn(LOG_MESSAGES.MANY_ROWS_RESPONSE, [JSON.stringify(query)], [length]);
+            return { status: "HUGE", result };
+      }
+      result = await this.query(csn, query, sort, limit, request.csnMode, projection, offset);
+      let total = 0;
+      let count = 0;
+      length = result.resultSet.length;
+      for (const obj of result.resultSet) {
+        total += JSON.stringify(obj).length + 1;
+        count += 1;
+        if (limit === EXPORT_LIMIT_NUM) {
+          if (total > MAX_STRING_LENGTH) {
+            result.resultSet = result.resultSet.slice(0, Math.max(1, count - 1));
+            return { status: "OK", result };
           }
-          return { status: "OK", result };
-        });
+        } else {
+          if ((total / count) * length > MAX_STRING_LENGTH) {
+            this.logger.warn(LOG_MESSAGES.TOO_LARGE_RESPONSE, [JSON.stringify(query)]);
+            let ids: any[] = [];
+            for (const obj of result.resultSet) {
+              ids.push({ _id: (obj as any)._id });
+            }
+            result.resultSet = ids;
+            return { status: "HUGE", result };
+          }
+        }
+      }
+      return { status: "OK", result };
     };
     const procCount = (request: any) => {
       const csn = ProxyHelper.validateNumberRequired(request.csn, "csn");
@@ -1129,6 +1188,68 @@ export class SubsetStorage extends ServiceEngine implements Proxy {
     const restQuery = LogicalOperator.getOutsideOfCache(query, this.subsetDefinition.query);
     this.logger.info(LOG_MESSAGES.COUNT_CSN, [csnMode || ""], [csn]);
     this.logger.info(LOG_MESSAGES.COUNT, [JSON.stringify(query)]);
+    if (this.type === "persistent" && Mongo.useTransaction()) {
+      return this.countLockFree(csn, query, innerQuery, restQuery, csnMode);
+    }
+    return this.countWithLock(csn, query, innerQuery, restQuery, csnMode);
+  }
+
+  /**
+   * ロックフリー版count。csnスタンプフィルタで対象csn時点までに確定した行のみを数え、
+   * その後に更新された行はジャーナルのbefore像から補正する。
+   * countは行の同定ができず読み取り中の更新による二重計上を排除できないため、
+   * 読み取り前後でcsnが動いていたらリトライし、リトライ超過時は従来のロック方式へフォールバックする。
+   */
+  private async countLockFree(csn: number, query: object, innerQuery: object, restQuery: object | undefined, csnMode?: CsnMode): Promise<CountResult> {
+    const protectedCsn = this.getJournalDb().getProtectedCsn();
+    for (let attempt = 0; attempt < LOCK_FREE_RETRY_MAX; attempt++) {
+      if (attempt > 0) { await new Promise<void>((resolve) => setTimeout(resolve, LOCK_FREE_RETRY_WAIT_MS)); }
+      if (this.unsafeWriteCount > 0) { continue; }
+      const epoch = this.unsafeWriteEpoch;
+      const currentCsn = await this.getSystemDb().getCsn();
+      let target = csn;
+      if (target === 0 || (target < currentCsn && csnMode === "latest")) {
+        target = Math.max(target, this.committedCsn || currentCsn);
+      }
+      if (target > currentCsn) {
+        this.logger.warn(LOG_MESSAGES.WAIT_FOR_TRANSACTIONS, [], [target, currentCsn]);
+        // wait for transaction journals
+        this.updateProcessor.proceedTransaction(target);
+        return new Promise<CountResult>((resolve, reject) => {
+          if (!this.queryWaitingList[target]) { this.queryWaitingList[target] = []; }
+          this.queryWaitingList[target].push(() => {
+            return this.getSubsetDb().count(innerQuery, true)
+              .then((result) => {
+                resolve({ csn: target, resultCount: result, restQuery });
+              }).catch((reason) => reject(reason));
+          });
+        });
+      }
+      if (target < protectedCsn) {
+        throw new DadgetError(ERROR.E2402, [target, protectedCsn]);
+      }
+      const stampedQuery = { $and: [innerQuery, { $or: [{ csn: { $lte: target } }, { csn: { $exists: false } }] }] };
+      const resultCount = await this.getSubsetDb().count(stampedQuery, true);
+      const csnAfter = await this.getSystemDb().getCsn();
+      if (csnAfter !== currentCsn || this.unsafeWriteEpoch !== epoch || this.unsafeWriteCount > 0) { continue; }
+      let restoredCount = 0;
+      if (currentCsn > target) {
+        const transactions = await this.getJournalDb().findByCsnRange(target + 1, currentCsn);
+        if (this.unsafeWriteEpoch !== epoch || this.unsafeWriteCount > 0) { continue; }
+        if (transactions.length !== currentCsn - target) {
+          this.logger.info(LOG_MESSAGES.INSUFFICIENT_ROLLBACK_TRANSACTIONS);
+          return { csn: target, resultCount: 0, restQuery: query };
+        }
+        if (transactions.some((t) => t.type === TransactionType.TRUNCATE || t.type === TransactionType.FORCE_ROLLBACK)) { continue; }
+        restoredCount = SubsetStorage.restoreRowsAtCsn([], transactions, innerQuery, target).length;
+      }
+      return { csn: target, resultCount: resultCount + restoredCount, restQuery };
+    }
+    this.logger.warn(LOG_MESSAGES.LOCK_FREE_FALLBACK, [JSON.stringify(query)]);
+    return this.countWithLock(csn, query, innerQuery, restQuery, csnMode);
+  }
+
+  private countWithLock(csn: number, query: object, innerQuery: object, restQuery: object | undefined, csnMode?: CsnMode): Promise<CountResult> {
     let release: () => void;
     const promise = new Promise<void>((resolve, reject) => {
       this.getLock().readLock((unlock) => {
@@ -1210,8 +1331,120 @@ export class SubsetStorage extends ServiceEngine implements Proxy {
       return Promise.resolve({ csn, resultSet: [], restQuery: query, csnMode });
     }
     if (limit && limit < 0) { limit = this.option.exportMaxLines; }
+    const maxRowsLimited = !limit;
+    if (!limit) { limit = MAX_ROWS_NUM; }
     this.logger.info(LOG_MESSAGES.QUERY_CSN, [csnMode || ""], [csn]);
     this.logger.info(LOG_MESSAGES.QUERY, [JSON.stringify(query)]);
+    const promise = this.type === "persistent" && Mongo.useTransaction() ?
+      this.queryLockFree(csn, query, innerQuery, restQuery, sort, limit, csnMode, projection, offset) :
+      this.queryWithLock(csn, query, innerQuery, restQuery, sort, limit, csnMode, projection, offset);
+    if (!maxRowsLimited) { return promise; }
+    return promise.then((result) => {
+      if (result.resultSet.length >= MAX_ROWS_NUM) {
+        this.logger.warn(LOG_MESSAGES.MAX_ROWS_LIMIT, [JSON.stringify(query)], [result.resultSet.length]);
+      }
+      return result;
+    });
+  }
+
+  /**
+   * ロックフリー版query。csnスタンプフィルタ(csn <= 対象csn)で対象csn時点までに確定した行のみを読み、
+   * 読み取り中に更新・削除された行はジャーナルのbefore像から復元(追加)する。
+   * スタンプフィルタにより除去の補正は不要で、復元行の追加のみでよい。
+   * 巻き戻し不能な変更(TRUNCATE等)や非アトミック書き込みと重なった場合はリトライし、
+   * リトライ超過時は従来のロック方式へフォールバックする。
+   */
+  private async queryLockFree(
+    csn: number, query: object, innerQuery: object, restQuery: object | undefined,
+    sort?: object, limit?: number, csnMode?: CsnMode, projection?: object, offset?: number): Promise<QueryResult> {
+    const protectedCsn = this.getJournalDb().getProtectedCsn();
+    // sortとprojectionが同時指定の場合、復元行のマージにはソートキーが必要になる。
+    // 射影後にソートキーが保持されるかを判定し、必要なら取得用射影にソートキーを補えるよう準備する
+    const sortMerge = sort && projection ? SubsetStorage.projectionForSortMerge(projection, sort) : null;
+    let useAugmented = false;
+    for (let attempt = 0; attempt < LOCK_FREE_RETRY_MAX; attempt++) {
+      if (attempt > 0) { await new Promise<void>((resolve) => setTimeout(resolve, LOCK_FREE_RETRY_WAIT_MS)); }
+      if (this.unsafeWriteCount > 0) { continue; }
+      const epoch = this.unsafeWriteEpoch;
+      const currentCsn = await this.getSystemDb().getCsn();
+      let target = csn;
+      if (target === 0 || (target < currentCsn && csnMode === "latest")) {
+        target = Math.max(target, this.committedCsn || currentCsn);
+      }
+      if (target > currentCsn) {
+        this.logger.warn(LOG_MESSAGES.WAIT_FOR_TRANSACTIONS, [], [target, currentCsn]);
+        // wait for transaction journals
+        this.updateProcessor.proceedTransaction(target);
+        return new Promise<QueryResult>((resolve, reject) => {
+          if (!this.queryWaitingList[target]) { this.queryWaitingList[target] = []; }
+          this.queryWaitingList[target].push(() => {
+            return this.getSubsetDb().find(innerQuery, sort, limit, projection, offset, true)
+              .then((result) => {
+                resolve({ csn: target, resultSet: result, restQuery });
+              }).catch((reason) => reject(reason));
+          });
+        });
+      }
+      if (target < protectedCsn) {
+        throw new DadgetError(ERROR.E2402, [target, protectedCsn]);
+      }
+      // 対象csn時点までに書き込まれた行のみを読む(書き込み途中の行や新しい行の混入を防ぐ)
+      const stampedQuery = { $and: [innerQuery, { $or: [{ csn: { $lte: target } }, { csn: { $exists: false } }] }] };
+      const maxLimit = (limit as number) + (offset ? offset : 0);
+      const fetchProjection = useAugmented && sortMerge ? sortMerge.fetchProjection : projection;
+      const rows = await this.getSubsetDb().find(stampedQuery, sort, maxLimit, fetchProjection, undefined, true);
+      const csnAfter = await this.getSystemDb().getCsn();
+      if (csnAfter < currentCsn || this.unsafeWriteEpoch !== epoch || this.unsafeWriteCount > 0) { continue; }
+      let restored: object[] = [];
+      if (csnAfter > target) {
+        const transactions = await this.getJournalDb().findByCsnRange(target + 1, csnAfter);
+        if (this.unsafeWriteEpoch !== epoch || this.unsafeWriteCount > 0) { continue; }
+        if (transactions.length !== csnAfter - target) {
+          this.logger.info(LOG_MESSAGES.INSUFFICIENT_ROLLBACK_TRANSACTIONS);
+          return { csn: target, resultSet: [], restQuery: query };
+        }
+        if (transactions.some((t) => t.type === TransactionType.TRUNCATE || t.type === TransactionType.FORCE_ROLLBACK)) { continue; }
+        restored = SubsetStorage.restoreRowsAtCsn(rows, transactions, innerQuery, target);
+        if (restored.length > 0 && sort && projection) {
+          // 復元行のマージにはソートキーが必要
+          if (sortMerge === null) { continue; }  // ドットパス衝突等で補完不能 → リトライ(超過時フォールバック)
+          if (sortMerge.needsStrip && !useAugmented) {
+            // ソートキーを射影に補って取得し直す
+            useAugmented = true;
+            continue;
+          }
+        }
+      }
+      let resultSet: any[] = rows;
+      if (restored.length > 0) {
+        if (sort) {
+          // 復元行(フル文書)はソートキーを持つ。行側は「射影後もソートキーが保持される」か
+          // 「ソートキーを補って取得した(useAugmented)」のいずれかなのでマージ可能
+          const merging = projection && !useAugmented ? restored.map((val) => Util.project(val, projection)) : restored;
+          resultSet = Util.mongoSearch(rows.concat(merging), {}, sort) as any[];
+        } else if (projection) {
+          resultSet = rows.concat(restored.map((val) => Util.project(val, projection)));
+        } else {
+          resultSet = rows.concat(restored);
+        }
+      }
+      const _offset = offset ? offset : 0;
+      if (_offset || resultSet.length > (limit as number)) {
+        resultSet = resultSet.slice(_offset, _offset + (limit as number));
+      }
+      if (useAugmented && projection) {
+        // 取得時に補ったソートキーを取り除き、元の射影に揃える(slice後なので対象は返却行のみ)
+        resultSet = resultSet.map((val) => Util.project(val, projection));
+      }
+      return { csn: target, resultSet, restQuery };
+    }
+    this.logger.warn(LOG_MESSAGES.LOCK_FREE_FALLBACK, [JSON.stringify(query)]);
+    return this.queryWithLock(csn, query, innerQuery, restQuery, sort, limit, csnMode, projection, offset);
+  }
+
+  private queryWithLock(
+    csn: number, query: object, innerQuery: object, restQuery: object | undefined,
+    sort?: object, limit?: number, csnMode?: CsnMode, projection?: object, offset?: number): Promise<QueryResult> {
     let release: () => void;
     const promise = new Promise<void>((resolve, reject) => {
       this.getLock().readLock((unlock) => {
@@ -1306,6 +1539,87 @@ export class SubsetStorage extends ServiceEngine implements Proxy {
         this.logger.warn(LOG_MESSAGES.ERROR_MSG, [e.toString()], [217]);
         return Promise.reject(e);
       });
+  }
+
+  /**
+   * sortとprojectionが同時指定されたロックフリー読み取りで、復元行をマージできるようにするための判定。
+   * 射影後もソートキーが保持される場合は needsStrip: false(そのままの射影で取得可能)。
+   * 保持されない包含射影の場合は、取得用射影にソートキーを補った fetchProjection を返す(needsStrip: true。
+   * 返却前に元のprojectionを適用してソートキーを取り除く必要がある)。
+   * ドットパスの衝突などで正しく補完できない場合は null(呼び出し側はリトライ/フォールバック)。
+   */
+  static projectionForSortMerge(projection: any, sort: object): { fetchProjection: object, needsStrip: boolean } | null {
+    // Util.projectと同じ規則で包含/除外モードを判定する
+    let mode = projection._id;
+    for (const key of Object.keys(projection)) {
+      if (key !== "_id") { mode = projection[key]; }
+    }
+    const sortKeys = Object.keys(sort);
+    if (mode === 0) {
+      // 除外射影: ソートキーの最上位セグメントが除外されていなければ射影後も保持される
+      for (const key of Object.keys(projection)) {
+        if (key === "_id") { continue; }
+        const excludedSeg = key.split(".")[0];
+        for (const sortKey of sortKeys) {
+          if (sortKey.split(".")[0] === excludedSeg) { return null; }
+        }
+      }
+      return { fetchProjection: projection, needsStrip: false };
+    }
+    // 包含射影: フィールド丸ごと包含済みならソートキーも保持される。未包含なら補完する
+    const segHasWholeKey = new Map<string, boolean>();
+    for (const key of Object.keys(projection)) {
+      if (key === "_id") { continue; }
+      const seg = key.split(".")[0];
+      segHasWholeKey.set(seg, (segHasWholeKey.get(seg) || false) || key === seg);
+    }
+    const fetchProjection: any = { ...projection };
+    let needsStrip = false;
+    for (const sortKey of sortKeys) {
+      const seg = sortKey.split(".")[0];
+      if (segHasWholeKey.get(seg) === true) { continue; }
+      if (segHasWholeKey.has(seg)) { return null; }  // "a.c"のような部分包含と衝突 → 補完不可
+      fetchProjection[sortKey] = 1;
+      needsStrip = true;
+    }
+    return { fetchProjection, needsStrip };
+  }
+
+  /**
+   * ロックフリー読み取りの補正。読み取り結果(rows)に含まれないが対象csn時点には存在した行を、
+   * ジャーナルのbefore像から復元して返す。
+   * 読み取りは csn <= targetCsn のスタンプフィルタ付きで行われるため、除去の補正は不要で追加のみでよい。
+   */
+  static restoreRowsAtCsn(rows: any[], transactions: TransactionObject[], query: object, targetCsn: number): object[] {
+    const txs = [...transactions].sort((a, b) => b.csn - a.csn);
+    // _idごとに対象csn時点の姿(before像)を求める。csn降順に走査するため、最後に設定された値(=窓内で最古のbefore像)が残る
+    const candidates = new Map<string, object | null>();
+    let committedCsn: number | undefined;
+    for (const trans of txs) {
+      if (committedCsn !== undefined && committedCsn < trans.csn) { continue; }
+      if (trans.type === TransactionType.ABORT || trans.type === TransactionType.ABORT_IMPORT) {
+        if (trans.committedCsn === undefined) { throw new Error("committedCsn required"); }
+        committedCsn = trans.committedCsn;
+        continue;
+      }
+      if (trans.before) {
+        candidates.set(trans.target, TransactionRequest.getBefore(trans));
+      } else if (trans.type === TransactionType.INSERT || trans.type === TransactionType.RESTORE) {
+        candidates.set(trans.target, null);
+      }
+    }
+    const existing = new Set(rows.map((row) => row._id));
+    const out: object[] = [];
+    for (const entry of candidates) {
+      const id = entry[0];
+      const before = entry[1];
+      if (!before) { continue; }
+      if (existing.has(id)) { continue; }
+      // before像は対象csn時点の姿のはずであり、スタンプが新しいものは復元対象外(防御的チェック)
+      if ((before as any).csn !== undefined && (before as any).csn > targetCsn) { continue; }
+      if (Util.mongoSearch([before], query).length > 0) { out.push(before); }
+    }
+    return out;
   }
 
   static rollbackAndFind(orgList: any[], transactions: TransactionObject[], query: object, sort?: object, limit?: number, offset?: number): any[] {
