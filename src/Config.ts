@@ -8,7 +8,7 @@ export const SPLIT_IN_INDEXED_DB = "__";
 export const MAX_EXPORT_NUM = 1000;
 export const EXPORT_LIMIT_NUM = -1;
 export const MAX_STRING_LENGTH = 500 * 1024 * 1024;
-export const MAX_ROWS_NUM = 10000000;
+export const MAX_ROWS_NUM = 2000000;
 
 export class Mongo {
   private static option: MongoClientOptions;
