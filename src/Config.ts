@@ -8,7 +8,16 @@ export const SPLIT_IN_INDEXED_DB = "__";
 export const MAX_EXPORT_NUM = 1000;
 export const EXPORT_LIMIT_NUM = -1;
 export const MAX_STRING_LENGTH = 500 * 1024 * 1024;
-export const MAX_ROWS_NUM = 2000000;
+// limit未指定時の取得上限行数。WebSocket中継の1メッセージ上限(CNODE_WSOCKET_MAX_PAYLOAD、既定100MiB)に
+// _idのみの行(約52バイト/行、socket.ioのエスケープ込み)が収まる行数で、既定値では2,000,000行になる
+const WSOCKET_MAX_PAYLOAD_DEFAULT = 104857600;
+const MAX_ROWS_NUM_DEFAULT = 2000000;
+function getWsocketMaxPayload(): number {
+  const env = typeof process !== "undefined" && process.env ? process.env.CNODE_WSOCKET_MAX_PAYLOAD : undefined;
+  const val = env ? parseInt(env, 10) : NaN;
+  return Number.isNaN(val) || val <= 0 ? WSOCKET_MAX_PAYLOAD_DEFAULT : val;
+}
+export const MAX_ROWS_NUM = Math.floor(getWsocketMaxPayload() * MAX_ROWS_NUM_DEFAULT / WSOCKET_MAX_PAYLOAD_DEFAULT);
 
 export class Mongo {
   private static option: MongoClientOptions;
