@@ -26,6 +26,8 @@ import { DatabaseRegistry, SubsetDef } from "./DatabaseRegistry";
 const MAX_RESPONSE_SIZE_OF_JOURNALS = 10485760;
 const LOCK_FREE_RETRY_MAX = 3;
 const LOCK_FREE_RETRY_WAIT_MS = 100;
+// _idのみの事前取得にこれ以上かかるフィルタは評価コストが高いとみなし、全文書の取得を_id索引経由に切り替える
+const ID_FETCH_THRESHOLD_MS = 500;
 
 class UpdateProcessor extends Subscriber {
 
@@ -1112,16 +1114,39 @@ export class SubsetStorage extends ServiceEngine implements Proxy {
       const offset = ProxyHelper.validateNumber(request.offset, "offset");
       const projection = request.projection ? EJSON.parse(request.projection) : undefined;
       if (request.version && Number(request.version) > CLIENT_VERSION) throw new DadgetError(ERROR.E3002);
-      let result = await this.query(csn, query, sort, limit, request.csnMode, { _id: 1 }, offset);
-      let length = result.resultSet.length;
-      if (length > MAX_EXPORT_NUM * 10 && limit !== EXPORT_LIMIT_NUM) {
-            this.logger.warn(LOG_MESSAGES.MANY_ROWS_RESPONSE, [JSON.stringify(query)], [length]);
-            return { status: "HUGE", result };
+      let result: QueryResult;
+      if (limit === EXPORT_LIMIT_NUM) {
+        // エクスポートはHUGE判定の対象外なので、_idのみの事前取得は行わず直接取得する
+        result = await this.query(csn, query, sort, limit, request.csnMode, projection, offset);
+      } else {
+        const startTime = Date.now();
+        const idResult = await this.query(csn, query, sort, limit, request.csnMode, { _id: 1 }, offset);
+        const idFetchTime = Date.now() - startTime;
+        const idCount = idResult.resultSet.length;
+        if (idCount > MAX_EXPORT_NUM * 10) {
+          this.logger.warn(LOG_MESSAGES.MANY_ROWS_RESPONSE, [JSON.stringify(query)], [idCount]);
+          return { status: "HUGE", result: idResult };
+        }
+        const excludesId = projection && (projection as any)._id === 0;
+        if (idCount === 0) {
+          // 0件なら同じcsnでの全文書取得も0件なので、フィルタを再実行せずそのまま返す
+          result = idResult;
+        } else if (idFetchTime > ID_FETCH_THRESHOLD_MS && !excludesId) {
+          // フィルタの評価が重い場合は、フィルタを再実行せずに取得済みの_idで文書を引く
+          // (_idを除外する射影では_idで突き合わせられないため対象外)
+          this.logger.info(LOG_MESSAGES.FETCH_BY_ID, [JSON.stringify(query)], [idCount, idFetchTime]);
+          result = await this.queryByIds(idResult, projection)
+            .catch((e) => {
+              this.logger.warn(LOG_MESSAGES.ERROR_MSG, [e.toString()], [218]);
+              return this.query(csn, query, sort, limit, request.csnMode, projection, offset);
+            });
+        } else {
+          result = await this.query(csn, query, sort, limit, request.csnMode, projection, offset);
+        }
       }
-      result = await this.query(csn, query, sort, limit, request.csnMode, projection, offset);
       let total = 0;
       let count = 0;
-      length = result.resultSet.length;
+      const length = result.resultSet.length;
       for (const obj of result.resultSet) {
         total += JSON.stringify(obj).length + 1;
         count += 1;
@@ -1345,6 +1370,31 @@ export class SubsetStorage extends ServiceEngine implements Proxy {
       }
       return result;
     });
+  }
+
+  /**
+   * 取得済みの_id一覧(idResult)を元に、同じcsn時点の文書を_id索引で取得する。
+   * フィルタ評価の重いクエリで全文書取得のためにフィルタを再実行すると走査コストが二重にかかるうえ、
+   * 射影の違いで実行計画が分岐し得るため、文書の取得コストをN件の索引参照に固定する。
+   * 順序・件数・csn・restQueryはidResultに従い、sort/limit/offsetは再適用しない。
+   */
+  private async queryByIds(idResult: QueryResult, projection?: object): Promise<QueryResult> {
+    const ids: string[] = idResult.resultSet.map((row) => (row as any)._id);
+    const docMap = new Map<string, object>();
+    for (let i = 0; i < ids.length; i += MAX_EXPORT_NUM) {
+      const chunk = ids.slice(i, i + MAX_EXPORT_NUM);
+      // csnをidResultに固定する(csnMode未指定のため現在csnへ繰り上げられず、対象csn時点の姿が返る)
+      const chunkResult = await this.query(idResult.csn, { _id: { $in: chunk } }, undefined, chunk.length, undefined, projection, undefined);
+      for (const doc of chunkResult.resultSet) {
+        docMap.set((doc as any)._id, doc);
+      }
+    }
+    const resultSet: object[] = [];
+    for (const id of ids) {
+      const doc = docMap.get(id);
+      if (doc) { resultSet.push(doc); }
+    }
+    return { ...idResult, resultSet };
   }
 
   /**

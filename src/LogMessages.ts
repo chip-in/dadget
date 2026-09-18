@@ -74,6 +74,7 @@ export const LOG_MESSAGES = {
   MANY_ROWS_RESPONSE: { code: 75, msg: "many rows response!, %d1, %1" },
   MAX_ROWS_LIMIT: { code: 76, msg: "max rows limit reached!, %d1, %1" },
   LOCK_FREE_FALLBACK: { code: 77, msg: "lock-free read fallback to lock, %1" },
+  FETCH_BY_ID: { code: 78, msg: "fetch by _id, rows: %d1, id fetch time: %d2 ms, %1" },
   DEBUG_LOG: { code: 9999, msg: "dadget info: %1" },
 };
 
